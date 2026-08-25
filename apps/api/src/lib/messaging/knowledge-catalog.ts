@@ -684,7 +684,7 @@ export const APPROVED_PORTAL_URL = "https://patient.tryark.com/login";
  * reviews generally): this one is for actually asking someone to submit a
  * review, so it goes straight to the write-a-review form, not an overview page.
  */
-export const APPROVED_REVIEW_WRITE_URL = "https://www.consumeraffairs.com/review/write/?brand_id=27277";
+export const APPROVED_REVIEW_WRITE_URL = "https://www.consumeraffairs.com/review/write/?brand_id=24325";
 
 /**
  * Topic keys Sophie (the post-purchase support bot) is allowed to use — a

@@ -142,7 +142,7 @@ export function renderOrderReceivedEmail(firstName: string, unsubscribeUrl: stri
           <a href="https://patient.tryark.com/login" class="cta-button">Go To Patient Login</a>
         </div>
 
-        <p class="paragraph">If you have any questions along the way, we're just a call or message away at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>.</p>
+        <p class="paragraph">If you have any questions along the way, we're just a call or message away at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>.</p>
 
         <p class="paragraph" style="margin-bottom:0;">Here's to your journey — we're glad you're on it.<br><!--[if mso]>&nbsp;<![endif]--><br>Warmly,<br>The Ark Health Team</p>
       </td>
@@ -152,8 +152,8 @@ export function renderOrderReceivedEmail(firstName: string, unsubscribeUrl: stri
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -230,7 +230,7 @@ export function renderRefillOrderReceivedEmail(firstName: string, unsubscribeUrl
           <a href="https://patient.tryark.com/login" class="cta-button">View My Patient Portal</a>
         </div>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>.</p>
 
         <p class="paragraph" style="margin-bottom:0;">Warmly,<br>The Ark Health Team</p>
       </td>
@@ -240,8 +240,8 @@ export function renderRefillOrderReceivedEmail(firstName: string, unsubscribeUrl
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -332,7 +332,7 @@ export function renderPrescriptionWrittenEmail(firstName: string, unsubscribeUrl
 
         <p class="paragraph">We'll let you know as soon as your order ships. In the meantime, if you have any questions about your treatment plan, we're here to help.</p>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>.</p>
 
         <p class="paragraph" style="margin-bottom:0;">Here's to your journey — we're glad you're on it.<br><!--[if mso]>&nbsp;<![endif]--><br>Warmly,<br>The Ark Health Team</p>
       </td>
@@ -342,8 +342,8 @@ export function renderPrescriptionWrittenEmail(firstName: string, unsubscribeUrl
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -434,7 +434,7 @@ export function renderOrderShippedEmail(firstName: string, trackingNumber: strin
 
         <p class="paragraph">When your package arrives, be sure to follow the dosing instructions provided by your care team. If you have any questions about getting started or what to expect, we're here to help.</p>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>.</p>
 
         <p class="paragraph" style="margin-bottom:0;">Here's to your journey — we're glad you're on it.<br><!--[if mso]>&nbsp;<![endif]--><br>Warmly,<br>The Ark Health Team</p>
       </td>
@@ -444,8 +444,8 @@ export function renderOrderShippedEmail(firstName: string, trackingNumber: strin
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -523,7 +523,7 @@ export function renderPaymentFailedFirstOrderEmail(firstName: string, unsubscrib
           <p class="status-value">Payment Needed</p>
         </div>
 
-        <p class="paragraph">Just reply to this email, or call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>, and we'll get your payment sorted out.</p>
+        <p class="paragraph">Just reply to this email, or call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>, and we'll get your payment sorted out.</p>
 
         <p class="paragraph" style="margin-bottom:0;">We're here to help.<br><!--[if mso]>&nbsp;<![endif]--><br>Warmly,<br>The Ark Health Team</p>
       </td>
@@ -533,8 +533,8 @@ export function renderPaymentFailedFirstOrderEmail(firstName: string, unsubscrib
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -603,7 +603,7 @@ export function renderPaymentFailedRecurringEmail(firstName: string, unsubscribe
           <p class="status-value">Payment Needed</p>
         </div>
 
-        <p class="paragraph">Are you still interested in moving forward with it? Just reply to this email, or call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>, and we'll get it sorted out.</p>
+        <p class="paragraph">Are you still interested in moving forward with it? Just reply to this email, or call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>, and we'll get it sorted out.</p>
 
         <p class="paragraph" style="margin-bottom:0;">We're here to help.<br><!--[if mso]>&nbsp;<![endif]--><br>Warmly,<br>The Ark Health Team</p>
       </td>
@@ -613,8 +613,8 @@ export function renderPaymentFailedRecurringEmail(firstName: string, unsubscribe
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -704,7 +704,7 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
 
         <p class="paragraph">It takes just a few minutes, and our clinical team is ready to review your visit as soon as it's submitted.</p>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a> — we're here to help you finish strong.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a> — we're here to help you finish strong.</p>
 
         <p class="paragraph" style="margin-bottom:0;">The Ark Health Team</p>
       </td>
@@ -714,8 +714,8 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -804,7 +804,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
 
         <p class="paragraph">It only takes a few minutes to complete, and our clinical team will review your visit as soon as it's submitted.</p>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a> — we're happy to help you finish strong.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a> — we're happy to help you finish strong.</p>
 
         <p class="paragraph" style="margin-bottom:0;">The Ark Health Team</p>
       </td>
@@ -814,8 +814,8 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -906,7 +906,7 @@ export function renderAbandonedCartEducationalEmail(firstName: string, ctaUrl: s
 
         <p class="paragraph">A licensed provider reviews your health assessment before anything is prescribed, so you'll know exactly what to expect. No judgment, no lectures — just a plan built around what actually works.</p>
 
-        <p class="paragraph">Questions? Call or text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a> — our team is here to help.</p>
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a> — our team is here to help.</p>
 
         <p class="paragraph" style="margin-bottom:0;">The Ark Health Team</p>
       </td>
@@ -916,8 +916,8 @@ export function renderAbandonedCartEducationalEmail(firstName: string, ctaUrl: s
     </tr>
     <tr>
       <td class="footer">
-        <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-        <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
         <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
       </td>
     </tr>
@@ -1017,7 +1017,7 @@ export function renderAbandonedCartPlanComparisonEmail(firstName: string, ctaUrl
           </div>
 
           <p class="paragraph">Not sure which plan is right for you? Our team is happy to walk you through it — call or
-            text us at <a href="tel:0000000000" class="footer-phone">(000) 000-0000</a>.</p>
+            text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a>.</p>
 
           <p class="paragraph" style="margin-bottom:0;">The Ark Health Team</p>
         </td>
@@ -1029,8 +1029,8 @@ export function renderAbandonedCartPlanComparisonEmail(firstName: string, ctaUrl
       </tr>
       <tr>
         <td class="footer">
-          <p class="footer-text">Ark Health &middot; [ARK_HEALTH_PHYSICAL_ADDRESS]</p>
-          <p class="footer-text"><a href="tel:0000000000" class="footer-phone">(000) 000-0000</a></p>
+          <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+          <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
           <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
         </td>
       </tr>
