@@ -125,15 +125,20 @@ export type BaskPrescriptionWrittenWebhookRequest = z.infer<typeof baskPrescript
 
 // ── Bask order-shipped webhook ─────────────────────────────────────────────────
 //
-// SPECULATIVE, same caveat as above. Bask's real payload also carries nested
-// products/shipments arrays (drug name, dosage strength, pharmacy, etc.) —
-// deliberately not modeled here since Sophie's shipped notice only needs the
-// tracking number, not per-item clinical detail.
+// Confirmed against a real delivery: this event carries only
+// externalPersonId, trackingNumber, and occurredAt — no eventId, no email,
+// none of the richer newOrder-event fields. eventId and email are optional
+// here (unlike every other Bask webhook) specifically because of that; see
+// handleBaskOrderShippedWebhook for how it copes with both being absent.
+// Bask's real payload also carries nested products/shipments arrays (drug
+// name, dosage strength, pharmacy, etc.) — deliberately not modeled here
+// since Sophie's shipped notice only needs the tracking number, not
+// per-item clinical detail.
 
 export const baskOrderShippedWebhookRequestSchema = z.object({
-  eventId: z.string().min(1),
+  eventId: z.string().min(1).optional(),
   externalPersonId: z.string().min(1), // Bask's "Data Patient Id"
-  email: z.string().email(),
+  email: z.string().email().optional(),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   phone: z.string().min(1).optional(),

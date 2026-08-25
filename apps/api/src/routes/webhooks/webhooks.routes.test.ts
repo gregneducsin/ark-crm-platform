@@ -632,31 +632,29 @@ describe("Webhooks", () => {
   });
 
   describe("Bask order shipped", () => {
-    it("creates/matches a customer, sets orderShipped + trackingNumber, sends the notice, and arms the review-request trigger", async () => {
+    it("matches an existing customer by external identity, sets orderShipped + trackingNumber, sends the notice, and arms the review-request trigger — with only the fields Bask's real event actually sends (no eventId, no email)", async () => {
       sendMessageMock.mockClear();
       sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_order_shipped" });
+
+      const { db, customersTable, externalIdentitiesTable, reviewRequestTriggersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Jena", lastName: "Abbott", email: "order-shipped@example.com", phone: "+14242650860", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-patient-shipped-1" });
 
       const res = await request(app)
         .post("/api/webhooks/bask-order-shipped")
         .set("x-webhook-secret", ORDER_SHIPPED_SECRET)
         .send({
-          eventId: "bask-shipped-evt-1",
           externalPersonId: "bask-patient-shipped-1",
-          email: "order-shipped@example.com",
-          firstName: "Jena",
-          lastName: "Abbott",
-          phone: "+14242650860",
-          orderId: "ac2225a4-e655-4394-801e-368f7c6cf350",
-          orderNumber: "p7QJ740Dfl",
           trackingNumber: "5481040885",
+          occurredAt: new Date().toISOString(),
         });
       expect(res.status).toBe(200);
 
       expect(sendMessageMock).toHaveBeenCalledWith("+14242650860", expect.stringContaining("5481040885"));
-
-      const { db, customersTable, reviewRequestTriggersTable } = await import("@luma/db");
-      const { eq } = await import("drizzle-orm");
-      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "order-shipped@example.com"));
 
       const { getOrCreateSupportConversation } = await import("../../services/support-conversations.service.js");
       const conversation = await getOrCreateSupportConversation(customer!.id);
@@ -672,8 +670,31 @@ describe("Webhooks", () => {
       const res = await request(app)
         .post("/api/webhooks/bask-order-shipped")
         .set("x-webhook-secret", ORDER_SHIPPED_SECRET)
-        .send({ eventId: "bask-shipped-evt-bad", externalPersonId: "bask-patient-bad", email: "shipped-bad@example.com" });
+        .send({ externalPersonId: "bask-patient-bad" });
       expect(res.status).toBe(400);
+    });
+
+    it("fails (marks the webhook event failed) when no existing customer matches the externalPersonId", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-order-shipped")
+        .set("x-webhook-secret", ORDER_SHIPPED_SECRET)
+        .send({ externalPersonId: "bask-patient-never-seen", trackingNumber: "9999999999" });
+      expect(res.status).toBe(500);
+    });
+
+    it("is idempotent on the synthesized externalPersonId+trackingNumber key when Bask sends no eventId", async () => {
+      const { db, customersTable, externalIdentitiesTable } = await import("@luma/db");
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Replay", lastName: "Test", email: "shipped-replay@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-patient-replay-shipped" });
+
+      const payload = { externalPersonId: "bask-patient-replay-shipped", trackingNumber: "1112223333" };
+      const first = await request(app).post("/api/webhooks/bask-order-shipped").set("x-webhook-secret", ORDER_SHIPPED_SECRET).send(payload);
+      expect(first.body.duplicate).toBe(false);
+      const second = await request(app).post("/api/webhooks/bask-order-shipped").set("x-webhook-secret", ORDER_SHIPPED_SECRET).send(payload);
+      expect(second.body.duplicate).toBe(true);
     });
   });
 

@@ -341,20 +341,24 @@ export async function handleBaskPrescriptionWrittenWebhook(payload: BaskPrescrip
 }
 
 export async function handleBaskOrderShippedWebhook(payload: BaskOrderShippedWebhookRequest): Promise<{ duplicate: boolean }> {
-  const recorded = await recordWebhookEventIfNew("bask_order_shipped", payload.eventId, payload);
+  // Bask's real shipping event doesn't include an eventId — synthesize a
+  // stable one from externalPersonId + trackingNumber so redelivery of the
+  // same shipment notice still dedupes, while a different tracking number
+  // for the same person (a separate refill shipment) is treated as new.
+  const eventId = payload.eventId ?? `${payload.externalPersonId}:${payload.trackingNumber}`;
+  const recorded = await recordWebhookEventIfNew("bask_order_shipped", eventId, payload);
   if (!recorded) return { duplicate: true };
 
   try {
-    const occurredAt = payload.occurredAt ?? new Date().toISOString();
-    const { id: customerId } = await findOrCreateCustomerByExternalIdentity({
-      system: "bask",
-      externalId: payload.externalPersonId,
-      email: payload.email,
-      firstName: payload.firstName,
-      lastName: payload.lastName,
-      phone: payload.phone,
-      leadReceivedDate: occurredDate(occurredAt),
-    });
+    // Bask's real shipping event also doesn't include email — but by the
+    // time an order ships, the customer should already exist from the order
+    // webhook, so this only ever needs to find the existing match, never
+    // create one (findOrCreateCustomerByExternalIdentity would fail here
+    // anyway, since customers.email is NOT NULL and this event has none).
+    const customerId = await tryFindCustomerByExternalIdentityOrEmail("bask", payload.externalPersonId, payload.email);
+    if (!customerId) {
+      throw new Error(`bask_order_shipped: no existing customer found for externalPersonId ${payload.externalPersonId}`);
+    }
 
     await handleOrderShipped(customerId, payload.trackingNumber);
 
