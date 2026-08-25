@@ -1,0 +1,1 @@
+DROP TABLE "unmatched_inbound_emails" CASCADE;

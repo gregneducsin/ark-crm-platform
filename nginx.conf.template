@@ -1,0 +1,75 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    # The dashboard calls the API with relative paths (see apiClient.ts),
+    # resolved against window.location.origin — so in production this proxy
+    # is what makes /api/* reach the api service at all, mirroring the
+    # /api proxy the Vite dev server already does for local development.
+    # API_UPSTREAM is filled in at container start (nginx's built-in
+    # envsubst-on-templates hook) — docker-compose sets it to "api:3001",
+    # a host with different service networking (e.g. Railway) sets it to
+    # whatever that host calls the api service, e.g.
+    # "api.railway.internal:3001".
+    #
+    # NGINX_RESOLVER matters just as much: nginx resolves a plain
+    # proxy_pass hostname once at startup and hard-fails ("host not found
+    # in upstream") if that name isn't resolvable yet at that moment —
+    # a real problem for container DNS names, which can come up after
+    # nginx does, or change on redeploy. Routing proxy_pass through a
+    # variable forces per-request resolution against an explicit
+    # resolver instead, so nginx starts fine either way and picks up
+    # the target once it's actually resolvable. docker-compose sets
+    # NGINX_RESOLVER to Docker's embedded DNS ("127.0.0.11 valid=1s");
+    # Railway sets it to its private-networking resolver
+    # ("[fd12::10] ipv6=on valid=1s").
+    resolver ${NGINX_RESOLVER};
+
+    location /api/ {
+        set $upstream_api http://${API_UPSTREAM};
+        proxy_pass $upstream_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # The api service also serves a few non-/api routes directly against
+    # this same public domain — not dashboard pages, so they don't belong
+    # under /api, but real destinations a customer's or admin's browser
+    # navigates to directly (a text/email trigger link, an unsubscribe
+    # link, the Gmail OAuth connect flow). Without these, any of the three
+    # falls through to the SPA fallback below and 404s, since none of them
+    # is a route the React app's client-side router knows about.
+    location /go/ {
+        set $upstream_api http://${API_UPSTREAM};
+        proxy_pass $upstream_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /unsubscribe/ {
+        set $upstream_api http://${API_UPSTREAM};
+        proxy_pass $upstream_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /auth/google {
+        set $upstream_api http://${API_UPSTREAM};
+        proxy_pass $upstream_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

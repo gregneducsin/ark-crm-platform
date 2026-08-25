@@ -1,0 +1,1 @@
+ALTER TABLE "intake_link_tokens" ADD COLUMN "promo_applied" text DEFAULT 'none' NOT NULL;

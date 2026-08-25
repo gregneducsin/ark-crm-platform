@@ -1,0 +1,1 @@
+ALTER TABLE "review_request_triggers" ADD COLUMN "attempt_count" integer DEFAULT 0 NOT NULL;

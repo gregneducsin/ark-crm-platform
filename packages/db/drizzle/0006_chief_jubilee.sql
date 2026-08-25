@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "needs_attention" boolean DEFAULT false NOT NULL;

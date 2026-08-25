@@ -1,0 +1,1 @@
+ALTER TABLE "objection_reengagement_triggers" ADD COLUMN "lead_source" text DEFAULT 'abandoned_cart' NOT NULL;

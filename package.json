@@ -1,0 +1,27 @@
+{
+  "name": "ark-crm-platform",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.26.1",
+  "scripts": {
+    "preinstall": "sh -c 'case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./apps/**\" --if-present run typecheck",
+    "lint": "pnpm -r --if-present run lint",
+    "test": "pnpm -r --if-present run test",
+    "dev:api": "pnpm --filter @luma/api run dev",
+    "dev:web": "pnpm --filter @luma/web run dev",
+    "db:migrate": "pnpm --filter @luma/db run migrate",
+    "db:seed": "pnpm --filter @luma/db run seed",
+    "db:generate": "pnpm --filter @luma/db run generate"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "prettier": "^3.9.6"
+  }
+}

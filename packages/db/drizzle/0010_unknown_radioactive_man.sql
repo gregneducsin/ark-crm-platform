@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "purchases_customer_first_order_key" ON "purchases" USING btree ("customer_id") WHERE "purchases"."order_classification" = 'first_order';

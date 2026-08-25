@@ -1,0 +1,1 @@
+ALTER TABLE "unmatched_email_threads" ADD COLUMN "collected_phone" text;

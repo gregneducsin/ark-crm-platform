@@ -1,0 +1,34 @@
+# ── Stage 1: Builder ──────────────────────────────────────────────────────────
+FROM node:22-slim AS builder
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm run build
+
+# ── Stage 2: Dashboard static files ──────────────────────────────────────────
+# Kept as a separate file from Dockerfile.api — see the comment there.
+FROM nginx:alpine AS web
+# Restrict which env vars envsubst is allowed to touch in the template below —
+# nginx's own runtime variables ($host, $scheme, etc.) use the same ${...}
+# syntax and must never be substituted at container-start time.
+ENV NGINX_ENVSUBST_FILTER=^(API_UPSTREAM|NGINX_RESOLVER)$
+COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+
+# nginx.conf.template's /api proxy target is filled in at container start by
+# nginx's built-in envsubst-on-templates entrypoint hook, from the
+# API_UPSTREAM env var — so the same image works unmodified against
+# docker-compose's "api" service name and a host with different
+# service-to-service networking (e.g. Railway's <service>.railway.internal).
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+EXPOSE 80

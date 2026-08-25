@@ -1,0 +1,1 @@
+ALTER TABLE "intake_link_tokens" ADD COLUMN "lead_source" text DEFAULT 'abandoned_cart' NOT NULL;

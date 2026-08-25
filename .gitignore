@@ -1,0 +1,43 @@
+# ── Secrets & credentials ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*_rsa
+*_ed25519
+secrets/
+credentials/
+
+# ── Database dumps & exports ─────────────────────────────────────────────────
+*.sql.gz
+*.pgdump
+*.dump
+db_exports/
+backups/
+
+# ── Dependencies & build output ───────────────────────────────────────────────
+node_modules/
+dist/
+build/
+out-tsc/
+*.tsbuildinfo
+.cache/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Editor / OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Test / coverage ────────────────────────────────────────────────────────────
+coverage/
