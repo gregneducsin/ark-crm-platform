@@ -4,20 +4,24 @@
  * concern-mixing this rebuild avoids (see ARCHITECTURE.md).
  *
  * Reads BOOTSTRAP_ADMIN_EMAILS (comma-separated), inserts each as an
- * app_users row with role=admin, status=invited. For each user actually
- * created (not already present), also generates an invitation token and
- * prints the one-time invitation link — this is the ONLY way a fresh
- * bootstrap admin can ever set a password and log in, so it must not be
- * skipped. The raw link is printed to stdout exactly once, at creation
- * time; it is never persisted or logged again after this (only its SHA-256
- * hash is stored, in user_invitation_tokens).
+ * app_users row with role=admin, status=invited, generates an invitation
+ * token, and prints the one-time invitation link — this is the ONLY way a
+ * fresh bootstrap admin can ever set a password and log in, so it must not
+ * be skipped. The raw link is printed to stdout only when a fresh token is
+ * issued; it is never persisted or logged again after this (only its
+ * SHA-256 hash is stored, in user_invitation_tokens).
  *
- * Idempotent: safe to run on every boot. Users already present are left
- * untouched (no new invitation token is generated for them).
+ * Idempotent: safe to run on every boot. A user already present and
+ * status=active is left untouched. A user already present but still
+ * status=invited (never completed the invitation flow — e.g. the original
+ * link expired or was lost before it was used) gets its outstanding
+ * invitation tokens invalidated and a fresh one issued and printed, so
+ * re-running seed (e.g. by redeploying) is always a safe way to recover
+ * the invitation link.
  */
 import { db, pool, appUsersTable, userInvitationTokensTable } from "./index.js";
 import { generateRawToken, hashToken } from "@luma/shared";
-import { sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 const ADVISORY_LOCK_KEY = 4271_9001_338n;
 const INVITATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
@@ -66,22 +70,39 @@ async function seedBootstrapAdmins(): Promise<void> {
           .onConflictDoNothing({ target: appUsersTable.normalizedEmail })
           .returning({ id: appUsersTable.id });
 
-        if (!inserted) {
-          // eslint-disable-next-line no-console
-          console.log(`seed: bootstrap admin already present, skipping: ${email}`);
-          continue;
+        let userId = inserted?.id;
+        let logPrefix = "seed: bootstrap admin created";
+
+        if (!userId) {
+          const [existing] = await db
+            .select({ id: appUsersTable.id, status: appUsersTable.status })
+            .from(appUsersTable)
+            .where(eq(appUsersTable.normalizedEmail, email));
+
+          if (!existing || existing.status !== "invited") {
+            // eslint-disable-next-line no-console
+            console.log(`seed: bootstrap admin already present, skipping: ${email}`);
+            continue;
+          }
+
+          userId = existing.id;
+          logPrefix = "seed: bootstrap admin still invited — reissuing invitation";
+          await db
+            .update(userInvitationTokensTable)
+            .set({ usedAt: new Date() })
+            .where(and(eq(userInvitationTokensTable.userId, userId), isNull(userInvitationTokensTable.usedAt)));
         }
 
         const rawToken = generateRawToken();
         await db.insert(userInvitationTokensTable).values({
-          userId: inserted.id,
+          userId,
           tokenHash: hashToken(rawToken),
           expiresAt: new Date(Date.now() + INVITATION_TOKEN_TTL_MS),
         });
 
         // eslint-disable-next-line no-console
         console.log(
-          `seed: bootstrap admin created: ${email}\n` +
+          `${logPrefix}: ${email}\n` +
             `  Invitation link (expires in 24h, shown only this once):\n` +
             `  ${invitationLink(rawToken)}`,
         );
