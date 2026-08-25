@@ -99,13 +99,13 @@ const LEAD_SOURCE_FILTER_LABELS: Record<LeadSourceFilter, string> = {
 function ConversationList({
   channel,
   onChannelChange,
-  selectedId,
+  selectedPersonId,
   onSelect,
 }: {
   channel: ConversationChannel;
   onChannelChange: (c: ConversationChannel) => void;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+  selectedPersonId: string | null;
+  onSelect: (personId: string, firstName: string, lastName: string) => void;
 }) {
   const { data, isLoading } = useConversationsList(channel);
   const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
@@ -172,9 +172,9 @@ function ConversationList({
         {visible.map((c) => (
           <button
             key={c.id}
-            onClick={() => onSelect(c.id)}
+            onClick={() => onSelect(c.personId, c.firstName, c.lastName)}
             className={
-              "block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedId === c.id ? "bg-blue-50" : "")
+              "block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedPersonId === c.personId ? "bg-blue-50" : "")
             }
           >
             <div className="flex items-center justify-between">
@@ -240,8 +240,27 @@ function StaffReplyBox({ conversationId, channel }: { conversationId: string; ch
   );
 }
 
-function ConversationDetailPanel({ conversationId, channel }: { conversationId: string; channel: ConversationChannel }) {
-  const { data, isLoading } = useConversationDetail(conversationId, channel);
+function ConversationDetailPanel({
+  personId,
+  firstName,
+  lastName,
+  channel,
+  onChannelChange,
+}: {
+  personId: string;
+  firstName: string;
+  lastName: string;
+  channel: ConversationChannel;
+  onChannelChange: (c: ConversationChannel) => void;
+}) {
+  // The list for this channel is already being fetched (and polled) for the
+  // left-hand list whenever that channel is the one being browsed — reusing
+  // it here (React Query dedupes identical in-flight/cached queries) is how
+  // we resolve "does this contact have a conversation on this channel" and
+  // its conversationId without a dedicated lookup endpoint.
+  const { data: listData, isLoading: listLoading } = useConversationsList(channel);
+  const summary = listData?.conversations.find((c) => c.personId === personId);
+  const { data, isLoading: detailLoading } = useConversationDetail(summary?.id ?? null, channel);
   const clearAttention = useClearNeedsAttention();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -249,10 +268,46 @@ function ConversationDetailPanel({ conversationId, channel }: { conversationId: 
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [data?.messages.length]);
 
-  if (isLoading || !data) {
+  const header = (
+    <div className="border-b border-gray-200 px-4 py-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-900">
+          {firstName} {lastName}
+        </p>
+        <ChannelToggle channel={channel} onChange={onChannelChange} />
+      </div>
+    </div>
+  );
+
+  if (listLoading) {
     return (
-      <Card className="flex h-[calc(100vh-268px)] items-center justify-center">
-        <p className="text-sm text-gray-400">Loading conversation…</p>
+      <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
+        {header}
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-gray-400">Loading…</p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
+        {header}
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-gray-400">No {channel === "email" ? "email" : "text"} conversation for this contact yet.</p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (detailLoading || !data) {
+    return (
+      <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
+        {header}
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-gray-400">Loading conversation…</p>
+        </div>
       </Card>
     );
   }
@@ -273,7 +328,8 @@ function ConversationDetailPanel({ conversationId, channel }: { conversationId: 
             </p>
             <UpcomingTriggerBanner personId={conversation.personId} />
           </div>
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex flex-wrap items-start justify-end gap-1">
+            <ChannelToggle channel={channel} onChange={onChannelChange} />
             {conversation.leadSource === "meta_form" && <Badge color="purple">Meta lead</Badge>}
             {conversation.selectedProduct && <Badge color="blue">{conversation.selectedProduct}</Badge>}
             {conversation.promoOffered && <Badge color="green">$20 promo offered</Badge>}
@@ -338,51 +394,74 @@ function ConversationDetailPanel({ conversationId, channel }: { conversationId: 
   );
 }
 
+interface SelectedContact {
+  personId: string;
+  firstName: string;
+  lastName: string;
+  /** The detail panel's own channel — independent of the list's channel, so toggling it doesn't change what the list is browsing or lose the selection. */
+  channel: ConversationChannel;
+}
+
 export function ConversationsPage() {
   // Lets NeedsAttentionPage link directly into the right channel tab (e.g. /conversations?channel=email).
   const search = useSearch();
   const params = new URLSearchParams(search);
   const initialChannel: ConversationChannel = params.get("channel") === "email" ? "email" : "sms";
   const deepLinkPersonId = params.get("personId");
-  const [channel, setChannel] = useState<ConversationChannel>(initialChannel);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [listChannel, setListChannel] = useState<ConversationChannel>(initialChannel);
+  const [selected, setSelected] = useState<SelectedContact | null>(null);
   const deepLinkResolved = useRef(false);
 
   // CustomerDetailPage links here as /conversations?personId=... — find that
   // person's conversation once the list loads and select it. Keeps trying
-  // across a manual channel toggle (the person may only exist on the other
-  // channel) until it succeeds; a manual selection or lack of a personId
-  // param disables this entirely.
-  const { data: listData } = useConversationsList(channel);
+  // across a manual list-channel toggle (the person may only exist on the
+  // other channel) until it succeeds; a manual selection or lack of a
+  // personId param disables this entirely.
+  const { data: listData } = useConversationsList(listChannel);
   useEffect(() => {
-    if (!deepLinkPersonId || deepLinkResolved.current || selectedId !== null || !listData) return;
+    if (!deepLinkPersonId || deepLinkResolved.current || selected !== null || !listData) return;
     const match = listData.conversations.find((c) => c.personId === deepLinkPersonId);
     if (match) {
-      setSelectedId(match.id);
+      setSelected({ personId: match.personId, firstName: match.firstName, lastName: match.lastName, channel: listChannel });
       deepLinkResolved.current = true;
     }
-  }, [deepLinkPersonId, listData, selectedId]);
+  }, [deepLinkPersonId, listData, listChannel, selected]);
 
-  function handleChannelChange(c: ConversationChannel) {
-    setChannel(c);
-    setSelectedId(null);
+  function handleListChannelChange(c: ConversationChannel) {
+    setListChannel(c);
+    setSelected(null);
   }
 
-  function handleSelect(id: string) {
+  function handleSelect(personId: string, firstName: string, lastName: string) {
     deepLinkResolved.current = true;
-    setSelectedId(id);
+    setSelected({ personId, firstName, lastName, channel: listChannel });
+  }
+
+  function handleDetailChannelChange(c: ConversationChannel) {
+    setSelected((prev) => (prev ? { ...prev, channel: c } : prev));
   }
 
   return (
     <div>
-      <ResponseRateSummary channel={channel} />
+      <ResponseRateSummary channel={listChannel} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="md:col-span-1">
-          <ConversationList channel={channel} onChannelChange={handleChannelChange} selectedId={selectedId} onSelect={handleSelect} />
+          <ConversationList
+            channel={listChannel}
+            onChannelChange={handleListChannelChange}
+            selectedPersonId={selected?.personId ?? null}
+            onSelect={handleSelect}
+          />
         </div>
         <div className="md:col-span-2">
-          {selectedId ? (
-            <ConversationDetailPanel conversationId={selectedId} channel={channel} />
+          {selected ? (
+            <ConversationDetailPanel
+              personId={selected.personId}
+              firstName={selected.firstName}
+              lastName={selected.lastName}
+              channel={selected.channel}
+              onChannelChange={handleDetailChannelChange}
+            />
           ) : (
             <Card className="flex h-[calc(100vh-268px)] items-center justify-center">
               <p className="text-sm text-gray-400">Select a conversation to view it.</p>
