@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { db, customersTable, questionnaireEventsTable, purchasesTable, conversationMessagesTable } from "@luma/db";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { getOrCreateEmailConversation, appendEmailMessage } from "./email-conversations.service.js";
@@ -41,6 +42,48 @@ describe("getFunnelSummary", () => {
     expect(after.questionnaireStarted).toBe(before.questionnaireStarted + 3);
     expect(after.questionnaireSubmitted).toBe(before.questionnaireSubmitted + 2);
     expect(after.purchased).toBe(before.purchased + 1);
+    expect(after.revenue).toBe(before.revenue + 120);
+  });
+
+  it("scopes every stage to the given date range, excluding events outside it", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const farPast = "2020-01-01";
+
+    const inRangeCustomer = await seedCustomer();
+    await db.update(customersTable).set({ leadReceivedDate: today }).where(eq(customersTable.id, inRangeCustomer));
+    const outOfRangeCustomer = await seedCustomer();
+    await db.update(customersTable).set({ leadReceivedDate: farPast }).where(eq(customersTable.id, outOfRangeCustomer));
+
+    await db.insert(purchasesTable).values({
+      customerId: inRangeCustomer,
+      purchaseDate: today,
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Semaglutide",
+      amountPaid: "50.00",
+      status: "completed",
+      createdAt: new Date(),
+    });
+    await db.insert(purchasesTable).values({
+      customerId: outOfRangeCustomer,
+      purchaseDate: farPast,
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Semaglutide",
+      amountPaid: "999.00",
+      status: "completed",
+      createdAt: new Date(farPast),
+    });
+
+    const before = await getFunnelSummary({ from: yesterday, to: today });
+    const inRangeAgain = await seedCustomer();
+    await db.update(customersTable).set({ leadReceivedDate: today }).where(eq(customersTable.id, inRangeAgain));
+
+    const after = await getFunnelSummary({ from: yesterday, to: today });
+    expect(after.totalLeads).toBe(before.totalLeads + 1);
+    // The far-past customer/purchase (2020, $999) never counts toward this
+    // range — proven by these staying flat across the one lead added above.
+    expect(after.purchased).toBe(before.purchased);
+    expect(after.revenue).toBe(before.revenue);
   });
 });
 

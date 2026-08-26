@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { Link } from "wouter";
-import { useCustomersList } from "../hooks/useCustomers";
 import { useEmployees, usePayrollWeeks } from "../hooks/usePayroll";
 import { useCurrentUser } from "../hooks/useAuth";
 import { useNeedsAttentionList } from "../hooks/useNeedsAttention";
 import { useFunnelSummary } from "../hooks/useReporting";
 import { Card, Badge } from "../components/ui";
+import type { DateRangeQuery } from "@luma/shared";
 
 function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
@@ -39,8 +40,81 @@ function NeedsAttentionCard({ enabled }: { enabled: boolean }) {
   );
 }
 
-function FunnelSummaryCard() {
-  const { data } = useFunnelSummary();
+type RangePreset = "24h" | "7d" | "1m" | "custom";
+
+const RANGE_PRESET_LABEL: Record<RangePreset, string> = {
+  "24h": "24 Hours",
+  "7d": "7 Days",
+  "1m": "1 Month",
+  custom: "Custom",
+};
+
+function toDateStr(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** Resolves a preset to a concrete {from, to} — both YYYY-MM-DD, inclusive. Returns undefined for "custom" (the caller supplies from/to directly instead). */
+function presetToRange(preset: RangePreset): DateRangeQuery | undefined {
+  if (preset === "custom") return undefined;
+  const daysBack = preset === "24h" ? 0 : preset === "7d" ? 6 : 29;
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - daysBack);
+  return { from: toDateStr(from), to: toDateStr(to) };
+}
+
+function DateRangePicker({
+  preset,
+  customFrom,
+  customTo,
+  onPresetChange,
+  onCustomChange,
+}: {
+  preset: RangePreset;
+  customFrom: string;
+  customTo: string;
+  onPresetChange: (p: RangePreset) => void;
+  onCustomChange: (from: string, to: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex gap-1">
+        {(["24h", "7d", "1m", "custom"] as const).map((p) => (
+          <button
+            key={p}
+            onClick={() => onPresetChange(p)}
+            className={"rounded px-2 py-1 text-xs font-medium " + (preset === p ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+          >
+            {RANGE_PRESET_LABEL[p]}
+          </button>
+        ))}
+      </div>
+      {preset === "custom" && (
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            value={customFrom}
+            max={customTo || undefined}
+            onChange={(e) => onCustomChange(e.target.value, customTo)}
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+          />
+          <span className="text-xs text-gray-400">to</span>
+          <input
+            type="date"
+            value={customTo}
+            min={customFrom || undefined}
+            onChange={(e) => onCustomChange(customFrom, e.target.value)}
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FunnelSummaryCard({ range, enabled }: { range?: DateRangeQuery; enabled: boolean }) {
+  const { data } = useFunnelSummary(range, enabled);
+  if (!enabled) return null;
 
   return (
     <Card>
@@ -79,33 +153,48 @@ function FunnelSummaryCard() {
 }
 
 export function DashboardPage() {
-  // limit: 100 is a pragmatic ceiling for a client-computed summary in this
-  // phase — a real aggregate endpoint (computed in SQL, not paginated
-  // client data) would be the right fix if the customer count grows well
-  // beyond that.
-  const { data: customersData } = useCustomersList({ limit: 100 });
+  const [preset, setPreset] = useState<RangePreset>("7d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const range = preset === "custom" ? (customFrom && customTo ? { from: customFrom, to: customTo } : undefined) : presetToRange(preset);
+
   const { data: employeesData } = useEmployees();
   const { data: weeksData } = usePayrollWeeks();
   const { data: currentUser } = useCurrentUser();
   // Matches the real /needs-attention route guard (App.tsx, Layout.tsx) —
   // admin + customer_service, not manager, whose scope is payroll/Leads/Orders.
   const canSeeNeedsAttention = currentUser?.user?.role === "admin" || currentUser?.user?.role === "customer_service";
+  // Matches /api/app/reporting/funnel's own role gate (same as
+  // /api/app/customers, which the Leads/Revenue figures used to come from).
+  const canSeeFunnelStats = currentUser?.user?.role === "admin" || currentUser?.user?.role === "manager";
+  const { data: funnelData } = useFunnelSummary(range, canSeeFunnelStats);
 
-  const totalRevenue = customersData?.customers.reduce((sum, c) => sum + Number(c.totalPaid), 0) ?? 0;
   const activeEmployees = employeesData?.employees.filter((e) => e.status === "active").length ?? 0;
   const draftWeeks = weeksData?.weeks.filter((w) => w.status === "draft").length ?? 0;
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+        <DateRangePicker
+          preset={preset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onPresetChange={setPreset}
+          onCustomChange={(from, to) => {
+            setCustomFrom(from);
+            setCustomTo(to);
+          }}
+        />
+      </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <StatCard label="Leads" value={customersData?.total ?? "…"} />
-        <StatCard label="Revenue" value={`$${totalRevenue.toFixed(2)}`} />
+        <StatCard label="Leads" value={canSeeFunnelStats ? (funnelData?.totalLeads ?? "…") : "—"} />
+        <StatCard label="Revenue" value={canSeeFunnelStats ? `$${(funnelData?.revenue ?? 0).toFixed(2)}` : "—"} />
         <StatCard label="Active employees" value={activeEmployees} />
         <StatCard label="Draft payroll weeks" value={draftWeeks} />
         <NeedsAttentionCard enabled={canSeeNeedsAttention} />
       </div>
-      {canSeeNeedsAttention && <FunnelSummaryCard />}
+      <FunnelSummaryCard range={range} enabled={canSeeFunnelStats} />
     </div>
   );
 }

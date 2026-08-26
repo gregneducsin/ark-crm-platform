@@ -2,32 +2,58 @@ import { sql } from "drizzle-orm";
 import { db } from "@luma/db";
 
 /**
- * Lead → questionnaire → purchase funnel, all-time (no date range in this
- * first pass — "basic" reporting per the request that prompted this file;
- * a date-filtered version is a natural follow-up if it's needed later).
- * Each stage counts distinct customers, not events — a customer who
+ * Lead → questionnaire → purchase funnel, optionally scoped to a date
+ * range. Each stage counts distinct customers, not events — a customer who
  * abandoned and later restarted the questionnaire is still one person in
- * "started", not two.
+ * "started", not two. Each stage is scoped by the date column that best
+ * represents when that stage's event actually happened (a customer's own
+ * leadReceivedDate for "leads," when a questionnaire row was created for
+ * "started," when it was last updated while submitted for "submitted,"
+ * when a purchase was recorded for "purchased"/"revenue") — not a single
+ * shared column, since these are four different kinds of events.
  */
 export interface FunnelSummary {
   readonly totalLeads: number;
   readonly questionnaireStarted: number;
   readonly questionnaireSubmitted: number;
   readonly purchased: number;
+  readonly revenue: number;
 }
 
-export async function getFunnelSummary(): Promise<FunnelSummary> {
+export interface DateRange {
+  /** Inclusive, YYYY-MM-DD. */
+  readonly from: string;
+  /** Inclusive, YYYY-MM-DD. */
+  readonly to: string;
+}
+
+export async function getFunnelSummary(range?: DateRange): Promise<FunnelSummary> {
+  // "to" is inclusive of the whole day, so the upper bound used in the
+  // query is exclusive-of-the-next-day — this matters for the timestamp
+  // columns (questionnaire/purchase events), where a bare "<= to" would
+  // silently exclude anything that happened after midnight on that day.
+  const leadsWhere = range ? sql`WHERE lead_received_date BETWEEN ${range.from} AND ${range.to}` : sql``;
+  const startedWhere = range ? sql`WHERE created_at >= ${range.from} AND created_at < (${range.to}::date + 1)` : sql``;
+  const submittedWhere = range
+    ? sql`WHERE status = 'submitted' AND updated_at >= ${range.from} AND updated_at < (${range.to}::date + 1)`
+    : sql`WHERE status = 'submitted'`;
+  const purchasedWhere = range
+    ? sql`WHERE status = 'completed' AND created_at >= ${range.from} AND created_at < (${range.to}::date + 1)`
+    : sql`WHERE status = 'completed'`;
+
   const [row] = await db.execute<{
     total_leads: string;
     questionnaire_started: string;
     questionnaire_submitted: string;
     purchased: string;
+    revenue: string;
   }>(sql`
     SELECT
-      (SELECT count(*) FROM customers) AS total_leads,
-      (SELECT count(DISTINCT person_id) FROM questionnaire_events) AS questionnaire_started,
-      (SELECT count(DISTINCT person_id) FROM questionnaire_events WHERE status = 'submitted') AS questionnaire_submitted,
-      (SELECT count(DISTINCT customer_id) FROM purchases WHERE status = 'completed') AS purchased
+      (SELECT count(*) FROM customers ${leadsWhere}) AS total_leads,
+      (SELECT count(DISTINCT person_id) FROM questionnaire_events ${startedWhere}) AS questionnaire_started,
+      (SELECT count(DISTINCT person_id) FROM questionnaire_events ${submittedWhere}) AS questionnaire_submitted,
+      (SELECT count(DISTINCT customer_id) FROM purchases ${purchasedWhere}) AS purchased,
+      (SELECT COALESCE(sum(amount_paid), 0) FROM purchases ${purchasedWhere}) AS revenue
   `).then((r) => r.rows);
 
   return {
@@ -35,6 +61,7 @@ export async function getFunnelSummary(): Promise<FunnelSummary> {
     questionnaireStarted: Number(row.questionnaire_started),
     questionnaireSubmitted: Number(row.questionnaire_submitted),
     purchased: Number(row.purchased),
+    revenue: Number(row.revenue),
   };
 }
 
