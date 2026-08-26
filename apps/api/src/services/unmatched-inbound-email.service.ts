@@ -311,10 +311,14 @@ const ACK_ASKING_NAME_VARIANTS = [
   "Thanks for reaching out to Ark Health — could you share your name so we can help you further? A member of our team will follow up shortly.",
   "Thanks for getting in touch with Ark Health — could you let us know your name so we can help you out? Our team will follow up shortly.",
 ] as const;
-const ACK_KNOWN_NAME_VARIANTS = [
-  "Thanks for reaching out to Ark Health — a member of our team will follow up shortly.",
-  "Thanks for getting in touch with Ark Health — our team will follow up with you shortly.",
-] as const;
+
+/** Actually greets the sender by name — a flat "our team will follow up" with no personalization reads as a form-letter brush-off even when we already know exactly who's writing in. */
+function ackKnownNameVariants(firstName: string): readonly string[] {
+  return [
+    `Hey ${firstName}, we received your email and we'll reach out here shortly.`,
+    `Hi ${firstName} — got your message, and someone from our team will follow up with you shortly.`,
+  ];
+}
 
 function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
@@ -369,7 +373,8 @@ async function sendAutoAcknowledgment(
   inReplyTo: string | null,
   fromEmailOverride: string | null,
 ): Promise<void> {
-  await sendEmailAndLog(threadId, fromAddress, subject, pickVariant(knownName ? ACK_KNOWN_NAME_VARIANTS : ACK_ASKING_NAME_VARIANTS), inReplyTo, fromEmailOverride);
+  const body = knownName ? pickVariant(ackKnownNameVariants(splitName(knownName).firstName)) : pickVariant(ACK_ASKING_NAME_VARIANTS);
+  await sendEmailAndLog(threadId, fromAddress, subject, body, inReplyTo, fromEmailOverride);
 }
 
 /**

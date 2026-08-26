@@ -420,11 +420,11 @@ describe("auto-acknowledgment", () => {
     });
 
     const [, , html] = sendEmailMock.mock.calls[0];
-    // Wording is randomized (see ACK_KNOWN_NAME_VARIANTS/ACK_ASKING_NAME_VARIANTS)
-    // — check the behavior (doesn't ask for a name, does thank them by brand),
-    // not one specific phrasing.
+    // Wording is randomized (see ackKnownNameVariants/ACK_ASKING_NAME_VARIANTS)
+    // — check the behavior (doesn't ask for a name, does greet them by their
+    // actual first name), not one specific phrasing.
     expect(html).not.toContain("your name");
-    expect(html.toLowerCase()).toMatch(/thanks for (reaching out to|getting in touch with) ark health/);
+    expect(html).toContain("Casey");
   });
 
   it("sends Claude's own drafted reply (not a repeat of the fixed ack) on a second message, since replies are auto-sent by default now", async () => {
