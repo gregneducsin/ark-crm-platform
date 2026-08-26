@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { AuthUser } from "@luma/shared";
-import { useUsers, useInviteUser, useUpdateUser } from "../hooks/useUsers";
+import { useUsers, useInviteUser, useUpdateUser, useResendInvite, useAdminResetPassword } from "../hooks/useUsers";
 import { Badge, Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { ApiError, useCurrentUser } from "../hooks/useAuth";
 
@@ -66,7 +66,10 @@ export function UsersPage() {
 
 function UserRow({ user, isSelf }: { user: AuthUser; isSelf: boolean }) {
   const updateUser = useUpdateUser();
+  const resendInvite = useResendInvite();
+  const resetPassword = useAdminResetPassword();
   const canToggleStatus = user.status === "active" || user.status === "disabled";
+  const canResetPassword = user.status === "active" || user.status === "locked";
 
   return (
     <tr className="border-b border-gray-100 last:border-0">
@@ -95,16 +98,38 @@ function UserRow({ user, isSelf }: { user: AuthUser; isSelf: boolean }) {
         <Badge color={STATUS_COLOR[user.status]}>{user.status}</Badge>
       </td>
       <td className="px-4 py-2">
-        {!isSelf && canToggleStatus && (
-          <Button
-            variant="secondary"
-            disabled={updateUser.isPending}
-            onClick={() =>
-              updateUser.mutate({ id: user.id, input: { status: user.status === "disabled" ? "active" : "disabled" } })
-            }
-          >
-            {user.status === "disabled" ? "Reactivate" : "Disable"}
-          </Button>
+        {!isSelf && (
+          <div className="flex flex-wrap items-center gap-2">
+            {canToggleStatus && (
+              <Button
+                variant="secondary"
+                disabled={updateUser.isPending}
+                onClick={() =>
+                  updateUser.mutate({ id: user.id, input: { status: user.status === "disabled" ? "active" : "disabled" } })
+                }
+              >
+                {user.status === "disabled" ? "Reactivate" : "Disable"}
+              </Button>
+            )}
+            {user.status === "invited" && (
+              <Button variant="secondary" disabled={resendInvite.isPending} onClick={() => resendInvite.mutate(user.id)}>
+                {resendInvite.isPending ? "Sending…" : resendInvite.isSuccess ? "Invite sent" : "Resend invite"}
+              </Button>
+            )}
+            {canResetPassword && (
+              <Button variant="secondary" disabled={resetPassword.isPending} onClick={() => resetPassword.mutate(user.id)}>
+                {resetPassword.isPending ? "Sending…" : resetPassword.isSuccess ? "Reset link sent" : "Reset password"}
+              </Button>
+            )}
+            {(resendInvite.isError || resetPassword.isError) && (
+              <ErrorText>
+                {(() => {
+                  const err = resendInvite.error ?? resetPassword.error;
+                  return err instanceof ApiError ? err.message : "Something went wrong.";
+                })()}
+              </ErrorText>
+            )}
+          </div>
         )}
       </td>
     </tr>

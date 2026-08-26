@@ -24,3 +24,17 @@ export function useUpdateUser() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users", "list"] }),
   });
 }
+
+/** Re-sends the invitation email for a user still stuck in status "invited". */
+export function useResendInvite() {
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ ok: true }>(`/api/app/users/${id}/resend-invite`),
+  });
+}
+
+/** Admin-triggered password reset — emails the target user a reset link directly, unlike the self-service forgot-password flow. */
+export function useAdminResetPassword() {
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ ok: true }>(`/api/app/users/${id}/reset-password`),
+  });
+}

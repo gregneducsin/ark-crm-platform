@@ -168,4 +168,134 @@ describe("Users", () => {
     expect(reactivateRes.status).toBe(200);
     expect(reactivateRes.body.user.status).toBe("active");
   });
+
+  describe("POST /:id/resend-invite", () => {
+  // A fresh app instance here means a fresh, independent authLimiter budget
+  // (limit: 10 per window) — the outer describe's tests already use all 10
+  // of the shared app's logins, so reusing it here would flake on rate
+  // limiting rather than the actual behavior under test.
+  let app: ReturnType<typeof createApp>;
+  beforeAll(() => {
+    app = createApp();
+  });
+
+  it("re-sends the invitation email for a user still stuck as invited", async () => {
+    await seedUser("resend-admin1@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "resend-admin1@example.com");
+
+    const inviteRes = await agent
+      .post("/api/app/users")
+      .set("x-csrf-token", csrf)
+      .send({ email: "resend-target1@example.com", firstName: "Res", lastName: "End", role: "customer_service" });
+    const targetId = inviteRes.body.user.id as string;
+
+    sendEmailMock.mockClear();
+    const res = await agent.post(`/api/app/users/${targetId}/resend-invite`).set("x-csrf-token", csrf).send();
+    expect(res.status).toBe(200);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [to, subject] = sendEmailMock.mock.calls[0];
+    expect(to).toBe("resend-target1@example.com");
+    expect(subject).toMatch(/invited/i);
+  });
+
+  it("rejects a user who has already accepted their invitation", async () => {
+    await seedUser("resend-admin2@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "resend-admin2@example.com");
+    const target = await seedUser("resend-active1@example.com", "customer_service");
+
+    const res = await agent.post(`/api/app/users/${target.id}/resend-invite`).set("x-csrf-token", csrf).send();
+    expect(res.status).toBe(400);
+  });
+
+  it("404s for a nonexistent user", async () => {
+    await seedUser("resend-admin3@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "resend-admin3@example.com");
+
+    const res = await agent
+      .post("/api/app/users/00000000-0000-0000-0000-000000000000/resend-invite")
+      .set("x-csrf-token", csrf)
+      .send();
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects manager and customer_service roles", async () => {
+    const target = await seedUser("resend-target2@example.com", "customer_service");
+    await seedUser("resend-mgr@example.com", "manager");
+    const manager = await loginAgent(app, "resend-mgr@example.com");
+    const res = await manager.agent.post(`/api/app/users/${target.id}/resend-invite`).set("x-csrf-token", manager.csrf).send();
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /:id/reset-password", () => {
+  // Same reasoning as the resend-invite describe above: a fresh app instance
+  // gets its own independent authLimiter budget instead of sharing the
+  // outer describe's already-exhausted one.
+  let app: ReturnType<typeof createApp>;
+  beforeAll(() => {
+    app = createApp();
+  });
+
+  it("emails a reset link directly to an active user", async () => {
+    await seedUser("reset-admin1@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "reset-admin1@example.com");
+    const target = await seedUser("reset-target1@example.com", "customer_service");
+
+    sendEmailMock.mockClear();
+    const res = await agent.post(`/api/app/users/${target.id}/reset-password`).set("x-csrf-token", csrf).send();
+    expect(res.status).toBe(200);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [to, subject, html] = sendEmailMock.mock.calls[0];
+    expect(to).toBe("reset-target1@example.com");
+    expect(subject).toMatch(/reset/i);
+    expect(html).toContain("/reset-password?token=");
+  });
+
+  it("works for a locked user (gives them a way back in)", async () => {
+    await seedUser("reset-admin2@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "reset-admin2@example.com");
+    const target = await seedUser("reset-locked1@example.com", "customer_service");
+    const { db, appUsersTable } = await import("@luma/db");
+    const { eq } = await import("drizzle-orm");
+    await db.update(appUsersTable).set({ status: "locked" }).where(eq(appUsersTable.id, target.id));
+
+    sendEmailMock.mockClear();
+    const res = await agent.post(`/api/app/users/${target.id}/reset-password`).set("x-csrf-token", csrf).send();
+    expect(res.status).toBe(200);
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a user who hasn't accepted their invitation yet", async () => {
+    await seedUser("reset-admin3@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "reset-admin3@example.com");
+
+    const inviteRes = await agent
+      .post("/api/app/users")
+      .set("x-csrf-token", csrf)
+      .send({ email: "reset-invited1@example.com", firstName: "A", lastName: "B", role: "customer_service" });
+    const targetId = inviteRes.body.user.id as string;
+
+    const res = await agent.post(`/api/app/users/${targetId}/reset-password`).set("x-csrf-token", csrf).send();
+    expect(res.status).toBe(400);
+  });
+
+  it("404s for a nonexistent user", async () => {
+    await seedUser("reset-admin4@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "reset-admin4@example.com");
+
+    const res = await agent
+      .post("/api/app/users/00000000-0000-0000-0000-000000000000/reset-password")
+      .set("x-csrf-token", csrf)
+      .send();
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects manager and customer_service roles", async () => {
+    const target = await seedUser("reset-target2@example.com", "customer_service");
+    await seedUser("reset-cs@example.com", "customer_service");
+    const cs = await loginAgent(app, "reset-cs@example.com");
+    const res = await cs.agent.post(`/api/app/users/${target.id}/reset-password`).set("x-csrf-token", cs.csrf).send();
+    expect(res.status).toBe(403);
+  });
+  });
 });

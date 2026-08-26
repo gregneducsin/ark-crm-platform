@@ -13,6 +13,7 @@ import { logger } from "../lib/logger.js";
 import { writeUserAuditEvent } from "./audit.service.js";
 import { getEmailProvider } from "../lib/email-provider.js";
 import { renderStaffInvitationEmail } from "../lib/email/staff-invite-email.js";
+import { renderStaffPasswordResetEmail } from "../lib/email/staff-password-reset-email.js";
 
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
@@ -356,4 +357,76 @@ export async function updateUser(
   }
 
   return { ok: true, user: toAuthUser(updated) };
+}
+
+export type AdminResendInvitationResult = { ok: true } | { ok: false; reason: "not_found" | "not_invited" };
+
+/**
+ * Re-sends the invitation email for a user still stuck in status "invited"
+ * — e.g. their original link expired, or they never got the email. Reuses
+ * createInvitation (invalidates any outstanding token, mints a fresh one)
+ * and the same template inviteUser sends on first invite.
+ */
+export async function adminResendInvitation(targetUserId: string, actorUserId: string): Promise<AdminResendInvitationResult> {
+  const [user] = await db.select().from(appUsersTable).where(eq(appUsersTable.id, targetUserId));
+  if (!user) return { ok: false, reason: "not_found" };
+  if (user.status !== "invited") return { ok: false, reason: "not_invited" };
+
+  const { rawToken } = await createInvitation(user.id);
+  await writeUserAuditEvent({ actorUserId, targetUserId: user.id, action: "invitation_resent" });
+
+  const base = process.env.WEB_PUBLIC_URL?.replace(/\/$/, "") ?? "";
+  const inviteUrl = `${base}/accept-invitation?token=${rawToken}`;
+  try {
+    const { provider, fromName } = getEmailProvider("system");
+    const rendered = renderStaffInvitationEmail(user.firstName, user.role, inviteUrl);
+    await provider.sendEmail(user.email, rendered.subject, rendered.html, { fromName });
+  } catch (err) {
+    logger.warn({ userId: user.id, reason: err instanceof Error ? err.message : String(err) }, "resend invitation email send failed");
+  }
+
+  return { ok: true };
+}
+
+export type AdminResetPasswordResult = { ok: true } | { ok: false; reason: "not_found" | "not_eligible" };
+
+/**
+ * Admin-triggered password reset, distinct from requestPasswordReset above:
+ * that one is the self-service "forgot password" flow (enumeration-resistant,
+ * looks up by email, only logs the link). This one is admin-authenticated,
+ * targets a specific user by id, and actually emails the link — the admin
+ * has no way to see a server log. Eligible for "active" or "locked" accounts
+ * only; an "invited" account hasn't set a password yet (use resend-invite
+ * instead) and a "disabled" one needs reactivating first.
+ */
+export async function adminResetPassword(targetUserId: string, actorUserId: string): Promise<AdminResetPasswordResult> {
+  const [user] = await db.select().from(appUsersTable).where(eq(appUsersTable.id, targetUserId));
+  if (!user) return { ok: false, reason: "not_found" };
+  if (user.status !== "active" && user.status !== "locked") return { ok: false, reason: "not_eligible" };
+
+  await db
+    .update(passwordResetTokensTable)
+    .set({ usedAt: new Date() })
+    .where(and(eq(passwordResetTokensTable.userId, user.id), isNull(passwordResetTokensTable.usedAt)));
+
+  const rawToken = generateRawToken();
+  await db.insert(passwordResetTokensTable).values({
+    userId: user.id,
+    tokenHash: hashToken(rawToken),
+    expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS),
+  });
+
+  await writeUserAuditEvent({ actorUserId, targetUserId: user.id, action: "password_reset_requested" });
+
+  const base = process.env.WEB_PUBLIC_URL?.replace(/\/$/, "") ?? "";
+  const resetUrl = `${base}/reset-password?token=${rawToken}`;
+  try {
+    const { provider, fromName } = getEmailProvider("system");
+    const rendered = renderStaffPasswordResetEmail(user.firstName, resetUrl);
+    await provider.sendEmail(user.email, rendered.subject, rendered.html, { fromName });
+  } catch (err) {
+    logger.warn({ userId: user.id, reason: err instanceof Error ? err.message : String(err) }, "admin-triggered password reset email send failed");
+  }
+
+  return { ok: true };
 }

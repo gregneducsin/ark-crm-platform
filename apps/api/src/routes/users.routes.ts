@@ -57,5 +57,39 @@ export function createUsersRouter(): RouterType {
     }
   });
 
+  router.post("/:id/resend-invite", requireRole("admin"), requireCsrf, async (req, res, next) => {
+    try {
+      const result = await authService.adminResendInvitation(req.params.id as string, req.user!.id);
+      if (!result.ok) {
+        if (result.reason === "not_invited") {
+          res.status(400).json({ error: "This user has already accepted an invitation." });
+          return;
+        }
+        res.status(404).json({ error: "User not found." });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/:id/reset-password", requireRole("admin"), requireCsrf, async (req, res, next) => {
+    try {
+      const result = await authService.adminResetPassword(req.params.id as string, req.user!.id);
+      if (!result.ok) {
+        if (result.reason === "not_eligible") {
+          res.status(400).json({ error: "This user isn't eligible for a password reset right now." });
+          return;
+        }
+        res.status(404).json({ error: "User not found." });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 }
