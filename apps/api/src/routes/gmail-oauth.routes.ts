@@ -113,9 +113,20 @@ export function createGmailOAuthRouter(): RouterType {
         return;
       }
 
+      // Nothing here persists this automatically (see the docstring above
+      // the "/" route) — it has to be copied into Railway's own variable
+      // editor as GOOGLE_REFRESH_TOKEN by hand, so it needs to actually be
+      // shown once, here, or the admin who just completed the consent
+      // screen has no way to get it at all. Plain text, not HTML, so
+      // there's no need to think about escaping an opaque token string.
       res
         .status(200)
-        .send("Google Workspace connected successfully (scope: gmail.send). You may close this page.");
+        .type("text/plain")
+        .send(
+          `Google Workspace connected successfully (scope: gmail.send).\n\n` +
+            `Copy the value below into GOOGLE_REFRESH_TOKEN in Railway's variable editor, then close this tab — never paste it anywhere else:\n\n` +
+            tokens.refresh_token,
+        );
     } catch (error) {
       next(error);
     }
