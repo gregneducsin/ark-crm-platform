@@ -82,6 +82,42 @@ describe("processInboundEmail", () => {
     expect(messages[1].inReplyTo).toBe("<inbound-1@example.com>");
   });
 
+  it("replies from the exact mailbox this customer's email arrived at, not the provider's default", async () => {
+    runAlexisTurnMock.mockClear();
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<reply-help@example.com>" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+
+    const personId = await seedCustomer();
+    await processInboundEmail(personId, "Question", "Do you ship to Texas?", "<inbound-help@example.com>", undefined, "help@example.com");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [, , , opts] = sendEmailMock.mock.calls[0];
+    expect(opts.fromEmailOverride).toBe("help@example.com");
+
+    const conversation = await getOrCreateEmailConversation(personId);
+    expect(conversation.receivingAddress).toBe("help@example.com");
+  });
+
+  it("updates the receiving mailbox — and replies from the new one — when the same customer later writes to a different address", async () => {
+    runAlexisTurnMock.mockClear();
+    sendEmailMock.mockClear();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<first@example.com>" });
+
+    const personId = await seedCustomer();
+    await processInboundEmail(personId, "Q1", "First message", "<m1@example.com>", undefined, "help@example.com");
+    expect((await getOrCreateEmailConversation(personId)).receivingAddress).toBe("help@example.com");
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<second@example.com>" });
+    await processInboundEmail(personId, "Q2", "Second message", "<m2@example.com>", undefined, "support@example.com");
+
+    const [, , , opts] = sendEmailMock.mock.calls[1];
+    expect(opts.fromEmailOverride).toBe("support@example.com");
+    expect((await getOrCreateEmailConversation(personId)).receivingAddress).toBe("support@example.com");
+  });
+
   it("schedules a 2-week re-engagement text once think_about_it reaches stand-down over email too", async () => {
     runAlexisTurnMock.mockClear();
     sendEmailMock.mockClear();
@@ -234,6 +270,21 @@ describe("sendEmailStaffReply", () => {
 
     const updated = await getOrCreateEmailConversation(personId);
     expect(updated.needsAttention).toBe(false);
+  });
+
+  it("sends a staff reply from the same mailbox the conversation is anchored to", async () => {
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<staff-reply-help@example.com>" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateEmailConversation(personId, undefined, "help@example.com");
+    await appendEmailMessage(conversation.id, "inbound", "Question", "Are you open weekends?", { messageId: "<inbound-help-2@example.com>" });
+
+    await sendEmailStaffReply(conversation.id, "Yes, we're open weekends.", "staff@example.com");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [, , , opts] = sendEmailMock.mock.calls[0];
+    expect(opts.fromEmailOverride).toBe("help@example.com");
   });
 
   it("returns not_found for an unknown conversation id", async () => {

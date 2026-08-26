@@ -179,7 +179,14 @@ describe("recordAndClassifyUnmatchedEmail", () => {
     // not left as a generic staff-reviewed draft, and no redundant generic
     // acknowledgment sent alongside it. Handed off as a Meta-lead-style
     // conversation, not abandoned_cart.
-    expect(processInboundEmailMock).toHaveBeenCalledWith(thread.linkedCustomerId, "Interested", "I'd like to learn more about your program, my number is 555-123-9876.", null, "meta_form");
+    expect(processInboundEmailMock).toHaveBeenCalledWith(
+      thread.linkedCustomerId,
+      "Interested",
+      "I'd like to learn more about your program, my number is 555-123-9876.",
+      null,
+      "meta_form",
+      undefined,
+    );
     expect(sendEmailMock).not.toHaveBeenCalled();
     expect(thread.status).toBe("replied");
     expect(thread.suggestedReply).toBeNull();
@@ -376,6 +383,27 @@ describe("auto-acknowledgment", () => {
     // the substring common to every variant that asks for a name.
     expect(html).toContain("your name");
     expect(opts.inReplyTo).toBe("<in-ack-1@example.com>");
+  });
+
+  it("replies from the exact mailbox the unmatched sender wrote to, not the provider's default", async () => {
+    createMock.mockResolvedValueOnce(toolResponse(classification({ summary: "First contact." })));
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<ack-help@example.com>" });
+
+    const fromAddress = uniqueAddress("first-contact-help");
+    const thread = await recordAndClassifyUnmatchedEmail({
+      fromAddress,
+      fromName: null,
+      subject: "Hello",
+      body: "Do you offer this?",
+      messageId: "<in-ack-help@example.com>",
+      receivingAddress: "help@example.com",
+    });
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [, , , opts] = sendEmailMock.mock.calls[0];
+    expect(opts.fromEmailOverride).toBe("help@example.com");
+    expect(thread.receivingAddress).toBe("help@example.com");
   });
 
   it("sends the name-known variant (no request for a name) when the From header already carries one", async () => {

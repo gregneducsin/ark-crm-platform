@@ -76,6 +76,23 @@ describe("processInboundSupportEmail", () => {
     expect(messages[1].messageId).toBe("<sophie-reply-1@example.com>");
   });
 
+  it("replies from the exact mailbox this customer's email arrived at, not the provider's default", async () => {
+    runSophieTurnMock.mockClear();
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<sophie-reply-help@example.com>" });
+    runSophieTurnMock.mockResolvedValueOnce(okResult());
+
+    const personId = await seedCustomer();
+    await processInboundSupportEmail(personId, "Refund status?", "Can you check on my refund?", "<sophie-inbound-help@example.com>", "help@example.com");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [, , , opts] = sendEmailMock.mock.calls[0];
+    expect(opts.fromEmailOverride).toBe("help@example.com");
+
+    const conversation = await getOrCreateSupportEmailConversation(personId);
+    expect(conversation.receivingAddress).toBe("help@example.com");
+  });
+
   it("greets the customer by first name and signs off as Sophie — Claude's draft is only the substantive reply, not a full email", async () => {
     runSophieTurnMock.mockClear();
     sendEmailMock.mockClear();
@@ -185,6 +202,21 @@ describe("sendEmailStaffReply", () => {
 
     const updated = await getOrCreateSupportEmailConversation(personId);
     expect(updated.needsAttention).toBe(false);
+  });
+
+  it("sends a staff reply from the same mailbox the conversation is anchored to", async () => {
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<staff-support-reply-help@example.com>" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportEmailConversation(personId, "help@example.com");
+    await appendSupportEmailMessage(conversation.id, "inbound", "Order status", "Has it shipped?", { messageId: "<inbound-help-2@example.com>" });
+
+    await sendEmailStaffReply(conversation.id, "It shipped this morning.", "staff@example.com");
+
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    const [, , , opts] = sendEmailMock.mock.calls[0];
+    expect(opts.fromEmailOverride).toBe("help@example.com");
   });
 
   it("returns not_found for an unknown conversation id", async () => {

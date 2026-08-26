@@ -227,13 +227,25 @@ async function classifyAndDraft(
   return toolBlock.input as Classification;
 }
 
-async function getOrCreateThread(fromAddress: string, fromName: string | null): Promise<UnmatchedEmailThread> {
+async function getOrCreateThread(fromAddress: string, fromName: string | null, receivingAddress?: string): Promise<UnmatchedEmailThread> {
   const [existing] = await db.select().from(unmatchedEmailThreadsTable).where(eq(unmatchedEmailThreadsTable.fromAddress, fromAddress));
-  if (existing) return existing;
+  if (existing) {
+    // See email-conversations.service.ts's getOrCreateEmailConversation for
+    // why this stays in sync on every inbound message, not just at creation.
+    if (receivingAddress && existing.receivingAddress !== receivingAddress) {
+      const [updated] = await db
+        .update(unmatchedEmailThreadsTable)
+        .set({ receivingAddress })
+        .where(eq(unmatchedEmailThreadsTable.id, existing.id))
+        .returning();
+      return updated;
+    }
+    return existing;
+  }
 
   const [created] = await db
     .insert(unmatchedEmailThreadsTable)
-    .values({ fromAddress, fromName })
+    .values({ fromAddress, fromName, receivingAddress: receivingAddress ?? null })
     .onConflictDoNothing({ target: unmatchedEmailThreadsTable.fromAddress })
     .returning();
   if (created) return created;
@@ -308,7 +320,14 @@ function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
 }
 
-async function sendEmailAndLog(threadId: string, fromAddress: string, subject: string, body: string, inReplyTo: string | null): Promise<boolean> {
+async function sendEmailAndLog(
+  threadId: string,
+  fromAddress: string,
+  subject: string,
+  body: string,
+  inReplyTo: string | null,
+  fromEmailOverride: string | null,
+): Promise<boolean> {
   const replySubject = /^re:/i.test(subject.trim()) ? subject : `Re: ${subject}`;
 
   let messageId: string | null = null;
@@ -319,6 +338,7 @@ async function sendEmailAndLog(threadId: string, fromAddress: string, subject: s
       fromName: "Ark Health Team",
       inReplyTo: inReplyTo ?? undefined,
       references: inReplyTo ?? undefined,
+      fromEmailOverride: fromEmailOverride ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {
@@ -341,8 +361,15 @@ async function sendEmailAndLog(threadId: string, fromAddress: string, subject: s
  * through classifyAndDraft's own reply instead (auto-sent unless flagged
  * needsHumanReview — see recordAndClassifyUnmatchedEmail).
  */
-async function sendAutoAcknowledgment(threadId: string, fromAddress: string, subject: string, knownName: string | null, inReplyTo: string | null): Promise<void> {
-  await sendEmailAndLog(threadId, fromAddress, subject, pickVariant(knownName ? ACK_KNOWN_NAME_VARIANTS : ACK_ASKING_NAME_VARIANTS), inReplyTo);
+async function sendAutoAcknowledgment(
+  threadId: string,
+  fromAddress: string,
+  subject: string,
+  knownName: string | null,
+  inReplyTo: string | null,
+  fromEmailOverride: string | null,
+): Promise<void> {
+  await sendEmailAndLog(threadId, fromAddress, subject, pickVariant(knownName ? ACK_KNOWN_NAME_VARIANTS : ACK_ASKING_NAME_VARIANTS), inReplyTo, fromEmailOverride);
 }
 
 /**
@@ -360,8 +387,9 @@ export async function recordAndClassifyUnmatchedEmail(input: {
   subject: string;
   body: string;
   messageId: string | null;
+  receivingAddress?: string;
 }): Promise<UnmatchedEmailThread> {
-  const thread = await getOrCreateThread(input.fromAddress, input.fromName);
+  const thread = await getOrCreateThread(input.fromAddress, input.fromName, input.receivingAddress);
   if (input.fromName && !thread.fromName) {
     await db.update(unmatchedEmailThreadsTable).set({ fromName: input.fromName }).where(eq(unmatchedEmailThreadsTable.id, thread.id));
   }
@@ -423,11 +451,11 @@ export async function recordAndClassifyUnmatchedEmail(input: {
       // this person already asked about or said, which can leave her with
       // nothing coherent to react to (confirmed against a real case of
       // this producing total silence on the equivalent SMS path).
-      const emailConversation = await getOrCreateEmailConversation(leadResult.customerId, "meta_form");
+      const emailConversation = await getOrCreateEmailConversation(leadResult.customerId, "meta_form", thread.receivingAddress ?? undefined);
       for (const m of messages.slice(0, -1)) {
         await appendEmailMessage(emailConversation.id, m.direction, m.subject, m.body);
       }
-      await processInboundEmail(leadResult.customerId, input.subject, input.body, input.messageId, "meta_form");
+      await processInboundEmail(leadResult.customerId, input.subject, input.body, input.messageId, "meta_form", thread.receivingAddress ?? undefined);
     } catch (err) {
       logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "handoff to Alexis after lead creation failed");
     }
@@ -442,7 +470,7 @@ export async function recordAndClassifyUnmatchedEmail(input: {
     // mail. A failed classification call (classification is null) still
     // gets the ack, same as before — no way to know it's spam without
     // Claude, so default to acknowledging.
-    await sendAutoAcknowledgment(thread.id, input.fromAddress, input.subject, knownName, input.messageId);
+    await sendAutoAcknowledgment(thread.id, input.fromAddress, input.subject, knownName, input.messageId, thread.receivingAddress);
   } else if (classification && classification.intent !== "spam_or_irrelevant" && !needsHumanReview && classification.suggestedReply) {
     // Everything past the first message is auto-sent by default now too —
     // Claude's own drafted reply, sent directly, the same trust level the
@@ -451,7 +479,7 @@ export async function recordAndClassifyUnmatchedEmail(input: {
     // no clinical claims, no promises) regardless of who hits send; the
     // needsHumanReview flag above is the actual safety valve, not a
     // missing review step.
-    autoSent = await sendEmailAndLog(thread.id, input.fromAddress, input.subject, classification.suggestedReply, input.messageId);
+    autoSent = await sendEmailAndLog(thread.id, input.fromAddress, input.subject, classification.suggestedReply, input.messageId, thread.receivingAddress);
   }
 
   const [updated] = await db
@@ -499,6 +527,7 @@ export async function listUnmatchedEmailThreads(): Promise<UnmatchedEmailThreadS
     suggestedMatchConfidence: UnmatchedEmailThread["suggestedMatchConfidence"];
     suggestedReply: string | null;
     linkedCustomerId: string | null;
+    receivingAddress: string | null;
     status: UnmatchedEmailThread["status"];
     repliedAt: Date | null;
     createdAt: Date;
@@ -510,7 +539,8 @@ export async function listUnmatchedEmailThreads(): Promise<UnmatchedEmailThreadS
       t.id, t.from_address as "fromAddress", t.from_name as "fromName", t.collected_phone as "collectedPhone",
       t.ai_intent as "aiIntent", t.ai_summary as "aiSummary",
       t.suggested_match_customer_id as "suggestedMatchCustomerId", t.suggested_match_confidence as "suggestedMatchConfidence",
-      t.suggested_reply as "suggestedReply", t.linked_customer_id as "linkedCustomerId", t.status, t.replied_at as "repliedAt",
+      t.suggested_reply as "suggestedReply", t.linked_customer_id as "linkedCustomerId", t.receiving_address as "receivingAddress",
+      t.status, t.replied_at as "repliedAt",
       t.created_at as "createdAt", t.updated_at as "updatedAt",
       (select max(m.created_at) from unmatched_email_messages m where m.thread_id = t.id) as "lastMessageAt",
       (select m.body from unmatched_email_messages m where m.thread_id = t.id order by m.created_at desc limit 1) as "lastMessagePreview"
@@ -572,6 +602,7 @@ export async function sendUnmatchedInboundEmailReply(id: string, body: string): 
       fromName: "Ark Health Team",
       inReplyTo: lastMessage?.messageId ?? undefined,
       references: lastMessage?.messageId ?? undefined,
+      fromEmailOverride: thread.receivingAddress ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {

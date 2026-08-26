@@ -38,6 +38,18 @@ export const emailConversationsTable = pgTable(
     needsAttention: boolean("needs_attention").notNull().default(false),
     /** Human-readable explanation of why needsAttention is set — see needs-attention-reason.ts. Null whenever needsAttention is false. */
     needsAttentionReason: text("needs_attention_reason"),
+    /**
+     * Which real mailbox (e.g. help@ vs support@) this customer's most
+     * recent inbound email arrived at, when more than one is polled (see
+     * EMAIL_INBOUND_EXTRA_MAILBOXES) — Alexis's replies send from this exact
+     * address instead of always one fixed mailbox, so a customer who wrote
+     * to help@ keeps hearing back from help@, not a different address than
+     * the one they actually used. Null until their first inbound email; a
+     * conversation that only ever received outbound trigger emails
+     * (abandoned-cart opener, etc.) falls back to the provider's default
+     * address until a real inbound reply sets this.
+     */
+    receivingAddress: text("receiving_address"),
     status: text("status", { enum: ["active", "closed"] }).notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -101,6 +113,8 @@ export const supportEmailConversationsTable = pgTable(
     needsAttention: boolean("needs_attention").notNull().default(false),
     /** Human-readable explanation of why needsAttention is set — see needs-attention-reason.ts. Null whenever needsAttention is false. */
     needsAttentionReason: text("needs_attention_reason"),
+    /** Sophie's twin of emailConversationsTable.receivingAddress — see its docstring. */
+    receivingAddress: text("receiving_address"),
     status: text("status", { enum: ["active", "closed"] }).notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -246,6 +260,8 @@ export const unmatchedEmailThreadsTable = pgTable(
     suggestedMatchConfidence: text("suggested_match_confidence", { enum: ["high", "medium", "low"] }),
     suggestedReply: text("suggested_reply"),
     linkedCustomerId: uuid("linked_customer_id").references(() => customersTable.id, { onDelete: "set null" }),
+    /** Same idea as emailConversationsTable.receivingAddress — which real mailbox this unrecognized sender's most recent email arrived at, so any reply goes back out from that same address. */
+    receivingAddress: text("receiving_address"),
     status: text("status", { enum: ["needs_review", "replied", "dismissed"] }).notNull().default("needs_review"),
     repliedAt: timestamp("replied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

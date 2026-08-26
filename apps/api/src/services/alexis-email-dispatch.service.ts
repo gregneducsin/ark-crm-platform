@@ -69,6 +69,7 @@ async function sendAndLog(
   subject: string,
   bodyText: string,
   inReplyTo: string | null,
+  fromEmailOverride: string | null,
 ): Promise<void> {
   if (await isCustomerEmailDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Alexis email not sent: customer is do-not-disturb");
@@ -86,6 +87,7 @@ async function sendAndLog(
       inReplyTo: inReplyTo ?? undefined,
       references: inReplyTo ?? undefined,
       unsubscribeUrl,
+      fromEmailOverride: fromEmailOverride ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {
@@ -109,8 +111,9 @@ export async function processInboundEmail(
   bodyText: string,
   messageId: string | null,
   initialLeadSource?: "abandoned_cart" | "meta_form",
+  receivingAddress?: string,
 ): Promise<AlexisTurnResult> {
-  return withPersonLock(personId, () => processInboundEmailLocked(personId, subject, bodyText, messageId, initialLeadSource));
+  return withPersonLock(personId, () => processInboundEmailLocked(personId, subject, bodyText, messageId, initialLeadSource, receivingAddress));
 }
 
 async function processInboundEmailLocked(
@@ -119,8 +122,9 @@ async function processInboundEmailLocked(
   bodyText: string,
   messageId: string | null,
   initialLeadSource?: "abandoned_cart" | "meta_form",
+  receivingAddress?: string,
 ): Promise<AlexisTurnResult> {
-  const conversation = initialLeadSource ? await getOrCreateEmailConversation(personId, initialLeadSource) : await getOrCreateEmailConversation(personId);
+  const conversation = await getOrCreateEmailConversation(personId, initialLeadSource, receivingAddress);
   const priorMessages = await listEmailMessages(conversation.id);
   const inboundMessage = await appendEmailMessage(conversation.id, "inbound", subject, bodyText, { messageId });
 
@@ -161,7 +165,7 @@ async function processInboundEmailLocked(
   const customer = await getCustomerContact(personId);
   const combinedBody = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t)).join("\n\n");
   if (combinedBody && customer) {
-    await sendAndLog(personId, conversation.id, customer.email, customer.firstName, replySubject(subject), combinedBody, inboundMessage.messageId);
+    await sendAndLog(personId, conversation.id, customer.email, customer.firstName, replySubject(subject), combinedBody, inboundMessage.messageId, conversation.receivingAddress);
   }
 
   // Set DND only after this turn's reply has gone out — see sendAndLog's docstring.
@@ -227,6 +231,7 @@ export async function sendEmailStaffReply(conversationId: string, body: string, 
       inReplyTo: lastMessage?.messageId ?? undefined,
       references: lastMessage?.messageId ?? undefined,
       unsubscribeUrl,
+      fromEmailOverride: detail.conversation.receivingAddress ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {

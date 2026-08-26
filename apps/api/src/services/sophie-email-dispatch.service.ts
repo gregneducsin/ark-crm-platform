@@ -58,6 +58,7 @@ async function sendAndLog(
   subject: string,
   bodyText: string,
   inReplyTo: string | null,
+  fromEmailOverride: string | null,
 ): Promise<void> {
   if (await isCustomerEmailDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Sophie email not sent: customer is do-not-disturb");
@@ -75,6 +76,7 @@ async function sendAndLog(
       inReplyTo: inReplyTo ?? undefined,
       references: inReplyTo ?? undefined,
       unsubscribeUrl,
+      fromEmailOverride: fromEmailOverride ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {
@@ -89,12 +91,24 @@ async function sendAndLog(
  * adaptation as alexis-email-dispatch.service.ts (reply + nextQuestion sent
  * as one email, not two).
  */
-export async function processInboundSupportEmail(personId: string, subject: string, bodyText: string, messageId: string | null): Promise<SophieTurnResult> {
-  return withPersonLock(personId, () => processInboundSupportEmailLocked(personId, subject, bodyText, messageId));
+export async function processInboundSupportEmail(
+  personId: string,
+  subject: string,
+  bodyText: string,
+  messageId: string | null,
+  receivingAddress?: string,
+): Promise<SophieTurnResult> {
+  return withPersonLock(personId, () => processInboundSupportEmailLocked(personId, subject, bodyText, messageId, receivingAddress));
 }
 
-async function processInboundSupportEmailLocked(personId: string, subject: string, bodyText: string, messageId: string | null): Promise<SophieTurnResult> {
-  const conversation = await getOrCreateSupportEmailConversation(personId);
+async function processInboundSupportEmailLocked(
+  personId: string,
+  subject: string,
+  bodyText: string,
+  messageId: string | null,
+  receivingAddress?: string,
+): Promise<SophieTurnResult> {
+  const conversation = await getOrCreateSupportEmailConversation(personId, receivingAddress);
   const priorMessages = await listSupportEmailMessages(conversation.id);
   const inboundMessage = await appendSupportEmailMessage(conversation.id, "inbound", subject, bodyText, { messageId });
 
@@ -122,7 +136,7 @@ async function processInboundSupportEmailLocked(personId: string, subject: strin
   const customer = await getCustomerContact(personId);
   const combinedBody = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t)).join("\n\n");
   if (combinedBody && customer) {
-    await sendAndLog(personId, conversation.id, customer.email, customer.firstName, replySubject(subject), combinedBody, inboundMessage.messageId);
+    await sendAndLog(personId, conversation.id, customer.email, customer.firstName, replySubject(subject), combinedBody, inboundMessage.messageId, conversation.receivingAddress);
   }
 
   if (result.preCheckCode === "OPT_OUT") {
@@ -169,6 +183,7 @@ export async function sendEmailStaffReply(conversationId: string, body: string, 
       inReplyTo: lastMessage?.messageId ?? undefined,
       references: lastMessage?.messageId ?? undefined,
       unsubscribeUrl,
+      fromEmailOverride: detail.conversation.receivingAddress ?? undefined,
     });
     messageId = result.messageId;
   } catch (err) {

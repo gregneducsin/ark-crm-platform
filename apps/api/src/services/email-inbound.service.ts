@@ -63,13 +63,13 @@ async function hasEmailConversation(personId: string): Promise<boolean> {
  * dispatchInboundMessage, matched by email instead of phone. See that
  * function's docstring for the full reasoning — identical here.
  */
-async function dispatchInboundEmail(personId: string, subject: string, bodyText: string, messageId: string | null): Promise<void> {
+async function dispatchInboundEmail(personId: string, subject: string, bodyText: string, messageId: string | null, receivingAddress: string): Promise<void> {
   if (await hasSupportEmailConversation(personId)) {
-    await processInboundSupportEmail(personId, subject, bodyText, messageId);
+    await processInboundSupportEmail(personId, subject, bodyText, messageId, receivingAddress);
     return;
   }
   if (await hasEmailConversation(personId)) {
-    await processInboundEmail(personId, subject, bodyText, messageId);
+    await processInboundEmail(personId, subject, bodyText, messageId, undefined, receivingAddress);
     return;
   }
   logger.warn({ personId }, "inbound email from a person with no Alexis or Sophie email conversation — no auto-reply sent");
@@ -117,12 +117,19 @@ export function parseExtraMailboxes(raw: string | undefined): ImapMailbox[] {
     });
 }
 
-function imapConfigs(): ImapMailbox[] {
+export function imapConfigs(): ImapMailbox[] {
   const user = process.env.GOOGLE_WORKSPACE_SMTP_USER;
-  const pass = process.env.GOOGLE_WORKSPACE_SMTP_APP_PASSWORD;
-  if (!user || !pass) {
+  const rawPass = process.env.GOOGLE_WORKSPACE_SMTP_APP_PASSWORD;
+  if (!user || !rawPass) {
     throw new Error("GOOGLE_WORKSPACE_SMTP_USER/GOOGLE_WORKSPACE_SMTP_APP_PASSWORD is not set — required for IMAP polling too (same mailbox, same app password).");
   }
+  // Google shows an app password as 4 space-separated groups — stripped the
+  // same way parseExtraMailboxes already tolerates it below, so pasting it
+  // exactly as displayed doesn't silently fail login (confirmed to happen:
+  // a space-containing value here is sent verbatim as the IMAP password and
+  // gets rejected, while the identical raw value parsed by
+  // parseExtraMailboxes already had this whitespace stripped).
+  const pass = rawPass.replace(/\s+/g, "");
   return [{ host: "imap.gmail.com", user, pass }, ...parseExtraMailboxes(process.env.EMAIL_INBOUND_EXTRA_MAILBOXES)];
 }
 
@@ -225,10 +232,11 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
               subject: parsed.subject ?? "(no subject)",
               body: bodyText,
               messageId: parsed.messageId ?? null,
+              receivingAddress: user,
             });
             await markWebhookEventProcessed(recorded.id);
           } else {
-            await dispatchInboundEmail(personId, parsed.subject ?? "(no subject)", bodyText, parsed.messageId ?? null);
+            await dispatchInboundEmail(personId, parsed.subject ?? "(no subject)", bodyText, parsed.messageId ?? null, user);
             await markWebhookEventProcessed(recorded.id, personId);
           }
           processedCount++;

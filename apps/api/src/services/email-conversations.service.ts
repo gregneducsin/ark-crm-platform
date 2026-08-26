@@ -34,13 +34,27 @@ export interface EmailConversationStatePatch {
 export async function getOrCreateEmailConversation(
   personId: string,
   leadSource: "abandoned_cart" | "meta_form" = "abandoned_cart",
+  receivingAddress?: string,
 ): Promise<EmailConversation> {
   const [existing] = await db.select().from(emailConversationsTable).where(eq(emailConversationsTable.personId, personId));
-  if (existing) return existing;
+  if (existing) {
+    // Keeps this in sync with whichever mailbox the customer most recently
+    // wrote to, so a repeat conversation that started on one polled mailbox
+    // and continues on another still replies from the right one each time.
+    if (receivingAddress && existing.receivingAddress !== receivingAddress) {
+      const [updated] = await db
+        .update(emailConversationsTable)
+        .set({ receivingAddress })
+        .where(eq(emailConversationsTable.id, existing.id))
+        .returning();
+      return updated;
+    }
+    return existing;
+  }
 
   const [created] = await db
     .insert(emailConversationsTable)
-    .values({ personId, leadSource })
+    .values({ personId, leadSource, receivingAddress: receivingAddress ?? null })
     .onConflictDoNothing({ target: emailConversationsTable.personId })
     .returning();
   if (created) return created;

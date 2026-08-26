@@ -30,13 +30,25 @@ export interface SupportEmailConversationStatePatch {
 }
 
 /** Email twin of support-conversations.service.ts's getOrCreateSupportConversation — its own table, same one-per-customer behavior. */
-export async function getOrCreateSupportEmailConversation(personId: string): Promise<SupportEmailConversation> {
+export async function getOrCreateSupportEmailConversation(personId: string, receivingAddress?: string): Promise<SupportEmailConversation> {
   const [existing] = await db.select().from(supportEmailConversationsTable).where(eq(supportEmailConversationsTable.personId, personId));
-  if (existing) return existing;
+  if (existing) {
+    // See email-conversations.service.ts's getOrCreateEmailConversation for
+    // why this stays in sync on every inbound turn, not just at creation.
+    if (receivingAddress && existing.receivingAddress !== receivingAddress) {
+      const [updated] = await db
+        .update(supportEmailConversationsTable)
+        .set({ receivingAddress })
+        .where(eq(supportEmailConversationsTable.id, existing.id))
+        .returning();
+      return updated;
+    }
+    return existing;
+  }
 
   const [created] = await db
     .insert(supportEmailConversationsTable)
-    .values({ personId })
+    .values({ personId, receivingAddress: receivingAddress ?? null })
     .onConflictDoNothing({ target: supportEmailConversationsTable.personId })
     .returning();
   if (created) return created;
