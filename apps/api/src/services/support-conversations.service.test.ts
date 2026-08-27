@@ -148,6 +148,25 @@ describe("listSupportConversationSummaries / getSupportConversationDetail", () =
     const detail = await getSupportConversationDetail("00000000-0000-0000-0000-000000000000");
     expect(detail).toBeNull();
   });
+
+  it("sorts a conversation with real messages ahead of one with none, not behind it", async () => {
+    const emptyPersonId = await seedCustomer();
+    await getOrCreateSupportConversation(emptyPersonId);
+
+    const activePersonId = await seedCustomer();
+    const activeConversation = await getOrCreateSupportConversation(activePersonId);
+    await appendSupportMessage(activeConversation.id, "outbound", "Hello");
+
+    const summaries = await listSupportConversationSummaries();
+    const activeIndex = summaries.findIndex((s) => s.personId === activePersonId);
+    const emptyIndex = summaries.findIndex((s) => s.personId === emptyPersonId);
+    expect(activeIndex).toBeGreaterThanOrEqual(0);
+    expect(emptyIndex).toBeGreaterThanOrEqual(0);
+    // A bare "ORDER BY ... DESC" sorts NULLs first in Postgres, which would
+    // put the zero-message conversation ahead of the active one — the
+    // opposite of "most recently active first".
+    expect(activeIndex).toBeLessThan(emptyIndex);
+  });
 });
 
 describe("sendStaffReply", () => {

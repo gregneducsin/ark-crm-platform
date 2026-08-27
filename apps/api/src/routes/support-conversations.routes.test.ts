@@ -105,6 +105,20 @@ describe("Support conversations", () => {
     expect(foundEmail).toBeDefined();
     expect(foundEmail.lastMessagePreview).toBe("Thanks for the email update!");
     expect(foundEmail.lastSentiment).toBe("positive");
+
+    // A zero-message email conversation (no lastMessageAt) must not sort
+    // ahead of a real, active one — a bare "ORDER BY ... DESC" puts NULLs
+    // first in Postgres, which would bury every real conversation under
+    // however many empty ones exist, making the email tab look empty at a
+    // glance even when active conversations exist further down the list.
+    const emptyPersonId = await seedCustomer();
+    await getOrCreateSupportEmailConversation(emptyPersonId);
+    const emailListWithEmptyRes = await agent.get("/api/app/support-conversations").query({ channel: "email" });
+    const activeIndex = emailListWithEmptyRes.body.conversations.findIndex((c: { id: string }) => c.id === emailConversation.id);
+    const emptyIndex = emailListWithEmptyRes.body.conversations.findIndex((c: { personId: string }) => c.personId === emptyPersonId);
+    expect(activeIndex).toBeGreaterThanOrEqual(0);
+    expect(emptyIndex).toBeGreaterThanOrEqual(0);
+    expect(activeIndex).toBeLessThan(emptyIndex);
   });
 
   it("returns conversation detail with customer contact and full message history", async () => {

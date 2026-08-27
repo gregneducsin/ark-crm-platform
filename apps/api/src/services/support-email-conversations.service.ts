@@ -175,7 +175,13 @@ export async function listSupportEmailConversationSummaries(): Promise<SupportEm
     })
     .from(supportEmailConversationsTable)
     .innerJoin(customersTable, eq(customersTable.id, supportEmailConversationsTable.personId))
-    .orderBy(desc(sql`(select max(${supportEmailConversationMessagesTable.createdAt}) from ${supportEmailConversationMessagesTable} where ${supportEmailConversationMessagesTable.conversationId} = ${supportEmailConversationsTable.id})`));
+    // Postgres sorts NULLs FIRST on a bare DESC order — without "nulls last"
+    // every conversation with zero messages floats to the very top of "most
+    // recently active first", burying every real, active conversation below
+    // however many empty ones exist. That's the opposite of the intent, and
+    // is exactly why the email tab could look entirely empty at a glance
+    // even when a contact further down had a real, current conversation.
+    .orderBy(sql`(select max(${supportEmailConversationMessagesTable.createdAt}) from ${supportEmailConversationMessagesTable} where ${supportEmailConversationMessagesTable.conversationId} = ${supportEmailConversationsTable.id}) desc nulls last`);
 
   return rows.map((r) => ({ ...r, lastSentiment: r.lastSentiment as SupportEmailConversationSummary["lastSentiment"] }));
 }
