@@ -14,6 +14,7 @@ const NAV_ITEMS: readonly { href: string; label: string; roles: readonly AuthUse
   { href: "/unmatched-contacts", label: "Unmatched Contacts", roles: ["admin", "customer_service"] },
   { href: "/customers", label: "Leads", roles: ["admin", "manager"] },
   { href: "/orders", label: "Orders", roles: ["admin", "manager"] },
+  { href: "/failed-payments", label: "Failed Payments", roles: ["admin", "manager"] },
   { href: "/questionnaires", label: "Questionnaires", roles: ["admin"] },
   { href: "/conversations", label: "Conversations", roles: ["admin", "customer_service"] },
   { href: "/support", label: "Support", roles: ["admin", "customer_service"] },

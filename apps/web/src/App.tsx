@@ -4,6 +4,7 @@ import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LeadsPage } from "./pages/LeadsPage";
 import { OrdersPage } from "./pages/OrdersPage";
+import { FailedPaymentsPage } from "./pages/FailedPaymentsPage";
 import { CustomerDetailPage } from "./pages/CustomerDetailPage";
 import { PayrollEmployeesPage } from "./pages/PayrollEmployeesPage";
 import { PayrollWeeksPage } from "./pages/PayrollWeeksPage";
@@ -45,6 +46,12 @@ export default function App() {
       <Route path="/orders">
         <ProtectedRoute roles={["admin", "manager"]}>
           <OrdersPage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/failed-payments">
+        <ProtectedRoute roles={["admin", "manager"]}>
+          <FailedPaymentsPage />
         </ProtectedRoute>
       </Route>
 

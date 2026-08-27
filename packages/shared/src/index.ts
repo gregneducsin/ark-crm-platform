@@ -18,5 +18,6 @@ export * from "./schemas/unmatched-emails.js";
 export * from "./schemas/unmatched-sms.js";
 export * from "./schemas/reporting.js";
 export * from "./schemas/scheduled-triggers.js";
+export * from "./schemas/failed-payments.js";
 export * from "./crypto.js";
 export * from "./calc/payroll.js";
