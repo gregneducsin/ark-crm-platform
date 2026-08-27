@@ -151,6 +151,21 @@ describe("Customers CRUD", () => {
     expect(noMatch.body.total).toBe(0);
   });
 
+  it("search finds a customer by their full name, not just first or last name alone", async () => {
+    await seedUser("admin-fullname@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "admin-fullname@example.com");
+
+    await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Teresa", lastName: "Holley", email: "teresa.holley@example.com", leadReceivedDate: "2026-01-01" });
+
+    const fullNameRes = await agent.get("/api/app/customers").query({ search: "Teresa Holley" });
+    expect(fullNameRes.status).toBe(200);
+    expect(fullNameRes.body.customers).toHaveLength(1);
+    expect(fullNameRes.body.customers[0].lastName).toBe("Holley");
+  });
+
   it("returns 404 for an unknown customer id", async () => {
     await seedUser("admin3@example.com", "admin");
     const { agent } = await loginAgent(app, "admin3@example.com");

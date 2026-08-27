@@ -36,6 +36,13 @@ export async function listCustomers(query: ListCustomersQuery) {
       ? or(
           ilike(customersTable.firstName, `%${search}%`),
           ilike(customersTable.lastName, `%${search}%`),
+          // firstName/lastName live in separate columns, so a search for the
+          // full name exactly as it's displayed everywhere else in the app
+          // ("Teresa Holley") wouldn't match either column alone — a real
+          // customer with a real completed purchase looked like it "wasn't
+          // a lead" purely because staff searched the name the way it's shown
+          // on screen instead of one name part at a time.
+          sql`(${customersTable.firstName} || ' ' || ${customersTable.lastName}) ilike ${`%${search}%`}`,
           ilike(customersTable.email, `%${search}%`),
           ilike(customersTable.phone, `%${search}%`),
         )
