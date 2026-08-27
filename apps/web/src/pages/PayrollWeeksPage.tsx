@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { usePayrollWeeks, useCreatePayrollWeek } from "../hooks/usePayroll";
 import { Badge, Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { ApiError } from "../hooks/useAuth";
+import { PayrollSubNav } from "../components/PayrollSubNav";
 
 const STATUS_COLORS: Record<string, "gray" | "green" | "yellow" | "blue"> = {
   draft: "gray",
@@ -16,6 +17,7 @@ export function PayrollWeeksPage() {
 
   return (
     <div className="space-y-4">
+      <PayrollSubNav />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">Payroll weeks</h1>
         <Button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New week"}</Button>

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useEmployees, useCreateEmployee } from "../hooks/usePayroll";
 import { Badge, Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { ApiError } from "../hooks/useAuth";
+import { PayrollSubNav } from "../components/PayrollSubNav";
 
 export function PayrollEmployeesPage() {
   const [showCreate, setShowCreate] = useState(false);
@@ -9,6 +10,7 @@ export function PayrollEmployeesPage() {
 
   return (
     <div className="space-y-4">
+      <PayrollSubNav />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">Employees</h1>
         <Button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New employee"}</Button>

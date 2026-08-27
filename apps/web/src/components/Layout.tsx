@@ -20,8 +20,7 @@ const NAV_ITEMS: readonly { href: string; label: string; roles: readonly AuthUse
   { href: "/support", label: "Support", roles: ["admin", "customer_service"] },
   { href: "/reporting", label: "Reporting", roles: ["admin"] },
   { href: "/marketing-cpa", label: "Marketing CPA", roles: ["admin"] },
-  { href: "/payroll/employees", label: "Employees", roles: ["admin", "manager"] },
-  { href: "/payroll/weeks", label: "Payroll", roles: ["admin", "manager"] },
+  { href: "/payroll/employees", label: "Payroll", roles: ["admin", "manager"] },
   { href: "/users", label: "Users", roles: ["admin"] },
 ];
 
@@ -52,7 +51,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 href={item.href}
                 className={
                   "flex items-center gap-1.5 " +
-                  (location === item.href
+                  ((location === item.href || (item.href === "/payroll/employees" && location.startsWith("/payroll")))
                     ? "text-sm font-medium text-blue-600"
                     : "text-sm font-medium text-gray-600 hover:text-gray-900")
                 }
