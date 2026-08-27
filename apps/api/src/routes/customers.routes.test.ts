@@ -166,6 +166,31 @@ describe("Customers CRUD", () => {
     expect(fullNameRes.body.customers[0].lastName).toBe("Holley");
   });
 
+  it("excludes a payment_failed purchase from orders/spent, so a declined charge doesn't read as real revenue next to a 'Not purchased' badge", async () => {
+    await seedUser("admin-failedpay@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "admin-failedpay@example.com");
+
+    const createRes = await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Joyce", lastName: "Sippel", email: "joyce.sippel@example.com", leadReceivedDate: "2026-01-01" });
+    const customerId = createRes.body.customer.id;
+
+    await agent
+      .post(`/api/app/customers/${customerId}/purchases`)
+      .set("x-csrf-token", csrf)
+      .send({ purchaseDate: "2026-01-05", orderNumber: "ORD-FAILED-1", productName: "Thing", amountPaid: "169.00", status: "payment_failed" });
+
+    const res = await agent.get("/api/app/customers").query({ search: "Sippel" });
+    expect(res.body.customers).toHaveLength(1);
+    expect(res.body.customers[0].purchaseCount).toBe(0);
+    // "0" not "0.00" — coalesce's integer fallback, same formatting quirk a
+    // customer with zero purchases at all already has; the frontend's
+    // formatMoney() normalizes either through Number().toFixed(2).
+    expect(res.body.customers[0].totalPaid).toBe("0");
+    expect(res.body.customers[0].qualifyingPurchaseDate).toBeNull();
+  });
+
   it("returns 404 for an unknown customer id", async () => {
     await seedUser("admin3@example.com", "admin");
     const { agent } = await loginAgent(app, "admin3@example.com");

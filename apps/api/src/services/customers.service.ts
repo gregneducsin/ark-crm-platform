@@ -58,9 +58,19 @@ export async function listCustomers(query: ListCustomersQuery) {
 
   // "Purchased" means a completed, first-order purchase — same rule the
   // summary tiles and Marketing CPA use, so a recurring-only purchase
-  // doesn't count. purchaseCount/totalPaid/firstPurchaseDate below stay
-  // unfiltered (full order history), this is a separate qualifying check.
+  // doesn't count. purchaseCount/totalPaid/firstPurchaseDate below are
+  // filtered to completed purchases only (see completedPurchaseSql), but
+  // still include recurring orders, not just the qualifying first order —
+  // this is a separate, broader "order history" check.
   const qualifyingPurchaseSql = sql`(${purchasesTable.orderClassification} = 'first_order' and ${purchasesTable.status} = 'completed')`;
+
+  // A pending/payment_failed/refunded/cancelled purchase never actually
+  // collected money, so it must not count toward "orders" or "spent" — same
+  // rule getPurchasesSummary's totalRevenue uses. Without this, a customer
+  // whose card was declined showed up with a dollar figure in "Spent" next
+  // to a "Not purchased" badge, which reads as a contradiction to staff even
+  // though nothing was actually charged.
+  const completedPurchaseSql = sql`${purchasesTable.status} = 'completed'`;
 
   const havingCondition =
     purchaseStatus === "purchased"
@@ -74,10 +84,10 @@ export async function listCustomers(query: ListCustomersQuery) {
   const rows = await db
     .select({
       ...getTableColumns(customersTable),
-      purchaseCount: sql<number>`count(${purchasesTable.id})::int`,
-      totalPaid: sql<string>`coalesce(sum(${purchasesTable.amountPaid}), 0)::text`,
-      firstPurchaseDate: sql<string | null>`min(${purchasesTable.purchaseDate})`,
-      mostRecentPurchaseDate: sql<string | null>`max(${purchasesTable.purchaseDate})`,
+      purchaseCount: sql<number>`count(${purchasesTable.id}) filter (where ${completedPurchaseSql})::int`,
+      totalPaid: sql<string>`coalesce(sum(${purchasesTable.amountPaid}) filter (where ${completedPurchaseSql}), 0)::text`,
+      firstPurchaseDate: sql<string | null>`min(${purchasesTable.purchaseDate}) filter (where ${completedPurchaseSql})`,
+      mostRecentPurchaseDate: sql<string | null>`max(${purchasesTable.purchaseDate}) filter (where ${completedPurchaseSql})`,
       qualifyingPurchaseDate: sql<string | null>`min(${purchasesTable.purchaseDate}) filter (where ${qualifyingPurchaseSql})`,
       questionnaireStatus: questionnaireStatusSubquery,
       questionnaireId: questionnaireIdSubquery,
