@@ -117,6 +117,28 @@ export function parseExtraMailboxes(raw: string | undefined): ImapMailbox[] {
     });
 }
 
+/**
+ * EMAIL_INBOUND_IGNORED_SENDERS silently drops mail from known automated
+ * senders (e.g. a practice-management platform's own operational alerts —
+ * new patient registered, prescription reminder, order notification — that
+ * happen to be addressed to the same polled mailbox as real customer
+ * inquiries, whether directly or via a same-Workspace domain alias) before
+ * it ever reaches the unmatched-sender triage queue. Comma-separated, exact
+ * address match, case-insensitive. Distinct from spam/irrelevant
+ * classification (which still creates a thread for review) — an ignored
+ * sender never creates a thread or record at all, since these are known,
+ * expected, non-customer senders rather than something worth a human
+ * glancing at even once.
+ */
+export function isIgnoredSender(fromAddress: string, raw: string | undefined): boolean {
+  if (!raw?.trim()) return false;
+  const ignored = raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
+  return ignored.includes(fromAddress.trim().toLowerCase());
+}
+
 export function imapConfigs(): ImapMailbox[] {
   const user = process.env.GOOGLE_WORKSPACE_SMTP_USER;
   const rawPass = process.env.GOOGLE_WORKSPACE_SMTP_APP_PASSWORD;
@@ -209,6 +231,12 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
         const parsed = await simpleParser(message.source);
         const fromAddress = parsed.from?.value[0]?.address;
         const externalEventId = parsed.messageId ?? `imap-uid-${uid}`;
+
+        if (fromAddress && isIgnoredSender(fromAddress, process.env.EMAIL_INBOUND_IGNORED_SENDERS)) {
+          await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
+          skippedCount++;
+          continue;
+        }
 
         const recorded = await recordWebhookEventIfNew("email_inbound", externalEventId, { uid, from: fromAddress, subject: parsed.subject });
         if (!recorded) {
