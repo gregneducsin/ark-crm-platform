@@ -204,6 +204,17 @@ export async function sweepInboundEmail(): Promise<EmailInboundSweepResult> {
 
 async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInboundSweepResult> {
   const client = new ImapFlow({ host, port: 993, secure: true, auth: { user, pass }, logger: false });
+  // ImapFlow is a Node EventEmitter — a socket timeout/reset emits "error"
+  // on the client itself, not just a rejection on whichever call was
+  // in flight. An EventEmitter throws synchronously and crashes the whole
+  // process on an "error" event with no listener, which is exactly what
+  // was taking down the entire API server (not just this sweep) on every
+  // IMAP socket timeout. The awaited calls below still reject and get
+  // caught by the existing try/catch/logger.error path — this listener's
+  // only job is to stop that crash, not to duplicate the logging.
+  client.on("error", (err) => {
+    logger.warn({ user, reason: err instanceof Error ? err.message : String(err) }, "IMAP client error");
+  });
 
   let processedCount = 0;
   let skippedCount = 0;
