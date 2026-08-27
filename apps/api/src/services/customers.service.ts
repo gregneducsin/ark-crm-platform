@@ -80,7 +80,12 @@ export async function listCustomers(query: ListCustomersQuery) {
     .where(whereCondition)
     .groupBy(customersTable.id)
     .having(havingCondition)
-    .orderBy(orderFn(SORT_COLUMNS[sortBy]))
+    // Tie-broken by id: leadReceivedDate/createdAt/lastName commonly repeat
+    // across customers, and an unstable tiebreak means rows can silently
+    // swap between the last page and the next one as Postgres picks a
+    // different tie order per request — a customer looks like it vanished
+    // even though nothing changed.
+    .orderBy(orderFn(SORT_COLUMNS[sortBy]), asc(customersTable.id))
     .limit(limit)
     .offset(offset);
 

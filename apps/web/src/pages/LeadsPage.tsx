@@ -80,6 +80,8 @@ function formatMoney(amount: string): string {
 
 type SortBy = "createdAt" | "leadReceivedDate" | "lastName";
 
+const PAGE_SIZE = 25;
+
 function SortHeader({
   label,
   column,
@@ -117,17 +119,29 @@ export function LeadsPage() {
   const [dateTo, setDateTo] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("leadReceivedDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const { data: currentUser } = useCurrentUser();
   const canEdit = currentUser?.user?.role === "admin";
 
   function handleSort(column: SortBy) {
+    setPage(0);
     if (column === sortBy) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortBy(column);
       setSortDir("desc");
     }
+  }
+
+  // Every filter/search input resets to page 0 — otherwise narrowing the
+  // result set can strand the view on a now-nonexistent later page, which
+  // renders as "No leads found" even though matches exist on page 0.
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => {
+      setPage(0);
+      setter(v);
+    };
   }
 
   const { data: leadTypesData } = useLeadTypes();
@@ -141,7 +155,11 @@ export function LeadsPage() {
     dateTo: dateTo || undefined,
     sortBy,
     sortDir,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
   });
+  const total = data?.total ?? 0;
+  const hasNextPage = (page + 1) * PAGE_SIZE < total;
 
   return (
     <div className="space-y-4">
@@ -159,9 +177,13 @@ export function LeadsPage() {
           className="max-w-xs"
           placeholder="Search by name, email, or phone…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => updateFilter(setSearch)(e.target.value)}
         />
-        <select className="rounded-md border border-gray-300 px-3 py-2 text-sm" value={leadType} onChange={(e) => setLeadType(e.target.value)}>
+        <select
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+          value={leadType}
+          onChange={(e) => updateFilter(setLeadType)(e.target.value)}
+        >
           <option value="">All Lead Types</option>
           {leadTypesData?.leadTypes.map((lt) => (
             <option key={lt} value={lt}>
@@ -172,7 +194,7 @@ export function LeadsPage() {
         <select
           className="rounded-md border border-gray-300 px-3 py-2 text-sm"
           value={purchaseStatus}
-          onChange={(e) => setPurchaseStatus(e.target.value)}
+          onChange={(e) => updateFilter(setPurchaseStatus)(e.target.value)}
         >
           <option value="">All Purchases</option>
           <option value="purchased">Purchased</option>
@@ -181,7 +203,7 @@ export function LeadsPage() {
         <select
           className="rounded-md border border-gray-300 px-3 py-2 text-sm"
           value={questionnaireId}
-          onChange={(e) => setQuestionnaireId(e.target.value)}
+          onChange={(e) => updateFilter(setQuestionnaireId)(e.target.value)}
         >
           <option value="">All Questionnaires</option>
           {questionnaireIdsData?.questionnaireIds.map((qid) => (
@@ -192,13 +214,14 @@ export function LeadsPage() {
         </select>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Lead received</span>
-          <Input type="date" className="w-auto" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <Input type="date" className="w-auto" value={dateFrom} onChange={(e) => updateFilter(setDateFrom)(e.target.value)} />
           <span className="text-sm text-gray-400">–</span>
-          <Input type="date" className="w-auto" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <Input type="date" className="w-auto" value={dateTo} onChange={(e) => updateFilter(setDateTo)(e.target.value)} />
           {(dateFrom || dateTo) && (
             <button
               type="button"
               onClick={() => {
+                setPage(0);
                 setDateFrom("");
                 setDateTo("");
               }}
@@ -285,7 +308,21 @@ export function LeadsPage() {
           </table>
         )}
       </Card>
-      {data && <p className="text-xs text-gray-400">{data.total} total</p>}
+      {data && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            {total === 0 ? "0 total" : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} of ${total}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+              Previous
+            </Button>
+            <Button variant="secondary" onClick={() => setPage((p) => p + 1)} disabled={!hasNextPage}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
