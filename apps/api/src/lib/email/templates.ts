@@ -63,7 +63,7 @@ export function wrapEmailHtml(bodyHtml: string, unsubscribeUrl: string): string 
   return (
     `<div style="font-family: -apple-system, sans-serif; font-size: 15px; line-height: 1.5; color: #1a1a1a; max-width: 600px;">` +
     `${bodyHtml}` +
-    `<hr style="border: none; border-top: 1px solid #e5e5e5; margin: 24px 0 12px;" />` +
+    `<hr style="border: none; border-top: 1px solid #dce3e8; margin: 24px 0 12px;" />` +
     `<p style="font-size: 12px; color: #888;">${physicalAddress()}<br/>` +
     `<a href="${unsubscribeUrl}" style="color: #888;">Unsubscribe</a> from future emails.</p>` +
     `</div>`
@@ -88,28 +88,28 @@ export function renderOrderReceivedEmail(firstName: string, unsubscribeUrl: stri
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .steps-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 26px 28px; margin: 0 0 26px 0; }
-  .step-row { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #4a4038; margin: 0 0 16px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .steps-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 26px 28px; margin: 0 0 26px 0; }
+  .step-row { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #3e4a56; margin: 0 0 16px 0; }
   .step-row:last-child { margin-bottom: 0; }
-  .step-number { display: inline-block; width: 22px; height: 22px; background-color: #b8935a; color: #fffdf9; border-radius: 50%; text-align: center; line-height: 22px; font-weight: bold; font-size: 12px; margin-right: 8px; }
-  .step-title { color: #2b2420; font-weight: bold; }
+  .step-number { display: inline-block; width: 22px; height: 22px; background-color: #d9f26a; color: #1a2a38; border-radius: 50%; text-align: center; line-height: 22px; font-weight: bold; font-size: 12px; margin-right: 8px; }
+  .step-title { color: #1a2a38; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -182,26 +182,26 @@ export function renderRefillOrderReceivedEmail(firstName: string, unsubscribeUrl
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .status-box { background-color: #2b2420; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
-  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .status-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #d4af6a; margin: 0; font-weight: 500; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .status-box { background-color: #1a2a38; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
+  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .status-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #ffffff; margin: 0; font-weight: 500; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -270,31 +270,31 @@ export function renderPrescriptionWrittenEmail(firstName: string, unsubscribeUrl
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .status-box { background-color: #2b2420; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
-  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .status-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .steps-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 26px 28px; margin: 0 0 26px 0; }
-  .step-row { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #4a4038; margin: 0 0 16px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .status-box { background-color: #1a2a38; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
+  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .status-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #ffffff; margin: 0; font-weight: 500; }
+  .steps-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 26px 28px; margin: 0 0 26px 0; }
+  .step-row { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #3e4a56; margin: 0 0 16px 0; }
   .step-row:last-child { margin-bottom: 0; }
-  .step-number { display: inline-block; width: 22px; height: 22px; background-color: #b8935a; color: #fffdf9; border-radius: 50%; text-align: center; line-height: 22px; font-weight: bold; font-size: 12px; margin-right: 8px; }
-  .step-title { color: #2b2420; font-weight: bold; }
+  .step-number { display: inline-block; width: 22px; height: 22px; background-color: #d9f26a; color: #1a2a38; border-radius: 50%; text-align: center; line-height: 22px; font-weight: bold; font-size: 12px; margin-right: 8px; }
+  .step-title { color: #1a2a38; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -372,31 +372,31 @@ export function renderOrderShippedEmail(firstName: string, trackingNumber: strin
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .status-box { background-color: #2b2420; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
-  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .status-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .tracking-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 20px 24px; margin: 0 0 26px 0; }
-  .tracking-row { font-family: Arial, sans-serif; font-size: 14px; color: #4a4038; margin: 0 0 6px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .status-box { background-color: #1a2a38; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
+  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .status-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #ffffff; margin: 0; font-weight: 500; }
+  .tracking-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 26px 0; }
+  .tracking-row { font-family: Arial, sans-serif; font-size: 14px; color: #3e4a56; margin: 0 0 6px 0; }
   .tracking-row:last-child { margin-bottom: 0; }
-  .tracking-label { color: #948a7c; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; display: block; margin-bottom: 2px; }
-  .tracking-value { color: #2b2420; font-weight: bold; }
+  .tracking-label { color: #7c8a96; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; display: block; margin-bottom: 2px; }
+  .tracking-value { color: #1a2a38; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -483,24 +483,24 @@ export function renderPaymentFailedFirstOrderEmail(firstName: string, unsubscrib
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .status-box { background-color: #2b2420; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
-  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .status-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .status-box { background-color: #1a2a38; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
+  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .status-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #ffffff; margin: 0; font-weight: 500; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -563,24 +563,24 @@ export function renderPaymentFailedRecurringEmail(firstName: string, unsubscribe
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .status-box { background-color: #2b2420; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
-  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .status-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .status-box { background-color: #1a2a38; border-radius: 4px; padding: 26px 24px; margin: 0 0 26px 0; text-align: center; }
+  .status-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .status-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #ffffff; margin: 0; font-weight: 500; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -651,27 +651,27 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .price-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
-  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #2b2420; margin: 0 0 8px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .price-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
+  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #1a2a38; margin: 0 0 8px 0; }
   .price-row:last-child { margin-bottom: 0; }
-  .price-value { color: #b8935a; font-weight: bold; }
+  .price-value { color: #3e6f8e; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -745,30 +745,30 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .expiry-box { background-color: #2b2420; border-radius: 4px; padding: 22px 24px; margin: 0 0 24px 0; text-align: center; }
-  .expiry-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin: 0 0 8px 0; }
-  .expiry-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 24px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .price-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
-  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #2b2420; margin: 0 0 8px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .expiry-box { background-color: #1a2a38; border-radius: 4px; padding: 22px 24px; margin: 0 0 24px 0; text-align: center; }
+  .expiry-label { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin: 0 0 8px 0; }
+  .expiry-value { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 24px; color: #ffffff; margin: 0; font-weight: 500; }
+  .price-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
+  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #1a2a38; margin: 0 0 8px 0; }
   .price-row:last-child { margin-bottom: 0; }
-  .price-value { color: #b8935a; font-weight: bold; }
+  .price-value { color: #3e6f8e; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -845,29 +845,29 @@ export function renderAbandonedCartEducationalEmail(firstName: string, ctaUrl: s
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .quote-box { background-color: #f5f1ea; border-left: 3px solid #b8935a; padding: 18px 22px; margin: 0 0 24px 0; }
-  .quote-text { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-size: 17px; line-height: 25px; color: #2b2420; margin: 0; }
-  .price-box { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
-  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #2b2420; margin: 0 0 8px 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .quote-box { background-color: #eef2f5; border-left: 3px solid #3e6f8e; padding: 18px 22px; margin: 0 0 24px 0; }
+  .quote-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-style: italic; font-size: 17px; line-height: 25px; color: #1a2a38; margin: 0; }
+  .price-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
+  .price-row { font-family: Arial, sans-serif; font-size: 15px; color: #1a2a38; margin: 0 0 8px 0; }
   .price-row:last-child { margin-bottom: 0; }
-  .price-value { color: #b8935a; font-weight: bold; }
+  .price-value { color: #3e6f8e; font-weight: bold; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
@@ -947,28 +947,28 @@ export function renderAbandonedCartPlanComparisonEmail(firstName: string, ctaUrl
 </noscript>
 <![endif]-->
 <style>
-  body, table, td { font-family: 'Georgia', 'Times New Roman', serif; }
-  body { margin: 0; padding: 0; background-color: #f5f1ea; }
-  .email-wrapper { width: 100%; background-color: #f5f1ea; padding: 40px 0; }
-  .email-container { max-width: 600px; margin: 0 auto; background-color: #fffdf9; border: 1px solid #e8dfd0; }
-  .header { background-color: #2b2420; padding: 36px 40px; text-align: center; }
-  .logo-text { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #d4af6a; margin: 0; font-weight: 500; }
-  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #cbbfa8; text-transform: uppercase; margin-top: 6px; }
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
   .body-content { padding: 44px 40px 20px 40px; }
-  .greeting { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 26px; color: #2b2420; margin: 0 0 22px 0; font-weight: 500; }
-  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #4a4038; margin: 0 0 20px 0; }
-  .section-heading { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 20px; color: #2b2420; margin: 30px 0 14px 0; font-weight: 500; }
-  .plan-card { background-color: #f5f1ea; border: 1px solid #e8dfd0; border-radius: 4px; padding: 20px 24px; margin: 0 0 16px 0; }
-  .plan-name { font-family: Arial, sans-serif; font-size: 16px; color: #2b2420; font-weight: bold; margin: 0 0 6px 0; }
-  .plan-price { font-family: Arial, sans-serif; font-size: 15px; color: #b8935a; font-weight: bold; margin: 0 0 8px 0; }
-  .plan-desc { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #4a4038; margin: 0; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .section-heading { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 20px; color: #1a2a38; margin: 30px 0 14px 0; font-weight: 500; }
+  .plan-card { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 16px 0; }
+  .plan-name { font-family: Arial, sans-serif; font-size: 16px; color: #1a2a38; font-weight: bold; margin: 0 0 6px 0; }
+  .plan-price { font-family: Arial, sans-serif; font-size: 15px; color: #3e6f8e; font-weight: bold; margin: 0 0 8px 0; }
+  .plan-desc { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #3e4a56; margin: 0; }
   .cta-wrapper { text-align: center; margin: 32px 0; }
-  .cta-button { display: inline-block; background-color: #b8935a; color: #fffdf9; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
-  .divider { border: none; border-top: 1px solid #e8dfd0; margin: 30px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
   .footer { padding: 28px 40px 40px 40px; text-align: center; }
-  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #948a7c; margin: 4px 0; }
-  .footer-phone { color: #b8935a; text-decoration: none; font-weight: bold; }
-  a { color: #b8935a; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
 </style>
 </head>
 <body>
