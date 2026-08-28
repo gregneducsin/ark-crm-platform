@@ -14,6 +14,7 @@ import type {
   BaskOrderWebhookRequest,
   BaskQuestionnaireWebhookRequest,
   BaskPaymentFailedWebhookRequest,
+  BaskPaymentSucceededWebhookRequest,
   BaskPrescriptionWrittenWebhookRequest,
   BaskOrderShippedWebhookRequest,
 } from "@luma/shared";
@@ -491,6 +492,62 @@ export async function handleBaskPaymentFailedWebhook(payload: BaskPaymentFailedW
       }
     } else {
       logger.warn({ transactionId: payload.transactionId }, "payment-failed webhook: could not resolve a customer — recorded for reporting only");
+    }
+
+    await markWebhookEventProcessed(recorded.id, customerId);
+  } catch (err) {
+    await markWebhookEventFailed(recorded.id, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+  return { duplicate: false };
+}
+
+/**
+ * Confirms a payment succeeded on an existing order — a retry after a card
+ * update, or (less commonly) the normal first-attempt confirmation. Purely a
+ * data correction, no customer notification: if handleBaskPaymentFailedWebhook
+ * had earlier corrected the matching purchase to "payment_failed", this flips
+ * it back to "completed" and auto-resolves the corresponding
+ * failed_payment_events row, recording which purchase/transaction recovered
+ * it — the same recoveredPurchaseId/recoveredTransactionId columns the
+ * Failed Payments page's manual "Resolve" action leaves untouched, since a
+ * staff member resolving by hand isn't necessarily citing a specific
+ * transaction the way this webhook always can.
+ *
+ * A no-op (recorded for reporting only) when there's no matching purchase or
+ * no open failed-payment row — e.g. Bask sending this as routine
+ * confirmation for a payment that never failed in the first place.
+ */
+export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucceededWebhookRequest): Promise<{ duplicate: boolean }> {
+  const recorded = await recordWebhookEventIfNew("bask_payment_succeeded", payload.eventId, payload);
+  if (!recorded) return { duplicate: true };
+
+  try {
+    const customerId = await tryFindCustomerByExternalIdentityOrEmail("bask", payload.externalPersonId, payload.email);
+
+    if (customerId) {
+      const [purchase] = await db
+        .select({ id: purchasesTable.id, status: purchasesTable.status })
+        .from(purchasesTable)
+        .where(and(eq(purchasesTable.customerId, customerId), eq(purchasesTable.ecommerceOrderId, payload.transactionId)));
+
+      if (purchase && purchase.status === "payment_failed") {
+        await db.update(purchasesTable).set({ status: "completed" }).where(eq(purchasesTable.id, purchase.id));
+
+        await db
+          .update(failedPaymentEventsTable)
+          .set({
+            resolutionStatus: "resolved",
+            resolvedAt: new Date(),
+            recoveredPurchaseId: purchase.id,
+            recoveredTransactionId: payload.transactionId,
+          })
+          .where(and(eq(failedPaymentEventsTable.transactionId, payload.transactionId), eq(failedPaymentEventsTable.resolutionStatus, "open")));
+      } else if (!purchase) {
+        logger.warn({ customerId, transactionId: payload.transactionId }, "payment-succeeded webhook: no matching purchase found — recorded for reporting only");
+      }
+    } else {
+      logger.warn({ transactionId: payload.transactionId }, "payment-succeeded webhook: could not resolve a customer — recorded for reporting only");
     }
 
     await markWebhookEventProcessed(recorded.id, customerId);

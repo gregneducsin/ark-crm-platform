@@ -7,6 +7,7 @@ const GHL_SECRET = "test-ghl-secret";
 const ORDER_SECRET = "test-order-secret";
 const QUESTIONNAIRE_SECRET = "test-questionnaire-secret";
 const PAYMENT_FAILED_SECRET = "test-payment-failed-secret";
+const PAYMENT_SUCCEEDED_SECRET = "test-payment-succeeded-secret";
 const PRESCRIPTION_WRITTEN_SECRET = "test-prescription-written-secret";
 const ORDER_SHIPPED_SECRET = "test-order-shipped-secret";
 const IBLUSEND_SECRET = "test-iblusend-secret";
@@ -26,6 +27,7 @@ describe("Webhooks", () => {
     process.env.ORDER_WEBHOOK_SECRET = ORDER_SECRET;
     process.env.QUESTIONNAIRE_WEBHOOK_SECRET = QUESTIONNAIRE_SECRET;
     process.env.FAILED_PAYMENT_WEBHOOK_SECRET = PAYMENT_FAILED_SECRET;
+    process.env.PAYMENT_SUCCEEDED_WEBHOOK_SECRET = PAYMENT_SUCCEEDED_SECRET;
     process.env.PRESCRIPTION_WRITTEN_WEBHOOK_SECRET = PRESCRIPTION_WRITTEN_SECRET;
     process.env.ORDER_SHIPPED_WEBHOOK_SECRET = ORDER_SHIPPED_SECRET;
     process.env.IBLUSEND_WEBHOOK_SECRET = IBLUSEND_SECRET;
@@ -1040,6 +1042,156 @@ describe("Webhooks", () => {
       const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
       expect(purchases).toHaveLength(0);
       expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Bask payment-succeeded", () => {
+    it("records the event, linking to a matched customer when found", async () => {
+      const { db, customersTable, externalIdentitiesTable, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Succeed", lastName: "Payment", email: "succeedpay@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-ps1" });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({
+          eventId: "bask-ps-evt-1",
+          transactionId: "txn-ps-1",
+          externalPersonId: "bask-person-ps1",
+          amount: "49.99",
+        });
+      expect(res.status).toBe(200);
+
+      const [event] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, "bask-ps-evt-1"));
+      expect(event.personId).toBe(customer!.id);
+      expect(event.status).toBe("processed");
+    });
+
+    it("flips a payment_failed purchase back to completed and auto-resolves the matching Failed Payments row, recording the recovery", async () => {
+      const { db, customersTable, purchasesTable, failedPaymentEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      // Order lands (marks completed) → payment fails (corrects to
+      // payment_failed, records a failed_payment_events row) → payment
+      // succeeds on a retry (this test) — the same round trip a real
+      // declined-then-updated card would produce.
+      await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          eventId: "bask-order-evt-ps-recover",
+          externalPersonId: "bask-person-ps-recover",
+          email: "ps-recover@example.com",
+          firstName: "Recover",
+          lastName: "Payment",
+          phone: "+15551110102",
+          orderId: "BASK-PS-RECOVER",
+          productName: "Program",
+          amountPaid: 199,
+          purchasedAt: "2026-02-01T10:00:00.000Z",
+          transactionId: "txn-ps-recover",
+        });
+
+      sendMessageMock.mockClear();
+      sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_payment_failed_ps_recover" });
+      await request(app)
+        .post("/api/webhooks/bask-payment-failed")
+        .set("x-webhook-secret", PAYMENT_FAILED_SECRET)
+        .send({
+          eventId: "bask-fp-evt-ps-recover",
+          transactionId: "txn-ps-recover",
+          externalPersonId: "bask-person-ps-recover",
+          amount: "199.00",
+          failureDate: new Date().toISOString(),
+        });
+
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "ps-recover@example.com"));
+      const [failedRow] = await db.select().from(failedPaymentEventsTable).where(eq(failedPaymentEventsTable.transactionId, "txn-ps-recover"));
+      expect(failedRow.resolutionStatus).toBe("open");
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({
+          eventId: "bask-ps-evt-recover",
+          transactionId: "txn-ps-recover",
+          externalPersonId: "bask-person-ps-recover",
+          amount: "199.00",
+        });
+      expect(res.status).toBe(200);
+
+      const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchase.status).toBe("completed");
+
+      const [resolvedRow] = await db.select().from(failedPaymentEventsTable).where(eq(failedPaymentEventsTable.id, failedRow.id));
+      expect(resolvedRow.resolutionStatus).toBe("resolved");
+      expect(resolvedRow.resolvedAt).toBeTruthy();
+      expect(resolvedRow.recoveredPurchaseId).toBe(purchase.id);
+      expect(resolvedRow.recoveredTransactionId).toBe("txn-ps-recover");
+    });
+
+    it("does not send any customer notification — purely a data correction", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Silent", lastName: "Recover", email: "ps-silent@example.com", phone: "+15551110103", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-ps-silent" });
+      await db.insert(purchasesTable).values({
+        customerId: customer!.id,
+        purchaseDate: "2026-02-01",
+        orderNumber: "BASK-PS-SILENT",
+        productName: "Program",
+        amountPaid: "199.00",
+        status: "payment_failed",
+        ecommerceOrderId: "txn-ps-silent",
+        orderClassification: "first_order",
+        orderClassificationSource: "manual",
+      });
+
+      sendMessageMock.mockClear();
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({
+          eventId: "bask-ps-evt-silent",
+          transactionId: "txn-ps-silent",
+          externalPersonId: "bask-person-ps-silent",
+          amount: "199.00",
+        });
+      expect(res.status).toBe(200);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it("leaves everything untouched and does not crash when no matching purchase is found", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "No", lastName: "MatchingSucceeded", email: "ps-nomatch@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-ps-nomatch" });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({
+          eventId: "bask-ps-evt-nomatch",
+          transactionId: "txn-ps-nomatch-does-not-exist",
+          externalPersonId: "bask-person-ps-nomatch",
+          amount: "49.99",
+        });
+      expect(res.status).toBe(200);
+
+      const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchases).toHaveLength(0);
     });
   });
 

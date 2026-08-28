@@ -33,6 +33,7 @@ import { createGhlLeadWebhookRouter } from "./routes/webhooks/ghl-lead.routes.js
 import { createBaskOrderWebhookRouter } from "./routes/webhooks/bask-order.routes.js";
 import { createBaskQuestionnaireWebhookRouter } from "./routes/webhooks/bask-questionnaire.routes.js";
 import { createBaskPaymentFailedWebhookRouter } from "./routes/webhooks/bask-payment-failed.routes.js";
+import { createBaskPaymentSucceededWebhookRouter } from "./routes/webhooks/bask-payment-succeeded.routes.js";
 import { createBaskPrescriptionWrittenWebhookRouter } from "./routes/webhooks/bask-prescription-written.routes.js";
 import { createBaskOrderShippedWebhookRouter } from "./routes/webhooks/bask-order-shipped.routes.js";
 import { createIbluSendMessageWebhookRouter } from "./routes/webhooks/iblusend-message.routes.js";
@@ -121,6 +122,7 @@ export function createApp(): Express {
   app.use("/api/webhooks/bask-order", createBaskOrderWebhookRouter());
   app.use("/api/webhooks/bask-questionnaire", createBaskQuestionnaireWebhookRouter());
   app.use("/api/webhooks/bask-payment-failed", createBaskPaymentFailedWebhookRouter());
+  app.use("/api/webhooks/bask-payment-succeeded", createBaskPaymentSucceededWebhookRouter());
   app.use("/api/webhooks/bask-prescription-written", createBaskPrescriptionWrittenWebhookRouter());
   app.use("/api/webhooks/bask-order-shipped", createBaskOrderShippedWebhookRouter());
   app.use("/api/webhooks/iblusend-message", createIbluSendMessageWebhookRouter());

@@ -16,6 +16,7 @@ export const webhookEventsTable = pgTable(
         "bask_order",
         "bask_questionnaire",
         "bask_payment_failed",
+        "bask_payment_succeeded",
         "bask_prescription_written",
         "bask_order_shipped",
         "iblusend_message",

@@ -102,6 +102,24 @@ export const baskPaymentFailedWebhookRequestSchema = z.object({
 });
 export type BaskPaymentFailedWebhookRequest = z.infer<typeof baskPaymentFailedWebhookRequestSchema>;
 
+// ── Bask payment-succeeded webhook ──────────────────────────────────────────────
+//
+// Confirms a previously-failed (or first-attempt) payment on an existing
+// order has now gone through — e.g. a retry after the customer updated
+// their card. Same field shape as bask-payment-failed minus the
+// failure-specific fields, correlated the same way (transactionId against
+// purchases.ecommerceOrderId).
+
+export const baskPaymentSucceededWebhookRequestSchema = z.object({
+  eventId: z.string().min(1),
+  transactionId: z.string().min(1),
+  externalPersonId: z.string().min(1),
+  email: z.string().email().optional(),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  succeededAt: z.string().datetime().optional(),
+});
+export type BaskPaymentSucceededWebhookRequest = z.infer<typeof baskPaymentSucceededWebhookRequestSchema>;
+
 // ── Bask prescription-written webhook ──────────────────────────────────────────
 //
 // SPECULATIVE — designed from Bask's raw trigger field labels (Data Patient
