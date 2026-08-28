@@ -47,4 +47,32 @@ describe("notifySlack", () => {
 
     await expect(notifySlack("hello")).resolves.toBeUndefined();
   });
+
+  it("truncates a message past Slack's block-text limit instead of letting the workflow step silently fail", async () => {
+    process.env.SLACK_WEBHOOK_URL = "https://hooks.slack.com/triggers/T000/1/abc";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // A raw Postgres/SMTP error message forwarded verbatim can easily run
+    // past Slack's 3000-character section-text cap — this is exactly what
+    // was silently dropping alerts with an opaque "Input validation error /
+    // invalid_blocks" in the Workflow Builder step, with nothing showing up
+    // in our own logs since the webhook POST itself always succeeds.
+    const longMessage = "x".repeat(5000);
+    await notifySlack(longMessage);
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body).message as string;
+    expect(sent.length).toBeLessThan(3000);
+    expect(sent.endsWith("… (truncated)")).toBe(true);
+  });
+
+  it("leaves a short message untouched", async () => {
+    process.env.SLACK_WEBHOOK_URL = "https://hooks.slack.com/triggers/T000/1/abc";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await notifySlack("short message");
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ message: "short message" });
+  });
 });
