@@ -25,9 +25,26 @@ export function createAuthLimiter(): RateLimitRequestHandler {
 export function createGeneralLimiter(): RateLimitRequestHandler {
   return rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 300,
+    // 300 sounded generous until accounting for what the app itself
+    // generates in the background: Layout renders three 15s-interval polls
+    // (needs-attention, unmatched emails, unmatched sms) on every page for
+    // every staff member who can see them — 12 requests/min from a single
+    // idle tab before any manual navigation, and Support's list/detail polls
+    // (8s/4s) add far more while open. One active staff member alone can
+    // exhaust 300 in under half an hour; a handful of staff sharing one
+    // office/VPN IP exhaust it in minutes. Once exhausted, every API call
+    // from that IP 429s — including the CSRF-token fetch that gates login,
+    // so a saturated shared IP could lock everyone on it out of the app
+    // entirely. Raised to a budget sized for real multi-staff polling load,
+    // not just a handful of manual clicks.
+    limit: 5000,
     standardHeaders: true,
     legacyHeaders: false,
+    // Belt-and-suspenders on top of the raised limit above: even if this
+    // budget is somehow still exhausted, login must stay reachable — these
+    // two are the calls every page load makes before anything else, they're
+    // cheap, safe, GET-only, and have no side effects worth limiting.
+    skip: (req) => req.path === "/api/app/auth/csrf-token" || req.path === "/api/app/auth/me",
   });
 }
 
