@@ -96,7 +96,12 @@ export async function markWebhookEventFailed(id: string, errorMessage: string): 
     .where(eq(webhookEventsTable.id, id))
     .returning({ source: webhookEventsTable.source });
   if (row) {
-    void notifySlack(`Webhook processing failed (${row.source}): ${errorMessage}`);
+    // Short and identifier-only, not the raw error — errorMessage is
+    // already stored on the webhook_events row and captured by the caller's
+    // own structured logging; Slack is a ping to go look, not the full
+    // diagnostic dump (which could also be arbitrarily long, e.g. a raw
+    // Postgres error's multi-line detail/hint text).
+    void notifySlack(`Webhook failed — ${row.source}`);
   }
 }
 

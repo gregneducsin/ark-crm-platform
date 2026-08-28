@@ -13,6 +13,7 @@ import { processInboundEmail } from "./alexis-email-dispatch.service.js";
 import { getOrCreateEmailConversation, appendEmailMessage } from "./email-conversations.service.js";
 import { normalizePhone } from "../lib/phone.js";
 import { logger } from "../lib/logger.js";
+import { notifySlack } from "../lib/slack.js";
 
 /**
  * What used to happen to an inbound email from an address matching no
@@ -401,6 +402,9 @@ export async function recordAndClassifyUnmatchedEmail(input: {
 
   const priorMessages = await listUnmatchedEmailMessages(thread.id);
   const isFirstMessage = priorMessages.length === 0;
+  if (isFirstMessage) {
+    void notifySlack(`New unmatched email — ${input.fromAddress}`);
+  }
 
   await db.insert(unmatchedEmailMessagesTable).values({
     threadId: thread.id,

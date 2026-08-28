@@ -82,7 +82,12 @@ function withFailureAlert(provider: SmsProvider): SmsProvider {
       try {
         return await provider.sendMessage(to, body);
       } catch (err) {
-        void notifySlack(`SMS send failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Short and identifier-only, not the raw provider error — the full
+        // reason is already in the structured logger.warn at the call site;
+        // Slack is a ping to go look, not a dump of the error itself (a
+        // verbose provider error was also what tripped Slack's own
+        // block-text length limit before notifySlack started truncating).
+        void notifySlack(`SMS send failed — ${to}`);
         throw err;
       }
     },

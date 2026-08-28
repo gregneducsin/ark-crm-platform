@@ -21,6 +21,9 @@ vi.mock("../lib/sms-provider.js", async () => {
   return { ...actual, getSmsProvider: () => ({ sendMessage: sendMessageMock }) };
 });
 
+const notifySlackMock = vi.fn();
+vi.mock("../lib/slack.js", () => ({ notifySlack: (...args: unknown[]) => notifySlackMock(...args) }));
+
 // Handoff-after-lead-creation is tested here only as "was processInboundMessage
 // called with the right args" — Alexis's actual pipeline (its own Claude call,
 // guardrails, sending) is covered by alexis-dispatch.service.test.ts.
@@ -84,6 +87,7 @@ beforeEach(() => {
   sendMessageMock.mockClear();
   processInboundMessageMock.mockClear();
   processInboundSupportMessageMock.mockClear();
+  notifySlackMock.mockClear();
 });
 
 describe("recordAndClassifyUnmatchedSms", () => {
@@ -136,6 +140,20 @@ describe("recordAndClassifyUnmatchedSms", () => {
     const secondCallUserContent = createMock.mock.calls[1][0].messages[0].content as string;
     expect(secondCallUserContent).toContain("Question one.");
     expect(secondCallUserContent).toContain("Question two.");
+  });
+
+  it("alerts Slack on the first message from a new unmatched number, but not on a second message in the same thread", async () => {
+    const phone = uniquePhone();
+
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedSms(phone, "hi");
+    expect(notifySlackMock).toHaveBeenCalledTimes(1);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/New unmatched SMS/);
+
+    notifySlackMock.mockClear();
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedSms(phone, "second message");
+    expect(notifySlackMock).not.toHaveBeenCalled();
   });
 
   it("resurfaces a dismissed thread (resets status to needs_review) when a new message arrives", async () => {

@@ -22,6 +22,9 @@ vi.mock("../lib/email-provider.js", async () => {
   return { ...actual, getEmailProvider: () => ({ provider: { sendEmail: sendEmailMock }, fromName: "Alexis at Ark Health" }) };
 });
 
+const notifySlackMock = vi.fn();
+vi.mock("../lib/slack.js", () => ({ notifySlack: (...args: unknown[]) => notifySlackMock(...args) }));
+
 // Handoff-after-lead-creation is tested here only as "was processInboundEmail
 // called with the right args" — Alexis's actual pipeline (its own Claude call,
 // guardrails, sending) is covered by alexis-email-dispatch.service.test.ts.
@@ -74,6 +77,7 @@ beforeEach(() => {
   createMock.mockClear();
   sendEmailMock.mockClear();
   processInboundEmailMock.mockClear();
+  notifySlackMock.mockClear();
 });
 
 describe("recordAndClassifyUnmatchedEmail", () => {
@@ -125,6 +129,20 @@ describe("recordAndClassifyUnmatchedEmail", () => {
     const secondCallUserContent = createMock.mock.calls[1][0].messages[0].content as string;
     expect(secondCallUserContent).toContain("Question one.");
     expect(secondCallUserContent).toContain("Question two.");
+  });
+
+  it("alerts Slack on the first email from a new unmatched address, but not on a second email in the same thread", async () => {
+    const fromAddress = uniqueAddress("slack-alert");
+
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedEmail({ fromAddress, fromName: null, subject: "Hi", body: "hello", messageId: "<slack-1@example.com>" });
+    expect(notifySlackMock).toHaveBeenCalledTimes(1);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/New unmatched email/);
+
+    notifySlackMock.mockClear();
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedEmail({ fromAddress, fromName: null, subject: "Follow up", body: "again", messageId: "<slack-2@example.com>" });
+    expect(notifySlackMock).not.toHaveBeenCalled();
   });
 
   it("resurfaces a dismissed thread (resets status to needs_review) when a new message arrives", async () => {

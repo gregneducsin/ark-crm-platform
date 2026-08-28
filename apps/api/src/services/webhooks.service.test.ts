@@ -6,7 +6,7 @@ vi.mock("../lib/slack.js", () => ({ notifySlack: (...args: unknown[]) => notifyS
 const { recordWebhookEventIfNew, markWebhookEventFailed } = await import("./webhooks.service.js");
 
 describe("markWebhookEventFailed", () => {
-  it("alerts Slack with the event's source and the error message", async () => {
+  it("alerts Slack with the event's source, not the raw error message", async () => {
     notifySlackMock.mockClear();
     const recorded = await recordWebhookEventIfNew("bask_order", `evt-${crypto.randomUUID()}`, { foo: "bar" });
 
@@ -15,7 +15,10 @@ describe("markWebhookEventFailed", () => {
     expect(notifySlackMock).toHaveBeenCalledTimes(1);
     const [message] = notifySlackMock.mock.calls[0];
     expect(message).toContain("bask_order");
-    expect(message).toContain("something went wrong");
+    // The raw error goes to structured logs and the webhook_events row, not
+    // Slack — a verbose provider/Postgres error is what was tripping
+    // Slack's own block-text length validation before this got shortened.
+    expect(message).not.toContain("something went wrong");
   });
 
   it("tags the alert with whichever source actually failed", async () => {

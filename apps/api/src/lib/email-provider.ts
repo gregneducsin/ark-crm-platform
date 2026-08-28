@@ -250,7 +250,9 @@ function withFailureAlert(provider: EmailProvider): EmailProvider {
       try {
         return await provider.sendEmail(to, subject, html, opts);
       } catch (err) {
-        void notifySlack(`Email send failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Short and identifier-only, not the raw provider error — see
+        // sms-provider.ts's withFailureAlert for the same reasoning.
+        void notifySlack(`Email send failed — ${to}`);
         throw err;
       }
     },

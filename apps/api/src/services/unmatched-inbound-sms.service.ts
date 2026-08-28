@@ -8,6 +8,7 @@ import { processInboundSupportMessage } from "./sophie-dispatch.service.js";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { getOrCreateSupportConversation, appendSupportMessage } from "./support-conversations.service.js";
 import { logger } from "../lib/logger.js";
+import { notifySlack } from "../lib/slack.js";
 
 /**
  * SMS twin of unmatched-inbound-email.service.ts. What used to happen to a
@@ -555,6 +556,9 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
 
   const priorMessages = await listUnmatchedSmsMessages(thread.id);
   const isFirstMessage = priorMessages.length === 0;
+  if (isFirstMessage) {
+    void notifySlack(`New unmatched SMS — ${normalizedPhone}`);
+  }
 
   await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "inbound", body });
 
