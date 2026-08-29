@@ -161,6 +161,7 @@ export async function sweepAbandonedCartEmailTriggers(): Promise<AbandonedCartEm
 
     const [customer] = await db.select({ firstName: customersTable.firstName, email: customersTable.email }).from(customersTable).where(eq(customersTable.id, trigger.personId));
     if (!customer) {
+      logger.warn({ personId: trigger.personId, step }, "abandoned-cart email: trigger references a customer that no longer exists");
       await db.update(abandonedCartEmailTriggersTable).set({ status: "failed", failureReason: "CUSTOMER_NOT_FOUND" }).where(eq(abandonedCartEmailTriggersTable.id, trigger.id));
       failedCount++;
       continue;

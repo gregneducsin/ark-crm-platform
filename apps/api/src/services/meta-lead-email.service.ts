@@ -144,6 +144,7 @@ export async function sweepMetaLeadEmailTriggers(): Promise<MetaLeadEmailSweepRe
 
     const [customer] = await db.select({ firstName: customersTable.firstName, email: customersTable.email }).from(customersTable).where(eq(customersTable.id, trigger.personId));
     if (!customer) {
+      logger.warn({ personId: trigger.personId, step }, "meta-lead email: trigger references a customer that no longer exists");
       await db.update(metaLeadEmailTriggersTable).set({ status: "failed", failureReason: "CUSTOMER_NOT_FOUND" }).where(eq(metaLeadEmailTriggersTable.id, trigger.id));
       failedCount++;
       continue;
