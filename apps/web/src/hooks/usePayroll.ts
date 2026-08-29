@@ -15,10 +15,11 @@ import { api } from "../lib/apiClient";
 
 // ── Employees ────────────────────────────────────────────────────────────────
 
-export function useEmployees() {
+export function useEmployees(enabled = true) {
   return useQuery({
     queryKey: ["employees", "list"],
     queryFn: () => api.get<{ employees: Employee[] }>("/api/app/payroll/employees"),
+    enabled,
   });
 }
 
@@ -40,10 +41,11 @@ export function useUpdateEmployee(id: string) {
 
 // ── Payroll weeks ────────────────────────────────────────────────────────────
 
-export function usePayrollWeeks() {
+export function usePayrollWeeks(enabled = true) {
   return useQuery({
     queryKey: ["payrollWeeks", "list"],
     queryFn: () => api.get<{ weeks: PayrollWeek[] }>("/api/app/payroll/weeks"),
+    enabled,
   });
 }
 

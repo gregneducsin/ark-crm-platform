@@ -9,7 +9,7 @@ import { Button, Badge } from "./ui";
 import { AiAssistantWidget } from "./AiAssistantWidget";
 
 const NAV_ITEMS: readonly { href: string; label: string; roles: readonly AuthUser["role"][] }[] = [
-  { href: "/", label: "Dashboard", roles: ["admin"] },
+  { href: "/", label: "Dashboard", roles: ["admin", "manager", "customer_service"] },
   { href: "/needs-attention", label: "Needs Attention", roles: ["admin", "customer_service"] },
   { href: "/unmatched-contacts", label: "Unmatched Contacts", roles: ["admin", "customer_service"] },
   { href: "/customers", label: "Leads", roles: ["admin", "manager"] },

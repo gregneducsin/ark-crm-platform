@@ -158,16 +158,16 @@ export function DashboardPage() {
   const [customTo, setCustomTo] = useState("");
   const range = preset === "custom" ? (customFrom && customTo ? { from: customFrom, to: customTo } : undefined) : presetToRange(preset);
 
-  const { data: employeesData } = useEmployees();
-  const { data: weeksData } = usePayrollWeeks();
   const { data: currentUser } = useCurrentUser();
   // Matches the real /needs-attention route guard (App.tsx, Layout.tsx) —
   // admin + customer_service, not manager, whose scope is payroll/Leads/Orders.
   const canSeeNeedsAttention = currentUser?.user?.role === "admin" || currentUser?.user?.role === "customer_service";
-  // Matches /api/app/reporting/funnel's own role gate (same as
-  // /api/app/customers, which the Leads/Revenue figures used to come from).
+  // Matches /api/app/reporting/funnel's own role gate, and /payroll/*'s route
+  // guard in App.tsx — manager has both, customer_service has neither.
   const canSeeFunnelStats = currentUser?.user?.role === "admin" || currentUser?.user?.role === "manager";
   const { data: funnelData } = useFunnelSummary(range, canSeeFunnelStats);
+  const { data: employeesData } = useEmployees(canSeeFunnelStats);
+  const { data: weeksData } = usePayrollWeeks(canSeeFunnelStats);
 
   const activeEmployees = employeesData?.employees.filter((e) => e.status === "active").length ?? 0;
   const draftWeeks = weeksData?.weeks.filter((w) => w.status === "draft").length ?? 0;
@@ -190,8 +190,8 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatCard label="Leads" value={canSeeFunnelStats ? (funnelData?.totalLeads ?? "…") : "—"} />
         <StatCard label="Revenue" value={canSeeFunnelStats ? `$${(funnelData?.revenue ?? 0).toFixed(2)}` : "—"} />
-        <StatCard label="Active employees" value={activeEmployees} />
-        <StatCard label="Draft payroll weeks" value={draftWeeks} />
+        <StatCard label="Active employees" value={canSeeFunnelStats ? activeEmployees : "—"} />
+        <StatCard label="Draft payroll weeks" value={canSeeFunnelStats ? draftWeeks : "—"} />
         <NeedsAttentionCard enabled={canSeeNeedsAttention} />
       </div>
       <FunnelSummaryCard range={range} enabled={canSeeFunnelStats} />
