@@ -2,12 +2,13 @@ import { Router, type Router as RouterType } from "express";
 import { loginRequestSchema, forgotPasswordRequestSchema, resetPasswordRequestSchema, acceptInvitationRequestSchema } from "@luma/shared";
 import * as authService from "../services/auth.service.js";
 import { issueCsrfCookieIfMissing, requireCsrf } from "../middleware/csrf.js";
-import { createAuthLimiter } from "../middleware/rateLimit.js";
+import { createAuthLimiter, createAuthAccountLimiter } from "../middleware/rateLimit.js";
 import { SESSION_COOKIE, SESSION_TTL_MS } from "../middleware/session.js";
 
 export function createAuthRouter(): RouterType {
   const router: RouterType = Router();
   const authLimiter = createAuthLimiter();
+  const authAccountLimiter = createAuthAccountLimiter();
 
   router.get("/csrf-token", (req, res) => {
     const csrfToken = issueCsrfCookieIfMissing(req, res);
@@ -18,7 +19,7 @@ export function createAuthRouter(): RouterType {
     res.json({ user: req.user });
   });
 
-  router.post("/login", authLimiter, requireCsrf, async (req, res, next) => {
+  router.post("/login", authLimiter, authAccountLimiter, requireCsrf, async (req, res, next) => {
     try {
       const parsed = loginRequestSchema.safeParse(req.body);
       if (!parsed.success) {

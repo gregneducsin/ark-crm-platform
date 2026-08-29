@@ -22,6 +22,30 @@ export function createAuthLimiter(): RateLimitRequestHandler {
   });
 }
 
+/**
+ * Keyed by the attempted email, not IP — the limiter above only budgets
+ * attempts per source IP, so an attacker spreading login guesses for one
+ * known account across many IPs (a botnet, a proxy pool) never trips it at
+ * all, no matter how many total attempts land. This closes that gap.
+ *
+ * Deliberately wider than the per-IP budget (10/15min) — this exists to
+ * catch a distributed attack, not to be the everyday lockout mechanism, so
+ * it shouldn't trip on a legitimate user who mistypes their password a
+ * handful of times from one place (the per-IP limiter above already covers
+ * that case tightly). Mounted on /login only — forgot/reset-password and
+ * accept-invitation aren't password-guessing surfaces.
+ */
+export function createAuthAccountLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many attempts. Please try again later." },
+    keyGenerator: (req) => (typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "unknown"),
+  });
+}
+
 export function createGeneralLimiter(): RateLimitRequestHandler {
   return rateLimit({
     windowMs: 15 * 60 * 1000,
