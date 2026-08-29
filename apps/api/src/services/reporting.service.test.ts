@@ -85,6 +85,49 @@ describe("getFunnelSummary", () => {
     expect(after.purchased).toBe(before.purchased);
     expect(after.revenue).toBe(before.revenue);
   });
+
+  it("scopes purchased/revenue by purchaseDate, not createdAt — a delayed webhook must not be missed or wrongly included", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const farPast = "2020-01-01";
+
+    const before = await getFunnelSummary({ from: yesterday, to: today });
+
+    // A retried/delayed webhook writes the row well after the date the sale
+    // actually happened on — purchaseDate is in range, createdAt isn't.
+    // This must still count, since purchaseDate governs.
+    const delayedWebhookCustomer = await seedCustomer();
+    await db.insert(purchasesTable).values({
+      customerId: delayedWebhookCustomer,
+      purchaseDate: today,
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Semaglutide",
+      amountPaid: "77.00",
+      status: "completed",
+      createdAt: new Date(farPast),
+    });
+
+    // The inverse — createdAt is in range, purchaseDate isn't — must NOT
+    // count, or this tile would disagree with the Orders tab (which scopes
+    // strictly by purchaseDate) for the same date range.
+    const backdatedPurchaseCustomer = await seedCustomer();
+    await db.insert(purchasesTable).values({
+      customerId: backdatedPurchaseCustomer,
+      purchaseDate: farPast,
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Semaglutide",
+      amountPaid: "888.00",
+      status: "completed",
+      createdAt: new Date(),
+    });
+
+    const after = await getFunnelSummary({ from: yesterday, to: today });
+    // Only the delayed-webhook purchase counts — if createdAt still
+    // governed, this would instead be +0 purchased/+0 revenue (missing the
+    // delayed one) or +2/+965 (wrongly including the backdated one).
+    expect(after.purchased).toBe(before.purchased + 1);
+    expect(after.revenue).toBe(before.revenue + 77);
+  });
 });
 
 describe("getMessageVolumeByChannel", () => {

@@ -9,8 +9,9 @@ import { db } from "@luma/db";
  * represents when that stage's event actually happened (a customer's own
  * leadReceivedDate for "leads," when a questionnaire row was created for
  * "started," when it was last updated while submitted for "submitted,"
- * when a purchase was recorded for "purchased"/"revenue") — not a single
- * shared column, since these are four different kinds of events.
+ * the purchase's own purchaseDate for "purchased"/"revenue" — matching how
+ * every other revenue figure in the app is scoped) — not a single shared
+ * column, since these are four different kinds of events.
  */
 export interface FunnelSummary {
   readonly totalLeads: number;
@@ -37,9 +38,12 @@ export async function getFunnelSummary(range?: DateRange): Promise<FunnelSummary
   const submittedWhere = range
     ? sql`WHERE status = 'submitted' AND updated_at >= ${range.from} AND updated_at < (${range.to}::date + 1)`
     : sql`WHERE status = 'submitted'`;
-  const purchasedWhere = range
-    ? sql`WHERE status = 'completed' AND created_at >= ${range.from} AND created_at < (${range.to}::date + 1)`
-    : sql`WHERE status = 'completed'`;
+  // purchase_date, not created_at — every other revenue/purchase figure in
+  // the app (Orders tab, Marketing CPA) scopes by purchase_date, and a
+  // webhook that's retried or delayed can insert a purchase row well after
+  // the date it actually happened on. Scoping by created_at here made this
+  // tile silently disagree with the Orders tab for the same date range.
+  const purchasedWhere = range ? sql`WHERE status = 'completed' AND purchase_date BETWEEN ${range.from} AND ${range.to}` : sql`WHERE status = 'completed'`;
 
   const [row] = await db.execute<{
     total_leads: string;
