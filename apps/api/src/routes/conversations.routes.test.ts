@@ -116,6 +116,19 @@ describe("Conversations", () => {
     expect(foundEmail.lastMessagePreview).toBe("yes I'm interested by email");
     expect(foundEmail.lastSentiment).toBe("positive");
     expect(emailListRes.body.stats).toBeDefined();
+
+    // A bare "ORDER BY ... DESC" sorts NULLs first in Postgres, which would
+    // put a zero-message email conversation ahead of the active one above —
+    // the opposite of "most recently active first". Reuses this test's
+    // login/customer setup rather than a fresh one (see rate-limiter note).
+    const emptyPersonId = await seedCustomer();
+    const emptyEmailConversation = await getOrCreateEmailConversation(emptyPersonId);
+    const afterEmailListRes = await agent.get("/api/app/conversations").query({ channel: "email" });
+    const activeIndex = afterEmailListRes.body.conversations.findIndex((c: { id: string }) => c.id === emailConversation.id);
+    const emptyIndex = afterEmailListRes.body.conversations.findIndex((c: { id: string }) => c.id === emptyEmailConversation.id);
+    expect(activeIndex).toBeGreaterThanOrEqual(0);
+    expect(emptyIndex).toBeGreaterThanOrEqual(0);
+    expect(activeIndex).toBeLessThan(emptyIndex);
   });
 
   it("returns conversation detail with customer contact and full message history", async () => {

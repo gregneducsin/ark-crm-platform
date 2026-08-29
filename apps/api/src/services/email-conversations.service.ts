@@ -197,7 +197,11 @@ export async function listEmailConversationSummaries(): Promise<EmailConversatio
     })
     .from(emailConversationsTable)
     .innerJoin(customersTable, eq(customersTable.id, emailConversationsTable.personId))
-    .orderBy(desc(sql`(select max(${emailConversationMessagesTable.createdAt}) from ${emailConversationMessagesTable} where ${emailConversationMessagesTable.conversationId} = ${emailConversationsTable.id})`));
+    // Postgres sorts NULLs FIRST on a bare DESC order — without "nulls last"
+    // every conversation with zero messages floats to the very top of "most
+    // recently active first", burying every real, active conversation below
+    // however many empty ones exist. That's the opposite of the intent.
+    .orderBy(sql`(select max(${emailConversationMessagesTable.createdAt}) from ${emailConversationMessagesTable} where ${emailConversationMessagesTable.conversationId} = ${emailConversationsTable.id}) desc nulls last`);
 
   return rows.map((r) => ({ ...r, lastSentiment: r.lastSentiment as EmailConversationSummary["lastSentiment"] }));
 }
