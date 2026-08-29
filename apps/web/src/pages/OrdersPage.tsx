@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { usePurchasesList, usePurchasesSummary } from "../hooks/useCustomers";
-import { Badge, Card } from "../components/ui";
+import { Badge, Button, Card } from "../components/ui";
 import type { PurchasesSummaryQuery, PurchaseWithCustomer } from "@luma/shared";
+
+const PAGE_SIZE = 50;
 
 const STATUS_COLOR: Record<string, "gray" | "green" | "yellow" | "red" | "blue"> = {
   completed: "green",
@@ -84,13 +86,29 @@ export function OrdersPage() {
   const [orderClassification, setOrderClassification] = useState("");
   const [status, setStatus] = useState<PurchaseWithCustomer["status"] | "">("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(0);
+
+  // Every filter/sort change resets to page 0 — otherwise narrowing or
+  // re-ordering the result set can strand the view on a now-nonexistent
+  // later page, which renders as "No orders found" even though matches
+  // exist on page 0.
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => {
+      setPage(0);
+      setter(v);
+    };
+  }
+
   const { data, isLoading } = usePurchasesList({
-    limit: 50,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
     orderClassification: (orderClassification || undefined) as "first_order" | "recurring" | undefined,
     status: status || undefined,
     sortBy: "purchaseDate",
     sortDir,
   });
+  const total = data?.total ?? 0;
+  const hasNextPage = (page + 1) * PAGE_SIZE < total;
 
   return (
     <div className="space-y-4">
@@ -102,7 +120,7 @@ export function OrdersPage() {
         <select
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
           value={orderClassification}
-          onChange={(e) => setOrderClassification(e.target.value)}
+          onChange={(e) => updateFilter(setOrderClassification)(e.target.value)}
         >
           <option value="">All Orders</option>
           <option value="first_order">New (first order)</option>
@@ -112,7 +130,7 @@ export function OrdersPage() {
         <select
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
           value={status}
-          onChange={(e) => setStatus(e.target.value as PurchaseWithCustomer["status"] | "")}
+          onChange={(e) => updateFilter(setStatus)(e.target.value as PurchaseWithCustomer["status"] | "")}
         >
           {STATUS_OPTIONS.map((o) => (
             <option key={o.label} value={o.value}>
@@ -124,7 +142,7 @@ export function OrdersPage() {
         <button
           type="button"
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          onClick={() => updateFilter(setSortDir)(sortDir === "asc" ? "desc" : "asc")}
           title="Sort by order date"
         >
           {sortDir === "asc" ? "Oldest first" : "Newest first"}
@@ -177,7 +195,21 @@ export function OrdersPage() {
           </table>
         )}
       </Card>
-      {data && <p className="text-xs text-gray-400">{data.total} total</p>}
+      {data && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            {total === 0 ? "0 total" : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} of ${total}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+              Previous
+            </Button>
+            <Button variant="secondary" onClick={() => setPage((p) => p + 1)} disabled={!hasNextPage}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

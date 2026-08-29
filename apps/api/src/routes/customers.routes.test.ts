@@ -635,7 +635,9 @@ describe("Purchases", () => {
     expect(reclassify.status).toBe(409);
   });
 
-  it("lists purchases across all customers with the customer's name attached", async () => {
+  it("lists purchases across all customers with the customer's name attached, with a stable order for same-date purchases", async () => {
+    // Shares one login for both concerns — the auth rate limiter caps
+    // logins per test file, and this file is already close to that cap.
     await seedUser("admin-orders@example.com", "admin");
     const { agent, csrf } = await loginAgent(app, "admin-orders@example.com");
 
@@ -648,16 +650,37 @@ describe("Purchases", () => {
       .set("x-csrf-token", csrf)
       .send({ purchaseDate: "2026-01-10", orderNumber: "ORD-LIST-1", productName: "Gizmo", amountPaid: "25.00" });
 
+    // Two more orders on the exact same date, created back to back —
+    // without an id tiebreak, Postgres has no guaranteed order among ties,
+    // so a real order can silently land on a different page each time the
+    // list is requested even though the webhook that created it succeeded.
+    await agent
+      .post(`/api/app/customers/${customerRes.body.customer.id}/purchases`)
+      .set("x-csrf-token", csrf)
+      .send({ purchaseDate: "2026-03-01", orderNumber: "ORD-STABLE-A", productName: "Gizmo", amountPaid: "25.00" });
+    await agent
+      .post(`/api/app/customers/${customerRes.body.customer.id}/purchases`)
+      .set("x-csrf-token", csrf)
+      .send({ purchaseDate: "2026-03-01", orderNumber: "ORD-STABLE-B", productName: "Gizmo", amountPaid: "25.00" });
+
     // limit:100 (the max) rather than a small page size — this shared test DB
     // accumulates purchase rows from other test files running concurrently in
     // the same schema, so a small limit risks this test's own row falling off
     // the page purely due to how many other purchases happen to sort above it.
-    const res = await agent.get("/api/app/purchases").query({ limit: 100 });
+    const res = await agent.get("/api/app/purchases").query({ limit: 100, sortBy: "purchaseDate", sortDir: "asc" });
     expect(res.status).toBe(200);
     expect(res.body.total).toBeGreaterThanOrEqual(1);
     const row = res.body.purchases.find((p: { orderNumber: string }) => p.orderNumber === "ORD-LIST-1");
     expect(row.customerFirstName).toBe("Order");
     expect(row.customerLastName).toBe("Placer");
+
+    const indexA = res.body.purchases.findIndex((p: { orderNumber: string }) => p.orderNumber === "ORD-STABLE-A");
+    const indexB = res.body.purchases.findIndex((p: { orderNumber: string }) => p.orderNumber === "ORD-STABLE-B");
+    expect(indexA).toBeGreaterThanOrEqual(0);
+    expect(indexB).toBeGreaterThanOrEqual(0);
+    // Tied on purchaseDate, so the id tiebreak decides — A was inserted
+    // first, so it must sort before B every time, not just by chance.
+    expect(indexA).toBeLessThan(indexB);
   });
 
   it("filters by orderClassification (first_order vs recurring) and by status, sorting oldest-first when asked", async () => {

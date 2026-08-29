@@ -36,7 +36,12 @@ export async function listPurchases(query: ListPurchasesQuery) {
     .from(purchasesTable)
     .innerJoin(customersTable, eq(customersTable.id, purchasesTable.customerId))
     .where(whereCondition)
-    .orderBy(orderFn(SORT_COLUMNS[sortBy]))
+    // Tie-broken by id: purchaseDate is a bare date (no time component) and
+    // amountPaid commonly repeats, so an unstable tiebreak means rows can
+    // silently swap between the last page and the next one as Postgres picks
+    // a different tie order per request — an order looks like it never
+    // arrived even though the webhook that created it succeeded.
+    .orderBy(orderFn(SORT_COLUMNS[sortBy]), asc(purchasesTable.id))
     .limit(limit)
     .offset(offset);
 
