@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { stripQuotedReply, parseExtraMailboxes, isIgnoredSender } from "./email-inbound.service.js";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+
+const notifySlackMock = vi.fn();
+vi.mock("../lib/slack.js", () => ({ notifySlack: (...args: unknown[]) => notifySlackMock(...args) }));
+
+const connectMock = vi.fn();
+vi.mock("imapflow", () => ({
+  ImapFlow: vi.fn().mockImplementation(function ImapFlowMock() {
+    return {
+      on: vi.fn(),
+      connect: connectMock,
+      logout: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
+}));
+
+const { stripQuotedReply, parseExtraMailboxes, isIgnoredSender, sweepInboundEmail } = await import("./email-inbound.service.js");
 
 describe("stripQuotedReply", () => {
   it("returns the whole body when there's no quoted history", () => {
@@ -69,6 +84,38 @@ describe("parseExtraMailboxes", () => {
   it("throws on an entry with an empty user or password", () => {
     expect(() => parseExtraMailboxes(":abcdefghijklmnop")).toThrow(/empty user or app password/);
     expect(() => parseExtraMailboxes("hello@tryark.com:")).toThrow(/empty user or app password/);
+  });
+});
+
+describe("sweepInboundEmail", () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    process.env.GOOGLE_WORKSPACE_SMTP_USER = "help@tryark.com";
+    process.env.GOOGLE_WORKSPACE_SMTP_APP_PASSWORD = "ulzqezghvjvulqfg";
+    delete process.env.EMAIL_INBOUND_EXTRA_MAILBOXES;
+    notifySlackMock.mockClear();
+    connectMock.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  // A revoked app password or connection failure used to only ever hit
+  // logger.error — nothing surfaced outside the server logs, so inbound
+  // routing for that mailbox could stay silently dead until someone thought
+  // to check Railway logs. This locks in that it now alerts the same way
+  // every other failure class in this sweep already does.
+  it("alerts Slack when a mailbox connection fails, naming the mailbox", async () => {
+    connectMock.mockRejectedValue(new Error("Invalid credentials (Failure)"));
+
+    const result = await sweepInboundEmail();
+
+    expect(result.failedCount).toBe(1);
+    expect(notifySlackMock).toHaveBeenCalledTimes(1);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/help@tryark\.com/);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/Invalid credentials/);
   });
 });
 

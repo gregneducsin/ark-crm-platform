@@ -8,6 +8,7 @@ import { processInboundSupportEmail } from "./sophie-email-dispatch.service.js";
 import { recordAndClassifyUnmatchedEmail } from "./unmatched-inbound-email.service.js";
 import { htmlToPlainText } from "../lib/email/templates.js";
 import { logger } from "../lib/logger.js";
+import { notifySlack } from "../lib/slack.js";
 
 /**
  * Cuts off a reply body at the start of the quoted history a mail client
@@ -190,7 +191,15 @@ export async function sweepInboundEmail(): Promise<EmailInboundSweepResult> {
       skippedCount += result.skippedCount;
       failedCount += result.failedCount;
     } catch (err) {
-      logger.error({ user: mailbox.user, reason: err instanceof Error ? err.message : String(err) }, "inbound email sweep failed to poll mailbox");
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.error({ user: mailbox.user, reason }, "inbound email sweep failed to poll mailbox");
+      // Log-only here was silent — a revoked app password or connection
+      // failure stopped that mailbox's inbound routing entirely, with
+      // nothing surfacing outside the server logs until someone thought to
+      // look. Every other failure class in this sweep (per-message fetch,
+      // per-message processing) already alerts; a whole mailbox going
+      // unreachable is strictly worse and deserves the same visibility.
+      void notifySlack(`Inbound email sweep — failed to poll mailbox ${mailbox.user}: ${reason}`);
       failedCount++;
     }
   }
