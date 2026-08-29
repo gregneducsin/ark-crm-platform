@@ -12,6 +12,7 @@ import {
 } from "../lib/email/templates.js";
 import { isCustomerEmailDnd } from "./dnd.service.js";
 import { logger } from "../lib/logger.js";
+import { notifySlack } from "../lib/slack.js";
 
 /**
  * The same 4-step nurture sequence as abandoned-cart-email.service.ts —
@@ -155,6 +156,10 @@ export async function sweepMetaLeadEmailTriggers(): Promise<MetaLeadEmailSweepRe
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId: trigger.personId, step, reason }, "meta-lead email: failed to mint intake link");
+      // A broken intake-link config (bad env, misconfigured route) fails on
+      // every trigger, not just this one — this can silently zero out the
+      // entire nurture sequence with nothing surfacing outside server logs.
+      void notifySlack(`Meta-lead email (${step}): failed to mint intake link — ${reason}`);
       await db.update(metaLeadEmailTriggersTable).set({ status: "failed", failureReason: reason }).where(eq(metaLeadEmailTriggersTable.id, trigger.id));
       failedCount++;
       continue;

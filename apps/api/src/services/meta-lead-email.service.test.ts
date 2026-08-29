@@ -17,6 +17,9 @@ vi.mock("../lib/email-provider.js", async () => {
   return { ...actual, getEmailProvider: () => ({ provider: { sendEmail: sendEmailMock }, fromName: "Alexis at Ark Health" }) };
 });
 
+const notifySlackMock = vi.fn();
+vi.mock("../lib/slack.js", () => ({ notifySlack: (...args: unknown[]) => notifySlackMock(...args) }));
+
 const { scheduleMetaLeadEmailSequence, sweepMetaLeadEmailTriggers } = await import("./meta-lead-email.service.js");
 const { scheduleAbandonedCartEmailSequence } = await import("./abandoned-cart-email.service.js");
 const { getOrCreateEmailConversation, listEmailMessages } = await import("./email-conversations.service.js");
@@ -120,6 +123,32 @@ describe("sweepMetaLeadEmailTriggers", () => {
     const messages = await listEmailMessages(conversation.id);
     expect(messages).toHaveLength(4);
     expect(conversation.promoOffered).toBe(true);
+  });
+
+  it("alerts Slack and marks the trigger failed when intake-link minting fails, e.g. a broken env config", async () => {
+    notifySlackMock.mockClear();
+
+    const personId = await seedCustomer();
+    await scheduleMetaLeadEmailSequence(personId);
+    await backdateAllSteps(personId);
+
+    const originalBaseUrl = process.env.INTAKE_LINK_BASE_URL;
+    delete process.env.INTAKE_LINK_BASE_URL;
+    try {
+      // A broken config fails on every trigger, not just one — this locks in
+      // that it now alerts Slack instead of only ever hitting server logs.
+      await sweepMetaLeadEmailTriggers();
+    } finally {
+      process.env.INTAKE_LINK_BASE_URL = originalBaseUrl;
+    }
+
+    const triggers = await rows(personId);
+    for (const t of triggers) {
+      expect(t.status).toBe("failed");
+      expect(t.failureReason).toMatch(/INTAKE_LINK_BASE_URL/);
+    }
+    expect(notifySlackMock).toHaveBeenCalled();
+    expect(notifySlackMock.mock.calls.every((c) => String(c[0]).includes("failed to mint intake link"))).toBe(true);
   });
 
   it("cancels all remaining due steps once the lead has purchased", async () => {

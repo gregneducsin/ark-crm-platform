@@ -12,6 +12,7 @@ import {
 } from "../lib/email/templates.js";
 import { isCustomerEmailDnd } from "./dnd.service.js";
 import { logger } from "../lib/logger.js";
+import { notifySlack } from "../lib/slack.js";
 
 /**
  * The 4-step abandoned-cart email nurture sequence — a distinct schedule
@@ -172,6 +173,10 @@ export async function sweepAbandonedCartEmailTriggers(): Promise<AbandonedCartEm
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId: trigger.personId, step, reason }, "abandoned-cart email: failed to mint intake link");
+      // A broken intake-link config (bad env, misconfigured route) fails on
+      // every trigger, not just this one — this can silently zero out the
+      // entire nurture sequence with nothing surfacing outside server logs.
+      void notifySlack(`Abandoned-cart email (${step}): failed to mint intake link — ${reason}`);
       await db.update(abandonedCartEmailTriggersTable).set({ status: "failed", failureReason: reason }).where(eq(abandonedCartEmailTriggersTable.id, trigger.id));
       failedCount++;
       continue;
