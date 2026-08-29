@@ -100,6 +100,13 @@ describe("supportPreCheck", () => {
     expect(supportPreCheck("it was warm to the touch")).toEqual({ blocked: true, code: "COLD_CHAIN_CONCERN" });
   });
 
+  it("blocks a request to pause, hold, or skip a prescription/order", () => {
+    expect(supportPreCheck("I want to pause my prescription for a bit")).toEqual({ blocked: true, code: "PAUSE_PRESCRIPTION_REQUEST" });
+    expect(supportPreCheck("can you put my order on hold")).toEqual({ blocked: true, code: "PAUSE_PRESCRIPTION_REQUEST" });
+    expect(supportPreCheck("please skip my next shipment")).toEqual({ blocked: true, code: "PAUSE_PRESCRIPTION_REQUEST" });
+    expect(supportPreCheck("hold my subscription please")).toEqual({ blocked: true, code: "PAUSE_PRESCRIPTION_REQUEST" });
+  });
+
   it("does not treat 'end'/'quit' as a stop word when it's the tail of an unrelated question", () => {
     expect(supportPreCheck("When does this program end?")).toEqual({ blocked: false });
     expect(supportPreCheck("Can I quit anytime if it's not working?")).toEqual({ blocked: false });

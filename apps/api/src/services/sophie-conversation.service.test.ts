@@ -86,6 +86,24 @@ describe("runSophieTurn", () => {
     }
   });
 
+  it("routes a request to pause/hold a prescription to staff_review via pre-check, no provider call, points to the portal, and never confirms the pause happened", async () => {
+    callSophieInteractiveMock.mockClear();
+    const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "can you pause my prescription for a couple months" }] }));
+
+    expect(callSophieInteractiveMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.action).toBe("staff_review");
+      expect(result.requiresStaff).toBe(true);
+      expect(result.reply).toMatch(/portal/i);
+      expect(result.reply).toContain("https://patient.tryark.com/login");
+      // Never a confirmation that the pause happened — Sophie has no way to
+      // action it, only to point at the portal and flag a person.
+      expect(result.reply).not.toMatch(/paused|has been paused|you're paused|is paused/i);
+      expect(result.preCheckCode).toBe("PAUSE_PRESCRIPTION_REQUEST");
+    }
+  });
+
   it("responds with a real 911 message on emergency content, and still flags staff attention", async () => {
     callSophieInteractiveMock.mockClear();
     const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "this is an emergency" }] }));

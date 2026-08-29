@@ -24,6 +24,10 @@ describe("describeNeedsAttentionReason", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "SIDE_EFFECT_REPORT" })).toMatch(/side effects/i);
   });
 
+  it("maps PAUSE_PRESCRIPTION_REQUEST to its specific explanation", () => {
+    expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "PAUSE_PRESCRIPTION_REQUEST" })).toMatch(/pause, hold, or skip/i);
+  });
+
   it("falls back to a generic explanation for an unmapped staff-flagged code", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "SOME_NEW_CODE" })).toBe("Flagged for a person to review (SOME_NEW_CODE).");
   });

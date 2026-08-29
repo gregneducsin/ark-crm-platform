@@ -158,10 +158,40 @@ const MG_DOSAGE_RE = /\bmg\b|\d\s?mg\b/i;
  */
 const COLD_CHAIN_CONCERN_PHRASES_LOWER = ["ice pack", "not refrigerated", "wasn't refrigerated", "no refrigeration", "not cold", "warm to the touch", "hot to the touch", "melted", "spoiled"] as const;
 
+/**
+ * A patient asking to pause, hold, or skip their prescription/order. Sophie
+ * must never confirm a pause has actually happened — she has no way to
+ * action it herself, and telling a patient "you're paused" when nothing
+ * changed risks them missing a dose or a shipment on the mistaken belief
+ * it's been handled. This routes to staff the same way a prescription
+ * question does, pointing the patient at the self-service portal instead of
+ * a false confirmation.
+ */
+const PAUSE_PRESCRIPTION_REQUEST_PHRASES_LOWER = [
+  "pause my prescription",
+  "pause my order",
+  "pause my subscription",
+  "pause my medication",
+  "pause my meds",
+  "pause my next order",
+  "pause my next shipment",
+  "want to pause",
+  "put my prescription on hold",
+  "put my order on hold",
+  "put my subscription on hold",
+  "hold my prescription",
+  "hold my order",
+  "hold my subscription",
+  "skip my next order",
+  "skip my next shipment",
+  "skip this month",
+  "skip next month",
+] as const;
+
 export type SupportPreCheckResult = { readonly blocked: false } | { readonly blocked: true; readonly code: string };
 
 /**
- * Priority order: opt_out > STOP_WORD > emergency > prescription_question > cold_chain_concern > legal.
+ * Priority order: opt_out > STOP_WORD > emergency > prescription_question > pause_prescription_request > cold_chain_concern > legal.
  */
 export function supportPreCheck(lastInbound: string): SupportPreCheckResult {
   const upper = lastInbound.toUpperCase();
@@ -176,6 +206,7 @@ export function supportPreCheck(lastInbound: string): SupportPreCheckResult {
   if (!lastInbound.trim().endsWith("?") && STOP_WORDS_UPPER.some((w) => tokens.includes(w))) return { blocked: true, code: "STOP_WORD" };
   if (EMERGENCY_WORDS_LOWER.some((w) => lower.includes(w)) || EMERGENCY_911_RE.test(lower)) return { blocked: true, code: "EMERGENCY_CONTENT" };
   if (PRESCRIPTION_QUESTION_PHRASES_LOWER.some((w) => lower.includes(w)) || MG_DOSAGE_RE.test(lower)) return { blocked: true, code: "PRESCRIPTION_QUESTION" };
+  if (PAUSE_PRESCRIPTION_REQUEST_PHRASES_LOWER.some((w) => lower.includes(w))) return { blocked: true, code: "PAUSE_PRESCRIPTION_REQUEST" };
   if (COLD_CHAIN_CONCERN_PHRASES_LOWER.some((w) => lower.includes(w))) return { blocked: true, code: "COLD_CHAIN_CONCERN" };
   if (LEGAL_WORDS_LOWER.some((w) => lower.includes(w)) || LEGAL_SUE_RE.test(lower)) return { blocked: true, code: "LEGAL_CONTENT" };
 

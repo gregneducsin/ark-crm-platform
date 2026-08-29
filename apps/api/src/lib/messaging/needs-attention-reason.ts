@@ -49,6 +49,7 @@ const STAFF_FLAGGED_REASONS: Record<string, string> = {
   MEDICAL_CONTENT: "The customer asked a clinical/medical question outside what's safe to answer automatically.",
   SIDE_EFFECT_REPORT: "The customer described side effects on their current medication (nausea, vomiting, or diarrhea) — Alexis gave them general options to discuss with the doctor, but a person should follow up to make sure they're doing okay.",
   PRESCRIPTION_QUESTION: "The customer asked something about their specific prescription needing individual judgment — not something to answer generically.",
+  PAUSE_PRESCRIPTION_REQUEST: "The customer asked to pause, hold, or skip their prescription/order — pointed to the patient portal, but nothing was actually paused, so a person needs to follow up.",
   LEGAL_CONTENT: "The customer mentioned something legal (e.g. a threat to sue) — needs a person to handle directly.",
 };
 

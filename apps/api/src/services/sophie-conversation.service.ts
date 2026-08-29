@@ -37,6 +37,20 @@ const COLD_CHAIN_CONCERN_REPLIES = [
   `That's worth flagging directly. Please message your doctor or support through the patient portal so they can address it right away: ${APPROVED_PORTAL_URL}`,
 ] as const;
 
+/**
+ * PAUSE_PRESCRIPTION_REQUEST — a patient asking to pause, hold, or skip
+ * their prescription/order. Sophie has no way to actually action this, so
+ * she must never say or imply it's been paused — that risks the patient
+ * believing a shipment/dose is handled when nothing has changed. She points
+ * them to the self-service portal and the conversation routes to staff, the
+ * same pattern as PRESCRIPTION_QUESTION/COLD_CHAIN_CONCERN above.
+ */
+const PAUSE_PRESCRIPTION_REQUEST_REPLIES = [
+  `For pausing or skipping an order, your patient portal is the best place to manage that: ${APPROVED_PORTAL_URL}`,
+  `You can pause or hold your prescription right from your patient portal: ${APPROVED_PORTAL_URL}`,
+  `To pause your prescription, please use your patient portal here: ${APPROVED_PORTAL_URL}`,
+] as const;
+
 function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
 }
@@ -65,9 +79,10 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
       "If this is a medical emergency, please call 911 or go to your nearest emergency room right away. This text line isn't monitored for emergencies. Our team has been notified and will follow up with you.",
   },
   // reply: null here is a placeholder — the real reply is picked at send
-  // time from PRESCRIPTION_QUESTION_REPLIES / COLD_CHAIN_CONCERN_REPLIES,
-  // see below.
+  // time from PRESCRIPTION_QUESTION_REPLIES / PAUSE_PRESCRIPTION_REQUEST_REPLIES
+  // / COLD_CHAIN_CONCERN_REPLIES, see below.
   PRESCRIPTION_QUESTION: { action: "staff_review", reply: null },
+  PAUSE_PRESCRIPTION_REQUEST: { action: "staff_review", reply: null },
   COLD_CHAIN_CONCERN: { action: "staff_review", reply: null },
   LEGAL_CONTENT: { action: "staff_review", reply: null },
 };
@@ -89,9 +104,11 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
       const reply =
         pre.code === "PRESCRIPTION_QUESTION"
           ? pickVariant(PRESCRIPTION_QUESTION_REPLIES)
-          : pre.code === "COLD_CHAIN_CONCERN"
-            ? pickVariant(COLD_CHAIN_CONCERN_REPLIES)
-            : deterministic.reply;
+          : pre.code === "PAUSE_PRESCRIPTION_REQUEST"
+            ? pickVariant(PAUSE_PRESCRIPTION_REQUEST_REPLIES)
+            : pre.code === "COLD_CHAIN_CONCERN"
+              ? pickVariant(COLD_CHAIN_CONCERN_REPLIES)
+              : deterministic.reply;
       return {
         ok: true,
         action: deterministic.action,
