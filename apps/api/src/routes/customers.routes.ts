@@ -66,7 +66,7 @@ export function createCustomersRouter(): RouterType {
     }
   });
 
-  router.get("/:id", requireRole("admin", "manager"), async (req, res, next) => {
+  router.get("/:id", requireRole("admin", "manager", "customer_service"), async (req, res, next) => {
     try {
       const customer = await customersService.getCustomer(req.params.id as string);
       if (!customer) {
