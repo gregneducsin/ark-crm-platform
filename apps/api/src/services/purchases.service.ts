@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql, getTableColumns } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, lte, or, sql, getTableColumns } from "drizzle-orm";
 import { db, customersTable, purchasesTable, purchaseClassificationAuditsTable, type PurchaseStatus } from "@luma/db";
 import type { CreatePurchaseRequest, ListPurchasesQuery, PurchasesSummaryQuery, UpdatePurchaseRequest } from "@luma/shared";
 import { setCustomerSmsDnd, setCustomerEmailDnd } from "./dnd.service.js";
@@ -18,11 +18,22 @@ const SORT_COLUMNS = {
 
 /** Order-level list across all customers, for the Orders tab. */
 export async function listPurchases(query: ListPurchasesQuery) {
-  const { sortBy, sortDir, limit, offset, orderClassification, status } = query;
+  const { sortBy, sortDir, limit, offset, orderClassification, status, search } = query;
   const orderFn = sortDir === "asc" ? asc : desc;
   const conditions = [
     orderClassification ? eq(purchasesTable.orderClassification, orderClassification) : undefined,
     status ? eq(purchasesTable.status, status) : undefined,
+    search
+      ? or(
+          // Concatenated, not separate firstName/lastName ilike checks — a
+          // search for the customer's name exactly as it's displayed
+          // ("Norma Pfannerstill") wouldn't match either column alone, same
+          // fix already applied to the Leads page search.
+          sql`(${customersTable.firstName} || ' ' || ${customersTable.lastName}) ilike ${`%${search}%`}`,
+          ilike(customersTable.email, `%${search}%`),
+          ilike(purchasesTable.orderNumber, `%${search}%`),
+        )
+      : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -45,7 +56,14 @@ export async function listPurchases(query: ListPurchasesQuery) {
     .limit(limit)
     .offset(offset);
 
-  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(purchasesTable).where(whereCondition);
+  // The count needs the same customersTable join as the row query whenever
+  // search is active (it filters on joined columns) — count(*) alone over
+  // purchasesTable would otherwise ignore the search condition entirely.
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(purchasesTable)
+    .innerJoin(customersTable, eq(customersTable.id, purchasesTable.customerId))
+    .where(whereCondition);
 
   return { purchases: rows, total };
 }

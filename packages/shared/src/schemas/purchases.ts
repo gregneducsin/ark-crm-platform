@@ -46,6 +46,8 @@ export const listPurchasesQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   orderClassification: purchaseClassificationSchema.optional(),
   status: purchaseStatusSchema.optional(),
+  // Matches by customer full name, customer email, or order number.
+  search: z.string().min(1).optional(),
 });
 export type ListPurchasesQuery = z.infer<typeof listPurchasesQuerySchema>;
 

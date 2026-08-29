@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { usePurchasesList, usePurchasesSummary } from "../hooks/useCustomers";
-import { Badge, Button, Card } from "../components/ui";
+import { Badge, Button, Card, Input } from "../components/ui";
 import type { PurchasesSummaryQuery, PurchaseWithCustomer } from "@luma/shared";
 
 const PAGE_SIZE = 50;
@@ -83,6 +83,7 @@ function SummaryBar() {
 }
 
 export function OrdersPage() {
+  const [search, setSearch] = useState("");
   const [orderClassification, setOrderClassification] = useState("");
   const [status, setStatus] = useState<PurchaseWithCustomer["status"] | "">("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -102,6 +103,7 @@ export function OrdersPage() {
   const { data, isLoading } = usePurchasesList({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
+    search: search || undefined,
     orderClassification: (orderClassification || undefined) as "first_order" | "recurring" | undefined,
     status: status || undefined,
     sortBy: "purchaseDate",
@@ -117,6 +119,12 @@ export function OrdersPage() {
       <SummaryBar />
 
       <div className="flex flex-wrap items-center gap-2">
+        <Input
+          className="max-w-xs"
+          placeholder="Search by name, email, or order #…"
+          value={search}
+          onChange={(e) => updateFilter(setSearch)(e.target.value)}
+        />
         <select
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
           value={orderClassification}

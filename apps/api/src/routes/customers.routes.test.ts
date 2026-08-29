@@ -735,6 +735,21 @@ describe("Purchases", () => {
     const newerIndex = oldestFirst.body.purchases.findIndex((p: { orderNumber: string }) => p.orderNumber === "ORD-CLASS-NEWER-FAILED");
     expect(olderIndex).toBeGreaterThanOrEqual(0);
     expect(olderIndex).toBeLessThan(newerIndex);
+
+    // Orders search — matches the customer's full name exactly as displayed
+    // (not separate firstName/lastName columns, same fix as Leads search),
+    // customer email, or order number.
+    const byName = await agent.get("/api/app/purchases").query({ search: "Class Filter", limit: 100 });
+    expect(byName.body.purchases.some((p: { orderNumber: string }) => p.orderNumber === "ORD-CLASS-1")).toBe(true);
+
+    const byEmail = await agent.get("/api/app/purchases").query({ search: "class-filter@example.com", limit: 100 });
+    expect(byEmail.body.purchases.some((p: { orderNumber: string }) => p.orderNumber === "ORD-CLASS-1")).toBe(true);
+
+    const byOrderNumber = await agent.get("/api/app/purchases").query({ search: "ORD-CLASS-NEWER-FAILED", limit: 100 });
+    expect(byOrderNumber.body.purchases.map((p: { orderNumber: string }) => p.orderNumber)).toEqual(["ORD-CLASS-NEWER-FAILED"]);
+
+    const noMatch = await agent.get("/api/app/purchases").query({ search: "no-such-order-or-person-xyz", limit: 100 });
+    expect(noMatch.body.purchases).toEqual([]);
   });
 
   it("rejects unauthenticated requests to the purchases list", async () => {
