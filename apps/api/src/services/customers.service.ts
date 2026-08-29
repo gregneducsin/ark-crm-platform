@@ -31,20 +31,31 @@ const questionnaireIdSubquery = sql<string | null>`(
 export async function listCustomers(query: ListCustomersQuery) {
   const { search, sortBy, sortDir, limit, offset, leadType, purchaseStatus, questionnaireId, dateFrom, dateTo } = query;
 
+  // Digits-only form of the search term, for matching against phone regardless
+  // of how staff formatted it ("(813) 818-4536", "813-818-4536") — phone is
+  // stored normalized E.164 ("+18138184536"), so a raw ilike against the
+  // formatted search term never matches it. Gated at 3+ digits so a plain
+  // name/email search with an incidental digit or two ("5th St", an email
+  // with a number in it) doesn't start matching phone numbers too broadly.
+  const searchDigits = search ? search.replace(/\D/g, "") : "";
+
   const conditions = [
     search
       ? or(
-          ilike(customersTable.firstName, `%${search}%`),
-          ilike(customersTable.lastName, `%${search}%`),
-          // firstName/lastName live in separate columns, so a search for the
-          // full name exactly as it's displayed everywhere else in the app
-          // ("Teresa Holley") wouldn't match either column alone — a real
-          // customer with a real completed purchase looked like it "wasn't
-          // a lead" purely because staff searched the name the way it's shown
-          // on screen instead of one name part at a time.
-          sql`(${customersTable.firstName} || ' ' || ${customersTable.lastName}) ilike ${`%${search}%`}`,
-          ilike(customersTable.email, `%${search}%`),
-          ilike(customersTable.phone, `%${search}%`),
+          ...[
+            ilike(customersTable.firstName, `%${search}%`),
+            ilike(customersTable.lastName, `%${search}%`),
+            // firstName/lastName live in separate columns, so a search for the
+            // full name exactly as it's displayed everywhere else in the app
+            // ("Teresa Holley") wouldn't match either column alone — a real
+            // customer with a real completed purchase looked like it "wasn't
+            // a lead" purely because staff searched the name the way it's shown
+            // on screen instead of one name part at a time.
+            sql`(${customersTable.firstName} || ' ' || ${customersTable.lastName}) ilike ${`%${search}%`}`,
+            ilike(customersTable.email, `%${search}%`),
+            ilike(customersTable.phone, `%${search}%`),
+            searchDigits.length >= 3 ? sql`regexp_replace(${customersTable.phone}, '\D', '', 'g') ilike ${`%${searchDigits}%`}` : undefined,
+          ].filter((c) => c !== undefined),
         )
       : undefined,
     leadType ? eq(customersTable.leadType, leadType) : undefined,

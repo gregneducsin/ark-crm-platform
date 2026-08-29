@@ -177,6 +177,22 @@ describe("Customers CRUD", () => {
     expect(fullNameRes.body.customers[0].lastName).toBe("Holley");
   });
 
+  it("search finds a customer by phone regardless of how the search term is formatted, since phone is stored normalized E.164", async () => {
+    await seedUser("admin-phonesearch@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "admin-phonesearch@example.com");
+
+    await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Phone", lastName: "Search", email: "phone.search@example.com", phone: "+18138184536", leadReceivedDate: "2026-01-01" });
+
+    const formatted = await agent.get("/api/app/customers").query({ search: "(813) 818-4536" });
+    expect(formatted.body.customers).toHaveLength(1);
+
+    const dashed = await agent.get("/api/app/customers").query({ search: "813-818-4536" });
+    expect(dashed.body.customers).toHaveLength(1);
+  });
+
   it("excludes a payment_failed purchase from orders/spent, so a declined charge doesn't read as real revenue next to a 'Not purchased' badge", async () => {
     await seedUser("admin-failedpay@example.com", "admin");
     const { agent, csrf } = await loginAgent(app, "admin-failedpay@example.com");
