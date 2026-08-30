@@ -108,12 +108,15 @@ export async function listCustomers(query: ListCustomersQuery) {
     .where(whereCondition)
     .groupBy(customersTable.id)
     .having(havingCondition)
-    // Tie-broken by id: leadReceivedDate/createdAt/lastName commonly repeat
-    // across customers, and an unstable tiebreak means rows can silently
-    // swap between the last page and the next one as Postgres picks a
-    // different tie order per request — a customer looks like it vanished
-    // even though nothing changed.
-    .orderBy(orderFn(SORT_COLUMNS[sortBy]), asc(customersTable.id))
+    // Tie-broken by createdAt (row insert time), then id: leadReceivedDate is
+    // a bare date with no time component, so every lead received "today"
+    // ties — an id tiebreak alone sorts those ties by random UUID, not by
+    // when they actually arrived, so a lead created moments ago could land
+    // anywhere within that day's block instead of at the top. createdAt
+    // fixes that; id stays as a final tiebreak for full determinism (so rows
+    // don't silently swap between the last page and the next one as Postgres
+    // picks a different tie order per request).
+    .orderBy(orderFn(SORT_COLUMNS[sortBy]), orderFn(customersTable.createdAt), asc(customersTable.id))
     .limit(limit)
     .offset(offset);
 

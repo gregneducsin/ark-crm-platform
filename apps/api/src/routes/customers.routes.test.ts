@@ -344,6 +344,51 @@ describe("Customers CRUD", () => {
   });
 });
 
+// Own describe block (own createApp(), own rate-limiter instance) rather
+// than folded into "Customers CRUD" above — that block's tests already use
+// up 10 logins against the 10-per-15-min login limiter, so an 11th test
+// sharing that app would get silently rate-limited on login and fail with
+// unrelated 401s on every subsequent request.
+describe("Customers CRUD: same-day sort tiebreak", () => {
+  let app: ReturnType<typeof createApp>;
+
+  beforeAll(() => {
+    app = createApp();
+  });
+
+  it("breaks a same-day leadReceivedDate tie by actual creation order, not by random id", async () => {
+    await seedUser("admin-sameday@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "admin-sameday@example.com");
+
+    // All three share the same leadReceivedDate (a bare date, no time), so a
+    // tiebreak on id alone would order them randomly by UUID instead of by
+    // when they actually arrived — this is what made a brand-new lead appear
+    // to vanish instead of showing at the top of the default (desc) sort.
+    const first = await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Same", lastName: "First", email: "sameday-first@example.com", leadReceivedDate: "2026-06-01", leadType: "Same Day Test" });
+    const second = await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Same", lastName: "Second", email: "sameday-second@example.com", leadReceivedDate: "2026-06-01", leadType: "Same Day Test" });
+    const third = await agent
+      .post("/api/app/customers")
+      .set("x-csrf-token", csrf)
+      .send({ firstName: "Same", lastName: "Third", email: "sameday-third@example.com", leadReceivedDate: "2026-06-01", leadType: "Same Day Test" });
+
+    const descRes = await agent
+      .get("/api/app/customers")
+      .query({ leadType: "Same Day Test", sortBy: "leadReceivedDate", sortDir: "desc" });
+    expect(descRes.body.customers.map((c: { id: string }) => c.id)).toEqual([third.body.customer.id, second.body.customer.id, first.body.customer.id]);
+
+    const ascRes = await agent
+      .get("/api/app/customers")
+      .query({ leadType: "Same Day Test", sortBy: "leadReceivedDate", sortDir: "asc" });
+    expect(ascRes.body.customers.map((c: { id: string }) => c.id)).toEqual([first.body.customer.id, second.body.customer.id, third.body.customer.id]);
+  });
+});
+
 describe("Customers summary", () => {
   let app: ReturnType<typeof createApp>;
 

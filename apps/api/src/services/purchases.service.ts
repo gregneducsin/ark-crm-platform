@@ -47,12 +47,15 @@ export async function listPurchases(query: ListPurchasesQuery) {
     .from(purchasesTable)
     .innerJoin(customersTable, eq(customersTable.id, purchasesTable.customerId))
     .where(whereCondition)
-    // Tie-broken by id: purchaseDate is a bare date (no time component) and
-    // amountPaid commonly repeats, so an unstable tiebreak means rows can
+    // Tie-broken by createdAt (row insert time), then id: purchaseDate is a
+    // bare date with no time component and amountPaid commonly repeats, so an
+    // id-only tiebreak sorts same-day ties by random UUID rather than by when
+    // the order actually arrived — a brand-new order could land anywhere
+    // within that day's block instead of at the top. createdAt fixes that;
+    // id stays as a final tiebreak for full determinism (so rows don't
     // silently swap between the last page and the next one as Postgres picks
-    // a different tie order per request — an order looks like it never
-    // arrived even though the webhook that created it succeeded.
-    .orderBy(orderFn(SORT_COLUMNS[sortBy]), asc(purchasesTable.id))
+    // a different tie order per request).
+    .orderBy(orderFn(SORT_COLUMNS[sortBy]), orderFn(purchasesTable.createdAt), asc(purchasesTable.id))
     .limit(limit)
     .offset(offset);
 
