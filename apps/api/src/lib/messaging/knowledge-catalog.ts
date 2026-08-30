@@ -89,16 +89,16 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
 
   // ── Semaglutide pricing ────────────────────────────────────────────────────
   // Source: Ark Health transparent-pricing page (owner-supplied 2026-08-25).
-  // Exact prices: $175/mo (month-to-month), $116.67/mo ($350 total, 3-mo, save $175),
-  // $108.33/mo ($650 total, 6-mo, save $400), $91.67/mo ($1,100 total, 12-mo, save $1,000)
+  // Exact prices: $175/mo (month-to-month), $117/mo ($350 total, 3-mo, save $175),
+  // $108/mo ($650 total, 6-mo, save $400), $92/mo ($1,100 total, 12-mo, save $1,000)
   {
     key: "semaglutide_pricing",
     approvedText:
       "Semaglutide pricing: " +
       "Month-to-month: $175 per month, no commitment. " +
-      "3-month plan: $116.67 per month, $350 billed every 3 months (save $175 vs. month-to-month). " +
-      "6-month plan: $108.33 per month, $650 billed every 6 months (save $400 vs. month-to-month). " +
-      "12-month plan: $91.67 per month, $1,100 billed annually (save $1,000 vs. month-to-month). " +
+      "3-month plan: $117 per month, $350 billed every 3 months (save $175 vs. month-to-month). " +
+      "6-month plan: $108 per month, $650 billed every 6 months (save $400 vs. month-to-month). " +
+      "12-month plan: $92 per month, $1,100 billed annually (save $1,000 vs. month-to-month). " +
       "When quoting a multi-month plan, clearly state both the monthly equivalent and the total plan price. " +
       "Never quote prices, discounts, promotions, coupon codes, or membership rates outside these amounts.",
     allowedParaphrase: true,
@@ -121,14 +121,14 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
 
   // ── Tirzepatide pricing ────────────────────────────────────────────────────
   // Source: Ark Health transparent-pricing page (owner-supplied 2026-08-25).
-  // Exact prices: $225/mo (month-to-month), $188.33/mo ($565 total, 3-mo, save $110),
+  // Exact prices: $225/mo (month-to-month), $188/mo ($565 total, 3-mo, save $110),
   // $175/mo ($1,050 total, 6-mo, save $300), $125/mo ($1,500 total, 12-mo, save $1,200)
   {
     key: "tirzepatide_pricing",
     approvedText:
       "Tirzepatide pricing: " +
       "Month-to-month: $225 per month, no commitment. " +
-      "3-month plan: $188.33 per month, $565 billed every 3 months (save $110 vs. month-to-month). " +
+      "3-month plan: $188 per month, $565 billed every 3 months (save $110 vs. month-to-month). " +
       "6-month plan: $175 per month, $1,050 billed every 6 months (save $300 vs. month-to-month). " +
       "12-month plan: $125 per month, $1,500 billed annually (save $1,200 vs. month-to-month). " +
       "When quoting a multi-month plan, clearly state both the monthly equivalent and the total plan price. " +

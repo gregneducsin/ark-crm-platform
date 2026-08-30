@@ -325,7 +325,7 @@ describe("interactivePostCheck: pricing and financing claims", () => {
   });
 
   it("allows dollar amounts with a pricing topic declared", () => {
-    const result = check(reply({ reply: "That plan is $116.67 per month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
+    const result = check(reply({ reply: "That plan is $117 per month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
     expect(result.ok).toBe(true);
   });
 
@@ -343,8 +343,8 @@ describe("interactivePostCheck: pricing and financing claims", () => {
 
   it("allows every real approved figure across both products, all plan lengths, and the promo-adjusted month-to-month prices", () => {
     const approvedReplies = [
-      "Semaglutide is $175 a month month-to-month, $116.67 a month ($350 total) for 3 months, $108.33 a month ($650 total) for 6 months, or $91.67 a month ($1,100 total) for 12 months.",
-      "Tirzepatide is $225 a month month-to-month, $188.33 a month ($565 total) for 3 months, $175 a month ($1,050 total) for 6 months, or $125 a month ($1,500 total) for 12 months.",
+      "Semaglutide is $175 a month month-to-month, $117 a month ($350 total) for 3 months, $108 a month ($650 total) for 6 months, or $92 a month ($1,100 total) for 12 months.",
+      "Tirzepatide is $225 a month month-to-month, $188 a month ($565 total) for 3 months, $175 a month ($1,050 total) for 6 months, or $125 a month ($1,500 total) for 12 months.",
       "With $20 off, semaglutide is $155 and tirzepatide is $205 for the first month.",
     ];
     for (const text of approvedReplies) {

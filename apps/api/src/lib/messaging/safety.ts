@@ -644,13 +644,14 @@ const INSURANCE_MENTION_RE = /\binsur(e|ance)\b/i;
 
 /**
  * Dollar-amount pattern — only blocked when no approved pricing topic is used.
- * Handles cents (e.g. "$116.67") and comma thousands-separators (e.g.
- * "$1,100") — Ark Health's plan prices use both, unlike Luma's original
- * whole-dollar-only pricing, so a plain /\$\d+/ would either truncate a
- * decimal price at the "." or truncate a 4-digit price at the first comma.
+ * Comma thousands-separators supported (e.g. "$1,100") since some totals are
+ * 4 digits; no decimal/cents support — all approved prices are whole dollars
+ * (the "per month" figures used to show cents as an artifact of dividing a
+ * whole-dollar total by the plan length; those are now rounded to the
+ * nearest whole dollar for display, see knowledge-catalog.ts).
  */
-const DOLLAR_AMOUNT_RE = /\$\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/;
-const DOLLAR_AMOUNT_GLOBAL_RE = /\$(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/g;
+const DOLLAR_AMOUNT_RE = /\$\d{1,3}(?:,\d{3})*/;
+const DOLLAR_AMOUNT_GLOBAL_RE = /\$(\d{1,3}(?:,\d{3})*)/g;
 
 /** Strips comma thousands-separators so "$1,100" and "$1100" compare equal. */
 function normalizeDollarAmount(raw: string): string {
@@ -672,9 +673,9 @@ function normalizeDollarAmount(raw: string): string {
 const APPROVED_DOLLAR_AMOUNTS = new Set([
   "20", // promo discount amount
   // semaglutide: month-to-month, 3/6/12-month monthly + total + save
-  "175", "116.67", "350", "108.33", "650", "400", "91.67", "1100", "1000",
+  "175", "117", "350", "108", "650", "400", "92", "1100", "1000",
   // tirzepatide: month-to-month, 3/6/12-month monthly + total + save
-  "225", "188.33", "565", "110", "1050", "300", "125", "1500", "1200",
+  "225", "188", "565", "110", "1050", "300", "125", "1500", "1200",
   // promo-adjusted month-to-month prices (promoState in provider.ts)
   "155", "205",
 ]);

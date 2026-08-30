@@ -118,24 +118,24 @@ describe("LK-09: semaglutide pricing values match Ark Health's approved pricing"
     expect(topic?.approvedText).toContain("$175 per month");
   });
 
-  it("3-month price is $116.67 per month", () => {
-    expect(topic?.approvedText).toContain("$116.67 per month");
+  it("3-month price is $117 per month", () => {
+    expect(topic?.approvedText).toContain("$117 per month");
   });
 
   it("3-month total is $350", () => {
     expect(topic?.approvedText).toContain("$350 billed every 3 months");
   });
 
-  it("6-month price is $108.33 per month", () => {
-    expect(topic?.approvedText).toContain("$108.33 per month");
+  it("6-month price is $108 per month", () => {
+    expect(topic?.approvedText).toContain("$108 per month");
   });
 
   it("6-month total is $650", () => {
     expect(topic?.approvedText).toContain("$650 billed every 6 months");
   });
 
-  it("12-month price is $91.67 per month", () => {
-    expect(topic?.approvedText).toContain("$91.67 per month");
+  it("12-month price is $92 per month", () => {
+    expect(topic?.approvedText).toContain("$92 per month");
   });
 
   it("12-month total is $1,100", () => {
@@ -154,8 +154,8 @@ describe("LK-10: tirzepatide pricing values match Ark Health's approved pricing"
     expect(topic?.approvedText).toContain("$225 per month");
   });
 
-  it("3-month price is $188.33 per month", () => {
-    expect(topic?.approvedText).toContain("$188.33 per month");
+  it("3-month price is $188 per month", () => {
+    expect(topic?.approvedText).toContain("$188 per month");
   });
 
   it("3-month total is $565", () => {
