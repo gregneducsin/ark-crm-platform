@@ -282,6 +282,12 @@ export function LeadsPage() {
                     <td className="px-3 py-2">
                       {c.qualifyingPurchaseDate ? (
                         <Badge color="green">Purchased</Badge>
+                      ) : c.purchaseCount > 0 ? (
+                        // A completed purchase exists, just not a first_order one — e.g. Bask
+                        // classified it "recurring" even though it's their only order on file.
+                        // Distinct from "Not purchased" so a real paying customer doesn't read
+                        // as a lead who never bought anything.
+                        <Badge color="blue">Recurring</Badge>
                       ) : (
                         <Badge color="gray">Not purchased</Badge>
                       )}
