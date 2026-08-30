@@ -880,6 +880,33 @@ describe("Webhooks", () => {
       expect(rows[0].personId).toBe(customer!.id);
     });
 
+    it("converts a bare-integer amount from cents to dollars, but leaves an already-decimal amount untouched", async () => {
+      const { db, failedPaymentEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      // Confirmed against a real Bask delivery: a $510.00 charge arrives as
+      // the bare integer "51000" (cents), unlike every other amount field in
+      // this app. "199.00" below proves a properly formatted value is never
+      // divided a second time.
+      const centsRes = await request(app)
+        .post("/api/webhooks/bask-payment-failed")
+        .set("x-webhook-secret", PAYMENT_FAILED_SECRET)
+        .send({ eventId: "bask-fp-cents-1", transactionId: "txn-cents-1", externalPersonId: "bask-person-cents-1", amount: "51000", failureDate: new Date().toISOString() });
+      expect(centsRes.status).toBe(200);
+
+      const decimalRes = await request(app)
+        .post("/api/webhooks/bask-payment-failed")
+        .set("x-webhook-secret", PAYMENT_FAILED_SECRET)
+        .send({ eventId: "bask-fp-decimal-1", transactionId: "txn-decimal-1", externalPersonId: "bask-person-decimal-1", amount: "199.00", failureDate: new Date().toISOString() });
+      expect(decimalRes.status).toBe(200);
+
+      const [centsRow] = await db.select().from(failedPaymentEventsTable).where(eq(failedPaymentEventsTable.transactionId, "txn-cents-1"));
+      expect(centsRow.amount).toBe("510.00");
+
+      const [decimalRow] = await db.select().from(failedPaymentEventsTable).where(eq(failedPaymentEventsTable.transactionId, "txn-decimal-1"));
+      expect(decimalRow.amount).toBe("199.00");
+    });
+
     it("records the event with a null personId when no customer can be matched, without creating one", async () => {
       const res = await request(app)
         .post("/api/webhooks/bask-payment-failed")

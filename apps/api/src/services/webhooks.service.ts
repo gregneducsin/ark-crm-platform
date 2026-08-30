@@ -444,6 +444,17 @@ export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireW
   return { duplicate: false };
 }
 
+// Bask's failed-payment webhook sends `amount` as a bare integer of CENTS
+// (confirmed against a real delivery: a $510.00 charge arrived as "51000"),
+// unlike every other amount field in this app, which is dollars-and-cents.
+// The schema's regex also accepts an already-decimal value, so only convert
+// when there's no decimal point — a value that already arrives correctly
+// formatted isn't silently divided by 100 a second time.
+function normalizeFailedPaymentAmount(amount: string | undefined): string | undefined {
+  if (amount === undefined || amount.includes(".")) return amount;
+  return (Number(amount) / 100).toFixed(2);
+}
+
 export async function handleBaskPaymentFailedWebhook(payload: BaskPaymentFailedWebhookRequest): Promise<{ duplicate: boolean }> {
   const recorded = await recordWebhookEventIfNew("bask_payment_failed", payload.eventId, payload);
   if (!recorded) return { duplicate: true };
@@ -456,7 +467,7 @@ export async function handleBaskPaymentFailedWebhook(payload: BaskPaymentFailedW
       transactionId: payload.transactionId,
       personId: customerId,
       externalPersonId: payload.externalPersonId,
-      amount: payload.amount,
+      amount: normalizeFailedPaymentAmount(payload.amount),
       failureDate: new Date(payload.failureDate),
       paymentMethodType: payload.paymentMethodType,
       cardBrand: payload.cardBrand,
