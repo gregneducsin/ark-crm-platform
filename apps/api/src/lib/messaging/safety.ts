@@ -738,6 +738,23 @@ function isValidFreeTextSlotValue(value: unknown): boolean {
   return value === null || (typeof value === "string" && value.trim().length > 0 && value.length <= FREE_TEXT_MAX_LENGTH);
 }
 
+/**
+ * The lead check-in asks a compound question in one message ("are you
+ * currently taking semaglutide or tirzepatide?"), but the slot schema
+ * expects two separate answers: currentlyTaking (yes/no) and selectedProduct
+ * (which drug). A terse one-word reply naming the drug can get mapped onto
+ * currentlyTaking alone (e.g. currentlyTaking: "tirzepatide"), which would
+ * otherwise fail SLOT_VALIDATORS and silently drop the whole reply. Treat a
+ * drug name in currentlyTaking as answering both slots at once.
+ */
+function normalizeSlotUpdates(raw: Record<string, unknown>): Record<string, unknown> {
+  if (raw.currentlyTaking === "semaglutide" || raw.currentlyTaking === "tirzepatide") {
+    const product = raw.currentlyTaking;
+    return { ...raw, currentlyTaking: "yes", selectedProduct: raw.selectedProduct ?? product };
+  }
+  return raw;
+}
+
 // Actions for which nextQuestion must be a valid single question
 const REPLY_TYPE_ACTIONS = new Set(["reply", "ask_product", "explain_process", "explain_pricing", "explain_inclusions"]);
 
@@ -1018,7 +1035,7 @@ export function interactivePostCheck(
     raw.requiresStaff && raw.action !== "staff_review" ? { ...raw, action: "staff_review", reply: null, nextQuestion: null } : raw;
 
   // Validate slot updates
-  const rawSlotUpdates = effectiveRaw.slotUpdates as Record<string, unknown>;
+  const rawSlotUpdates = normalizeSlotUpdates(effectiveRaw.slotUpdates as Record<string, unknown>);
   const validatedSlotUpdates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rawSlotUpdates)) {
     if (FREE_TEXT_SLOT_KEYS.has(key)) {

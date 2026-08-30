@@ -603,4 +603,20 @@ describe("interactivePostCheck: slot validation", () => {
     const result = check(reply({ slotUpdates: { state: 12 } }));
     expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
   });
+
+  it("treats a drug name mistakenly placed in currentlyTaking as answering both slots", () => {
+    const result = check(reply({ slotUpdates: { currentlyTaking: "tirzepatide" } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ currentlyTaking: "yes", selectedProduct: "tirzepatide" });
+    }
+  });
+
+  it("does not overwrite an explicitly-set selectedProduct when normalizing currentlyTaking", () => {
+    const result = check(reply({ slotUpdates: { currentlyTaking: "semaglutide", selectedProduct: "tirzepatide" } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ currentlyTaking: "yes", selectedProduct: "tirzepatide" });
+    }
+  });
 });
