@@ -502,7 +502,13 @@ export async function recordAndClassifyUnmatchedEmail(input: {
       suggestedMatchCustomerId: matchCandidate?.id ?? thread.suggestedMatchCustomerId,
       suggestedMatchConfidence: matchCandidate ? (classification?.matchConfidence ?? null) : thread.suggestedMatchConfidence,
       linkedCustomerId: leadResult?.customerId ?? thread.linkedCustomerId,
-      status: leadResult?.justCreated || autoSent ? "replied" : "needs_review",
+      // Spam/irrelevant (bounce notices, marketing blasts, phishing) is
+      // auto-dismissed rather than left in needs_review — staff shouldn't
+      // have to manually clear an automated "mailbox full" notice out of
+      // their queue every time one arrives. A later genuine reply on the
+      // same thread gets its own fresh classification and resurfaces it
+      // (see the dismissed-thread-resurfacing behavior above).
+      status: leadResult?.justCreated || autoSent ? "replied" : classification?.intent === "spam_or_irrelevant" ? "dismissed" : "needs_review",
       repliedAt: leadResult?.justCreated || autoSent ? new Date() : thread.repliedAt,
     })
     .where(eq(unmatchedEmailThreadsTable.id, thread.id))

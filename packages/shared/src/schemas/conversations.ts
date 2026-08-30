@@ -51,7 +51,7 @@ export const conversationDetailSchema = z.object({
     needsAttentionReason: z.string().nullable(),
   }),
   /** email is only populated on the email-channel response — optional so the SMS response shape (no email field at all) still matches. */
-  customer: z.object({ firstName: z.string(), lastName: z.string(), phone: z.string().nullable(), email: z.string().optional() }),
+  customer: z.object({ firstName: z.string(), lastName: z.string(), phone: z.string().nullable(), email: z.string().optional(), hasQualifyingPurchase: z.boolean() }),
   messages: z.array(conversationMessageSchema),
 });
 export type ConversationDetail = z.infer<typeof conversationDetailSchema>;

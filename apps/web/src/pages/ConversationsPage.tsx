@@ -321,6 +321,7 @@ function ConversationDetailPanel({
           <div>
             <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
               {customer.firstName} {customer.lastName}
+              {customer.hasQualifyingPurchase && <Badge color="green">Purchased</Badge>}
               {conversation.needsAttention && <Badge color="red">Needs attention</Badge>}
             </p>
             <p className="text-xs text-gray-400">

@@ -331,11 +331,12 @@ describe("recordAndClassifyUnmatchedEmail", () => {
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
-  it("does not create a lead for spam_or_irrelevant even with a known name", async () => {
+  it("does not create a lead for spam_or_irrelevant even with a known name, and auto-dismisses it out of the review queue", async () => {
     createMock.mockResolvedValueOnce(toolResponse(classification({ intent: "spam_or_irrelevant", summary: "Marketing spam.", suggestedReply: null })));
     const thread = await recordAndClassifyUnmatchedEmail({ fromAddress: uniqueAddress("spam"), fromName: "Spam Bot", subject: "Win now", body: "click here", messageId: null });
     expect(thread.linkedCustomerId).toBeNull();
     expect(thread.suggestedReply).toBeNull();
+    expect(thread.status).toBe("dismissed");
   });
 
   it("only attaches a suggested match when Claude picks a candidate from the real, DB-verified list — never an invented id, and does not create a duplicate lead", async () => {
@@ -500,6 +501,7 @@ describe("auto-acknowledgment", () => {
     });
 
     expect(thread.aiIntent).toBe("spam_or_irrelevant");
+    expect(thread.status).toBe("dismissed"); // auto-dismissed — a bounce notice shouldn't sit in the staff review queue
     expect(sendEmailMock).not.toHaveBeenCalled();
     const detail = await getUnmatchedEmailThreadDetail(thread.id);
     expect(detail?.messages).toHaveLength(1); // just the inbound message, no ack logged

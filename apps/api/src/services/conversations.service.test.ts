@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { db, customersTable } from "@luma/db";
+import { db, customersTable, purchasesTable } from "@luma/db";
 
 const sendMessageMock = vi.fn();
 vi.mock("../lib/sms-provider.js", async () => {
@@ -200,6 +200,21 @@ describe("listConversationSummaries / getConversationDetail", () => {
   it("getConversationDetail returns null for an unknown conversation id", async () => {
     const detail = await getConversationDetail("00000000-0000-0000-0000-000000000000");
     expect(detail).toBeNull();
+  });
+
+  it("flags hasQualifyingPurchase once the customer has a completed purchase, so staff see it without checking Orders separately", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+
+    const before = await getConversationDetail(conversation.id);
+    expect(before?.customer.hasQualifyingPurchase).toBe(false);
+
+    await db
+      .insert(purchasesTable)
+      .values({ customerId: personId, purchaseDate: "2026-08-30", orderNumber: `ORD-${crypto.randomUUID()}`, productName: "Semaglutide", amountPaid: "199.00", status: "completed" });
+
+    const after = await getConversationDetail(conversation.id);
+    expect(after?.customer.hasQualifyingPurchase).toBe(true);
   });
 
   it("sorts a conversation with real messages ahead of one with none, not behind it", async () => {

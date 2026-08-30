@@ -1,5 +1,13 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, emailConversationsTable, emailConversationMessagesTable, customersTable, type EmailConversation, type EmailConversationMessage } from "@luma/db";
+import {
+  db,
+  emailConversationsTable,
+  emailConversationMessagesTable,
+  customersTable,
+  purchasesTable,
+  type EmailConversation,
+  type EmailConversationMessage,
+} from "@luma/db";
 import type { BotPreviewRequestBody } from "../lib/messaging/types.js";
 import type { ObjectionKey } from "../lib/messaging/objection-handling.js";
 import { notifySlack } from "../lib/slack.js";
@@ -233,7 +241,7 @@ export async function getEmailConversationDetail(
   conversationId: string,
 ): Promise<{
   conversation: EmailConversation;
-  customer: { firstName: string; lastName: string; phone: string | null; email: string };
+  customer: { firstName: string; lastName: string; phone: string | null; email: string; hasQualifyingPurchase: boolean };
   messages: EmailConversationMessage[];
 } | null> {
   const [row] = await db
@@ -249,5 +257,17 @@ export async function getEmailConversationDetail(
     .where(eq(emailConversationsTable.id, conversationId));
   if (!row) return null;
   const messages = await listEmailMessages(conversationId, 200);
-  return { conversation: row.conversation, customer: { firstName: row.firstName, lastName: row.lastName, phone: row.phone, email: row.email }, messages };
+  // Same "completed purchase" check the lead-checkin/abandoned-cart sweeps
+  // use to cancel their own triggers — see conversations.service.ts's
+  // getConversationDetail for why this is surfaced here too.
+  const [purchased] = await db
+    .select({ id: purchasesTable.id })
+    .from(purchasesTable)
+    .where(and(eq(purchasesTable.customerId, row.conversation.personId), eq(purchasesTable.status, "completed")))
+    .limit(1);
+  return {
+    conversation: row.conversation,
+    customer: { firstName: row.firstName, lastName: row.lastName, phone: row.phone, email: row.email, hasQualifyingPurchase: Boolean(purchased) },
+    messages,
+  };
 }

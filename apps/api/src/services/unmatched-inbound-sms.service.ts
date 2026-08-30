@@ -735,7 +735,14 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
       // covers the name-based candidate list it was shown.
       suggestedMatchConfidence: autoConnectCustomerId ? null : emailMatch ? "high" : matchCandidate ? (classification?.matchConfidence ?? null) : thread.suggestedMatchConfidence,
       linkedCustomerId: autoConnectCustomerId ?? leadResult?.customerId ?? thread.linkedCustomerId,
-      status: autoConnectCustomerId || leadResult?.justCreated || autoSent ? "replied" : "needs_review",
+      // Spam/irrelevant is auto-dismissed rather than left in needs_review —
+      // same rule as the email side, see that service's comment for why.
+      status:
+        autoConnectCustomerId || leadResult?.justCreated || autoSent
+          ? "replied"
+          : classification?.intent === "spam_or_irrelevant"
+            ? "dismissed"
+            : "needs_review",
       repliedAt: autoConnectCustomerId || leadResult?.justCreated || autoSent ? new Date() : thread.repliedAt,
     })
     .where(eq(unmatchedSmsThreadsTable.id, thread.id))
