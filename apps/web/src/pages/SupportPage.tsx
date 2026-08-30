@@ -320,27 +320,41 @@ function SupportConversationDetailPanel({
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {messages.length === 0 && <p className="text-sm text-gray-400">No messages yet.</p>}
-        {messages.map((m) => (
-          <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
-            <div className={"inline-flex max-w-[75%] flex-col gap-1 " + (m.direction === "inbound" ? "items-start" : "items-end")}>
-              {m.subject && <span className="px-1 text-[11px] font-medium text-gray-500">{m.subject}</span>}
-              <span
-                className={
-                  m.direction === "inbound"
-                    ? "inline-block whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
-                    : "inline-block whitespace-pre-wrap rounded-lg bg-purple-600 px-3 py-2 text-left text-sm text-white"
-                }
-              >
-                {m.body}
-              </span>
-              <div className="flex items-center gap-2 px-1">
-                {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName="Sophie" />}
-                <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>
-                <SentimentBadge sentiment={m.sentiment} />
+        {messages.map((m, i) => {
+          // A bare time ("6:16 PM") with no date reads identically whether
+          // the next message came 20 minutes or 6 days later — this divider
+          // makes the actual gap between sends visible without staff having
+          // to hover/click each timestamp to check.
+          const showDateDivider = i === 0 || formatDate(m.createdAt) !== formatDate(messages[i - 1].createdAt);
+          return (
+            <div key={m.id}>
+              {showDateDivider && (
+                <div className="my-3 flex items-center justify-center">
+                  <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">{formatDate(m.createdAt)}</span>
+                </div>
+              )}
+              <div className={m.direction === "inbound" ? "text-left" : "text-right"}>
+                <div className={"inline-flex max-w-[75%] flex-col gap-1 " + (m.direction === "inbound" ? "items-start" : "items-end")}>
+                  {m.subject && <span className="px-1 text-[11px] font-medium text-gray-500">{m.subject}</span>}
+                  <span
+                    className={
+                      m.direction === "inbound"
+                        ? "inline-block whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
+                        : "inline-block whitespace-pre-wrap rounded-lg bg-purple-600 px-3 py-2 text-left text-sm text-white"
+                    }
+                  >
+                    {m.body}
+                  </span>
+                  <div className="flex items-center gap-2 px-1">
+                    {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName="Sophie" />}
+                    <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>
+                    <SentimentBadge sentiment={m.sentiment} />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="border-t border-gray-200 p-3">
