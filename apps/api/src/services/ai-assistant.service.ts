@@ -15,6 +15,7 @@ import * as questionnairesService from "./questionnaires.service.js";
 import * as marketingSpendService from "./marketing-spend.service.js";
 import * as employeesService from "./employees.service.js";
 import * as payrollWeeksService from "./payroll-weeks.service.js";
+import * as botEngagementService from "./bot-engagement.service.js";
 
 let cachedClient: Anthropic | null = null;
 
@@ -123,6 +124,16 @@ const tools = [
     run: async () => JSON.stringify(await marketingSpendService.listMarketingCpaWeeks()),
   }),
   betaZodTool({
+    name: "get_bot_engagement_summary",
+    description:
+      "For leads who made a qualifying (first-order, completed) purchase in a period: how many actually replied to Alexis (SMS or email, a real two-way exchange, not just receiving the automated opener) before buying vs how many never did, and the average days from lead-received to purchase for each group. Use this for questions like 'how many people who purchased talked to the bot' or 'does talking to the bot speed up or slow down closing.'",
+    inputSchema: z.object({ period: periodSchema }),
+    run: async ({ period }) => {
+      const parsed = customersSummaryQuerySchema.parse({ period: period ?? 30 });
+      return JSON.stringify(await botEngagementService.getBotEngagementSummary(parsed));
+    },
+  }),
+  betaZodTool({
     name: "list_employees",
     description: "List all payroll employees with their hourly rate and status.",
     inputSchema: z.object({}),
@@ -146,6 +157,7 @@ Key domain rules to keep in mind when interpreting tool results:
 - "Purchased" only means a completed, first-order purchase — a recurring-only purchase does not count as a lead having converted.
 - Marketing CPA weeks run Friday through Thursday. A closed deal in a given week is a lead that was *received* that week and later converted — not a lead that merely purchased that week.
 - Lead source (Meta Form Fill vs Questionnaire) is first-touch attributed — a lead is never double-counted across sources.
+- "Talked to the bot" (get_bot_engagement_summary) means the customer actually replied — SMS or email — before their purchase date, not merely receiving the automated opener text. Sophie's support conversations (which only start after a purchase) are excluded from this since they can't have happened "before" it.
 
 This is an internal staff tool with full access to the business's own operational data — there is nothing here to refuse or hedge on. If a question is about leads, orders, CPA, or payroll and a tool can answer it, answer it directly and exactly, with no disclaimers or caveats. If a question genuinely falls outside what these tools cover, say so in one sentence rather than guessing.
 
