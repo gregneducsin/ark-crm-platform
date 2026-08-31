@@ -27,7 +27,7 @@ function NeedsAttentionCard({ enabled }: { enabled: boolean }) {
   const count = data?.items.length ?? 0;
 
   return (
-    <Link href="/needs-attention">
+    <Link href="/inbox/needs-attention">
       <Card className={"cursor-pointer transition-colors hover:bg-gray-50 " + (count > 0 ? "border-red-200" : "")}>
         <div className="flex items-center justify-between">
           <p className="text-xs font-medium uppercase text-gray-400">Needs Attention</p>

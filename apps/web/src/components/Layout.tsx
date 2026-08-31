@@ -10,8 +10,7 @@ import { AiAssistantWidget } from "./AiAssistantWidget";
 
 const NAV_ITEMS: readonly { href: string; label: string; roles: readonly AuthUser["role"][] }[] = [
   { href: "/", label: "Dashboard", roles: ["admin", "manager", "customer_service"] },
-  { href: "/needs-attention", label: "Needs Attention", roles: ["admin", "customer_service"] },
-  { href: "/unmatched-contacts", label: "Unmatched Contacts", roles: ["admin", "customer_service"] },
+  { href: "/inbox", label: "Inbox", roles: ["admin", "customer_service"] },
   { href: "/customers", label: "Leads", roles: ["admin", "manager"] },
   { href: "/orders", label: "Orders", roles: ["admin", "manager"] },
   { href: "/failed-payments", label: "Failed Payments", roles: ["admin", "manager"] },
@@ -51,14 +50,15 @@ export function Layout({ children }: { children: ReactNode }) {
                 href={item.href}
                 className={
                   "flex items-center gap-1.5 " +
-                  ((location === item.href || (item.href === "/payroll/employees" && location.startsWith("/payroll")))
+                  ((location === item.href ||
+                    (item.href === "/payroll/employees" && location.startsWith("/payroll")) ||
+                    (item.href === "/inbox" && location.startsWith("/inbox")))
                     ? "text-sm font-medium text-blue-600"
                     : "text-sm font-medium text-gray-600 hover:text-gray-900")
                 }
               >
                 {item.label}
-                {item.href === "/needs-attention" && needsAttentionCount > 0 && <Badge color="red">{needsAttentionCount}</Badge>}
-                {item.href === "/unmatched-contacts" && unmatchedContactsCount > 0 && <Badge color="yellow">{unmatchedContactsCount}</Badge>}
+                {item.href === "/inbox" && needsAttentionCount + unmatchedContactsCount > 0 && <Badge color="red">{needsAttentionCount + unmatchedContactsCount}</Badge>}
               </Link>
             ))}
           </nav>

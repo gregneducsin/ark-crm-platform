@@ -7,6 +7,7 @@ import { OrdersPage } from "./pages/OrdersPage";
 import { FailedPaymentsPage } from "./pages/FailedPaymentsPage";
 import { WebhookEventsPage } from "./pages/WebhookEventsPage";
 import { AdminLayout } from "./components/AdminLayout";
+import { InboxLayout } from "./components/InboxLayout";
 import { CustomerDetailPage } from "./pages/CustomerDetailPage";
 import { PayrollEmployeesPage } from "./pages/PayrollEmployeesPage";
 import { PayrollWeeksPage } from "./pages/PayrollWeeksPage";
@@ -113,15 +114,23 @@ export default function App() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/needs-attention">
+      <Route path="/inbox">
+        <Redirect to="/inbox/needs-attention" />
+      </Route>
+
+      <Route path="/inbox/needs-attention">
         <ProtectedRoute roles={["admin", "customer_service"]}>
-          <NeedsAttentionPage />
+          <InboxLayout>
+            <NeedsAttentionPage />
+          </InboxLayout>
         </ProtectedRoute>
       </Route>
 
-      <Route path="/unmatched-contacts">
+      <Route path="/inbox/unmatched-contacts">
         <ProtectedRoute roles={["admin", "customer_service"]}>
-          <UnmatchedContactsPage />
+          <InboxLayout>
+            <UnmatchedContactsPage />
+          </InboxLayout>
         </ProtectedRoute>
       </Route>
 
