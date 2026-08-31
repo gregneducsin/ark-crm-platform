@@ -25,7 +25,7 @@ export function UsersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Users</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Users</h1>
         <Button onClick={() => setShowInvite((s) => !s)}>{showInvite ? "Cancel" : "Invite user"}</Button>
       </div>
 
@@ -164,7 +164,7 @@ function InviteUserForm({ onDone }: { onDone: () => void }) {
         </Field>
         <Field label="Role">
           <select
-            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-ark-blue-500 focus:outline-none focus:ring-1 focus:ring-ark-blue-500"
             value={form.role}
             onChange={(e) => setForm({ ...form, role: e.target.value as AuthUser["role"] })}
           >

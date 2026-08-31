@@ -11,7 +11,7 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
       <p className="text-xs font-medium uppercase text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-ark-ink">{value}</p>
     </Card>
   );
 }
@@ -33,7 +33,7 @@ function NeedsAttentionCard({ enabled }: { enabled: boolean }) {
           <p className="text-xs font-medium uppercase text-gray-400">Needs Attention</p>
           {count > 0 && <Badge color="red">flagged</Badge>}
         </div>
-        <p className="mt-1 text-2xl font-semibold text-gray-900">{data === undefined ? "…" : count}</p>
+        <p className="mt-1 text-2xl font-semibold text-ark-ink">{data === undefined ? "…" : count}</p>
         <p className="mt-1 text-xs text-gray-400">Across SMS and email — click to review</p>
       </Card>
     </Link>
@@ -83,7 +83,7 @@ function DateRangePicker({
           <button
             key={p}
             onClick={() => onPresetChange(p)}
-            className={"rounded px-2 py-1 text-xs font-medium " + (preset === p ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+            className={"rounded px-2 py-1 text-xs font-medium " + (preset === p ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
           >
             {RANGE_PRESET_LABEL[p]}
           </button>
@@ -119,8 +119,8 @@ function FunnelSummaryCard({ range, enabled }: { range?: DateRangeQuery; enabled
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-900">Lead → Purchase Funnel</h2>
-        <Link href="/reporting" className="text-xs font-medium text-blue-600 hover:underline">
+        <h2 className="text-sm font-semibold text-ark-ink">Lead → Purchase Funnel</h2>
+        <Link href="/reporting" className="text-xs font-medium text-ark-blue-600 hover:underline">
           Full report →
         </Link>
       </div>
@@ -129,21 +129,21 @@ function FunnelSummaryCard({ range, enabled }: { range?: DateRangeQuery; enabled
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div>
             <p className="text-xs font-medium uppercase text-gray-400">Leads</p>
-            <p className="mt-1 text-xl font-semibold text-gray-900">{data.totalLeads}</p>
+            <p className="mt-1 text-xl font-semibold text-ark-ink">{data.totalLeads}</p>
           </div>
           <div>
             <p className="text-xs font-medium uppercase text-gray-400">Started</p>
-            <p className="mt-1 text-xl font-semibold text-gray-900">{data.questionnaireStarted}</p>
+            <p className="mt-1 text-xl font-semibold text-ark-ink">{data.questionnaireStarted}</p>
             <p className="text-xs text-gray-400">{pct(data.questionnaireStarted, data.totalLeads)}</p>
           </div>
           <div>
             <p className="text-xs font-medium uppercase text-gray-400">Submitted</p>
-            <p className="mt-1 text-xl font-semibold text-gray-900">{data.questionnaireSubmitted}</p>
+            <p className="mt-1 text-xl font-semibold text-ark-ink">{data.questionnaireSubmitted}</p>
             <p className="text-xs text-gray-400">{pct(data.questionnaireSubmitted, data.questionnaireStarted)}</p>
           </div>
           <div>
             <p className="text-xs font-medium uppercase text-gray-400">Purchased</p>
-            <p className="mt-1 text-xl font-semibold text-gray-900">{data.purchased}</p>
+            <p className="mt-1 text-xl font-semibold text-ark-ink">{data.purchased}</p>
             <p className="text-xs text-gray-400">{pct(data.purchased, data.questionnaireSubmitted)}</p>
           </div>
         </div>
@@ -175,7 +175,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Dashboard</h1>
         <DateRangePicker
           preset={preset}
           customFrom={customFrom}

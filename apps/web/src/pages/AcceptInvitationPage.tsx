@@ -30,12 +30,12 @@ export function AcceptInvitationPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <Card className="w-full max-w-sm">
-        <h1 className="mb-1 text-lg font-semibold text-gray-900">Set your password</h1>
+        <h1 className="mb-1 text-lg font-semibold text-ark-ink">Set your password</h1>
         <p className="mb-4 text-sm text-gray-500">Choose a password to activate your account.</p>
         {acceptInvitation.isSuccess ? (
           <div className="space-y-3">
             <p className="text-sm text-green-700">Password set. You can now log in.</p>
-            <Link href="/login" className="inline-block text-sm font-medium text-blue-600 hover:underline">
+            <Link href="/login" className="inline-block text-sm font-medium text-ark-blue-600 hover:underline">
               Go to login →
             </Link>
           </div>

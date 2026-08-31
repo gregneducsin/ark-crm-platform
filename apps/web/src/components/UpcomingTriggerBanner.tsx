@@ -37,7 +37,7 @@ export function UpcomingTriggerBanner({ personId }: { personId: string | null })
       {canCancel && (
         <button
           type="button"
-          className="text-blue-500 hover:underline disabled:text-gray-300"
+          className="text-ark-blue-500 hover:underline disabled:text-gray-300"
           disabled={cancelTrigger.isPending}
           onClick={() => cancelTrigger.mutate(trigger.kind)}
         >

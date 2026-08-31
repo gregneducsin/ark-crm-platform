@@ -45,7 +45,7 @@ function WebhookEventRow({ item }: { item: WebhookEventItem }) {
         </td>
         <td className="px-4 py-2">
           {item.personId ? (
-            <Link href={`/customers/${item.personId}`} className="font-medium text-blue-600 hover:underline">
+            <Link href={`/customers/${item.personId}`} className="font-medium text-ark-blue-600 hover:underline">
               {item.customerName || "(no name)"}
             </Link>
           ) : (
@@ -78,7 +78,7 @@ export function WebhookEventsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Webhook Log</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Webhook Log</h1>
         {data && <p className="text-sm text-gray-500">{data.items.length} shown</p>}
       </div>
       <p className="text-xs text-gray-400">

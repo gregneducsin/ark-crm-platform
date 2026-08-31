@@ -92,7 +92,7 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
     <div className="space-y-2 px-4 pb-3">
       {data.messages.map((m) => (
         <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
-          <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-blue-600 text-white")}>
+          <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {"subject" in m && <p className="mb-0.5 font-semibold">{m.subject}</p>}
             <p className="whitespace-pre-wrap">{m.body}</p>
           </div>
@@ -141,14 +141,14 @@ function ThreadRow({
               type="checkbox"
               checked={selected}
               onChange={onToggleSelect}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-gray-300 text-ark-blue-600 focus:ring-ark-blue-500"
               aria-label={`Select ${thread.contactLabel}`}
             />
           </label>
         )}
         <button onClick={() => setExpanded((e) => !e)} className="block min-w-0 flex-1 px-4 py-3 text-left hover:bg-gray-50">
           <div className="flex items-center justify-between">
-            <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+            <span className="flex items-center gap-2 text-sm font-medium text-ark-ink">
               <Badge color={thread.channel === "email" ? "blue" : "green"}>{thread.channel === "email" ? "Email" : "Text"}</Badge>
               {thread.contactLabel}
               {thread.aiIntent && <Badge color={INTENT_COLOR[thread.aiIntent] ?? "gray"}>{INTENT_LABEL[thread.aiIntent] ?? thread.aiIntent}</Badge>}
@@ -204,7 +204,7 @@ function ThreadRow({
                 {thread.suggestedReply ? "Claude's suggested reply — review and edit before sending:" : "No suggested reply — write one, or dismiss:"}
               </p>
               <textarea
-                className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-ark-blue-500 focus:outline-none focus:ring-1 focus:ring-ark-blue-500"
                 rows={4}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -285,7 +285,7 @@ export function UnmatchedContactsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Unmatched Contacts</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Unmatched Contacts</h1>
         {!isLoading && <p className="text-sm text-gray-500">{needsReview.length} awaiting review</p>}
       </div>
 
@@ -302,7 +302,7 @@ export function UnmatchedContactsPage() {
             onClick={() => changeChannel(opt.value)}
             className={
               "flex items-center gap-1.5 rounded px-3 py-1 font-medium " +
-              (channel === opt.value ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50")
+              (channel === opt.value ? "bg-ark-blue-600 text-white" : "text-gray-600 hover:bg-gray-50")
             }
           >
             {opt.label}
@@ -335,7 +335,7 @@ export function UnmatchedContactsPage() {
               type="checkbox"
               checked={allSelected}
               onChange={toggleSelectAll}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-gray-300 text-ark-blue-600 focus:ring-ark-blue-500"
             />
             Select all
           </label>

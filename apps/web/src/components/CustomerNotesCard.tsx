@@ -25,13 +25,13 @@ export function CustomerNotesCard({ customerId }: { customerId: string }) {
 
   return (
     <Card>
-      <h2 className="text-sm font-semibold text-gray-900">Notes</h2>
+      <h2 className="text-sm font-semibold text-ark-ink">Notes</h2>
       <p className="text-xs text-gray-500">Internal staff notes — never shown to the customer.</p>
 
       {canEdit && (
         <div className="mt-3">
           <textarea
-            className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-ark-blue-500 focus:outline-none focus:ring-1 focus:ring-ark-blue-500"
             rows={2}
             placeholder="Add a note…"
             value={draft}

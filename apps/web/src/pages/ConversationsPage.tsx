@@ -37,7 +37,7 @@ function SenderBadge({ sentBy, staffEmail, botName }: { sentBy: "ai" | "staff" |
 /** Which pipeline a message came from — the piece of context the old separate pages got for free from which tab you were on, now that everything's interleaved. */
 function ThreadBadge({ persona, channel }: { persona: ConversationPersona; channel: UnifiedConversationChannel }) {
   return (
-    <span className={"rounded px-1.5 py-0.5 text-[10px] font-medium uppercase " + (persona === "sales" ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600")}>
+    <span className={"rounded px-1.5 py-0.5 text-[10px] font-medium uppercase " + (persona === "sales" ? "bg-ark-blue-50 text-ark-blue-600" : "bg-purple-50 text-purple-600")}>
       {PERSONA_LABEL[persona]} · {CHANNEL_LABEL[channel]}
     </span>
   );
@@ -73,15 +73,15 @@ function SalesResponseSummary() {
       <div className="grid grid-cols-3 gap-3">
         <div>
           <p className="text-xs font-medium uppercase text-gray-400">Sales contacted</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalContacted ?? "…"}</p>
+          <p className="mt-1 text-2xl font-semibold text-ark-ink">{stats?.totalContacted ?? "…"}</p>
         </div>
         <div>
           <p className="text-xs font-medium uppercase text-gray-400">Sales responded</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalResponded ?? "…"}</p>
+          <p className="mt-1 text-2xl font-semibold text-ark-ink">{stats?.totalResponded ?? "…"}</p>
         </div>
         <div>
           <p className="text-xs font-medium uppercase text-gray-400">Response rate</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{ratePct === null ? "…" : `${ratePct}%`}</p>
+          <p className="mt-1 text-2xl font-semibold text-ark-ink">{ratePct === null ? "…" : `${ratePct}%`}</p>
         </div>
       </div>
       <p className="mt-2 text-xs text-gray-400">Sales (Alexis) leads only, each contact counted once regardless of channel or how many messages went back and forth.</p>
@@ -111,19 +111,19 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
     <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
       <div className="border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Conversations</h2>
+          <h2 className="text-sm font-semibold text-ark-ink">Conversations</h2>
           {attentionCount > 0 && <Badge color="red">{attentionCount} need attention</Badge>}
         </div>
         <div className="mt-2 flex gap-1">
           <button
             onClick={() => setOnlyNeedsAttention(false)}
-            className={"rounded px-2 py-1 text-xs font-medium " + (!onlyNeedsAttention ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+            className={"rounded px-2 py-1 text-xs font-medium " + (!onlyNeedsAttention ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
           >
             All
           </button>
           <button
             onClick={() => setOnlyNeedsAttention(true)}
-            className={"rounded px-2 py-1 text-xs font-medium " + (onlyNeedsAttention ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+            className={"rounded px-2 py-1 text-xs font-medium " + (onlyNeedsAttention ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
           >
             Needs attention
           </button>
@@ -133,7 +133,7 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
             <button
               key={key}
               onClick={() => setLeadSourceFilter(key)}
-              className={"rounded px-2 py-1 text-xs font-medium " + (leadSourceFilter === key ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+              className={"rounded px-2 py-1 text-xs font-medium " + (leadSourceFilter === key ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
             >
               {LEAD_SOURCE_FILTER_LABELS[key]}
             </button>
@@ -148,10 +148,10 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
           <button
             key={c.personId}
             onClick={() => onSelect(c.personId, c.firstName, c.lastName)}
-            className={"block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedPersonId === c.personId ? "bg-blue-50" : "")}
+            className={"block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedPersonId === c.personId ? "bg-ark-blue-50" : "")}
           >
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-ark-ink">
                 {c.needsAttention && <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label="Needs attention" />}
                 {c.firstName} {c.lastName}
               </span>
@@ -207,7 +207,7 @@ function StaffReplyBox({ personId, targets, defaultTarget }: { personId: string;
               <button
                 key={`${t.persona}-${t.channel}`}
                 onClick={() => setTarget(t)}
-                className={"rounded px-2 py-1 text-[11px] font-medium " + (active ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+                className={"rounded px-2 py-1 text-[11px] font-medium " + (active ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
               >
                 Reply as {BOT_NAME[t.persona]} ({CHANNEL_LABEL[t.channel]})
               </button>
@@ -271,7 +271,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
 
   const header = (
     <div className="border-b border-gray-200 px-4 py-3">
-      <p className="text-sm font-semibold text-gray-900">
+      <p className="text-sm font-semibold text-ark-ink">
         {firstName} {lastName}
       </p>
     </div>
@@ -304,7 +304,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
       <div className="border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <div>
-            <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+            <p className="flex items-center gap-2 text-sm font-semibold text-ark-ink">
               {customer.firstName} {customer.lastName}
               {customer.hasQualifyingPurchase && <Badge color="green">Purchased</Badge>}
               {needsAttention && <Badge color="red">Needs attention</Badge>}
@@ -349,7 +349,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
             <button
               key={key}
               onClick={() => setChannelFilter(key)}
-              className={"rounded px-2 py-1 text-xs font-medium " + (channelFilter === key ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+              className={"rounded px-2 py-1 text-xs font-medium " + (channelFilter === key ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600")}
             >
               {CHANNEL_FILTER_LABELS[key]}
             </button>
@@ -383,7 +383,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                       m.direction === "inbound"
                         ? "inline-block whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
                         : "inline-block whitespace-pre-wrap rounded-lg px-3 py-2 text-left text-sm text-white " +
-                          (m.persona === "sales" ? "bg-blue-600" : "bg-purple-600")
+                          (m.persona === "sales" ? "bg-ark-blue-600" : "bg-purple-600")
                     }
                   >
                     {m.body}

@@ -27,7 +27,7 @@ export function PayrollWeekDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">
+          <h1 className="text-xl font-semibold text-ark-ink">
             {week.weekStart} – {week.weekEnd}
           </h1>
           <Badge color={week.status === "paid" ? "green" : week.status === "approved" ? "blue" : "gray"}>{week.status}</Badge>
@@ -131,7 +131,7 @@ function HoursEntryForm({ weekId }: { weekId: string }) {
 
   return (
     <Card>
-      <h2 className="mb-2 text-sm font-semibold text-gray-900">Enter hours</h2>
+      <h2 className="mb-2 text-sm font-semibold text-ark-ink">Enter hours</h2>
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
         <Field label="Employee">
           <select
@@ -181,7 +181,7 @@ function BonusForm({ weekId }: { weekId: string }) {
 
   return (
     <Card>
-      <h2 className="mb-2 text-sm font-semibold text-gray-900">Add bonus</h2>
+      <h2 className="mb-2 text-sm font-semibold text-ark-ink">Add bonus</h2>
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
         <Field label="Employee">
           <select

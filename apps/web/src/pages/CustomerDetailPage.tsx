@@ -35,7 +35,7 @@ export function CustomerDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">
+          <h1 className="text-xl font-semibold text-ark-ink">
             {customer.firstName} {customer.lastName}
           </h1>
           <p className="text-sm text-gray-500">{customer.personNumber}</p>
@@ -75,7 +75,7 @@ export function CustomerDetailPage() {
 
       {questionnaireEvents.length > 0 && (
         <Card>
-          <h2 className="text-sm font-semibold text-gray-900">Questionnaire / Funnel</h2>
+          <h2 className="text-sm font-semibold text-ark-ink">Questionnaire / Funnel</h2>
           <p className="text-xs text-gray-500">Where this lead came from — every questionnaire they have an event for, most recent first.</p>
           <div className="mt-3 space-y-2">
             {questionnaireEvents.map((qe) => (
@@ -94,7 +94,7 @@ export function CustomerDetailPage() {
       {canEdit && <IntakeLinkCard customerId={customer.id} />}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-900">Purchase history</h2>
+        <h2 className="text-sm font-semibold text-ark-ink">Purchase history</h2>
         {canEdit && <Button onClick={() => setShowAddPurchase((s) => !s)}>{showAddPurchase ? "Cancel" : "Add purchase"}</Button>}
       </div>
 
@@ -144,7 +144,7 @@ function IntakeLinkCard({ customerId }: { customerId: string }) {
     <Card>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">Signup link</h2>
+          <h2 className="text-sm font-semibold text-ark-ink">Signup link</h2>
           <p className="text-xs text-gray-500">
             Only send this once the lead has actually agreed to fill out the form — it starts the 2-hour follow-up timer as soon as
             they click it.

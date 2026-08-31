@@ -34,7 +34,7 @@ function SummaryTile({ label, value, hint }: { label: string; value: string | nu
   return (
     <Card>
       <p className="text-xs font-medium uppercase text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-ark-ink">{value}</p>
       {hint && <p className="mt-1 text-xs text-gray-400">{hint}</p>}
     </Card>
   );
@@ -49,7 +49,7 @@ function SummaryBar() {
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm text-gray-500">
-          Summary for <span className="font-medium text-gray-900">{periodLabel}</span>
+          Summary for <span className="font-medium text-ark-ink">{periodLabel}</span>
         </p>
         <select
           className="rounded-md border border-gray-300 px-2 py-1 text-sm"
@@ -114,7 +114,7 @@ export function OrdersPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-gray-900">Orders</h1>
+      <h1 className="text-xl font-semibold text-ark-ink">Orders</h1>
 
       <SummaryBar />
 
@@ -179,7 +179,7 @@ export function OrdersPage() {
                   <td className="px-4 py-2 text-gray-600">{p.purchaseDate}</td>
                   <td className="px-4 py-2 text-gray-800">{p.orderNumber}</td>
                   <td className="px-4 py-2">
-                    <Link href={`/customers/${p.customerId}`} className="font-medium text-blue-600 hover:underline">
+                    <Link href={`/customers/${p.customerId}`} className="font-medium text-ark-blue-600 hover:underline">
                       {p.customerFirstName} {p.customerLastName}
                     </Link>
                     <div className="text-xs text-gray-400">{p.customerPersonNumber}</div>

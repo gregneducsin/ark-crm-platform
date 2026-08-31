@@ -1,1 +1,36 @@
 @import "tailwindcss";
+
+/*
+ * Ark Health brand tokens — from Ark_Health_Branding.docx (2026-08-31).
+ * Confirmed palette: Black #1A1A1A, Blue #289BC2, Slate #4F6D7A (labeled
+ * "Red" in the source doc, but functions as a muted secondary tone —
+ * status colors below are conventional red/green/amber, not this), Yellow
+ * #F2FC90, Light grey #F2F2F2. ark-blue-500 is the confirmed brand blue;
+ * the rest of the ark-blue scale is derived from it for hover/active states.
+ */
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-ark-blue-50: #eaf6fa;
+  --color-ark-blue-100: #d2ecf4;
+  --color-ark-blue-200: #a6d9e9;
+  --color-ark-blue-300: #79c6de;
+  --color-ark-blue-400: #4db2d3;
+  --color-ark-blue-500: #289bc2;
+  --color-ark-blue-600: #217e9e;
+  --color-ark-blue-700: #1a6178;
+  --color-ark-blue-800: #134450;
+  --color-ark-blue-900: #0c2a31;
+
+  --color-ark-ink: #1a1a1a;
+  --color-ark-slate: #4f6d7a;
+  --color-ark-highlight: #f2fc90;
+  --color-ark-surface: #f2f2f2;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ark-ink);
+  background-color: var(--color-ark-surface);
+}

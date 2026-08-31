@@ -5,10 +5,10 @@ export function Button({ className, variant = "primary", ...props }: ButtonHTMLA
   return (
     <button
       className={clsx(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "bg-blue-600 text-white hover:bg-blue-700",
-        variant === "secondary" && "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
-        variant === "danger" && "bg-red-600 text-white hover:bg-red-700",
+        "rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
+        variant === "primary" && "bg-ark-blue-600 text-white shadow-sm hover:bg-ark-blue-700 focus-visible:ring-ark-blue-500",
+        variant === "secondary" && "border border-gray-200 bg-white text-ark-ink hover:bg-ark-surface focus-visible:ring-ark-blue-500",
+        variant === "danger" && "bg-red-600 text-white shadow-sm hover:bg-red-700 focus-visible:ring-red-500",
         className,
       )}
       {...props}
@@ -20,7 +20,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={clsx(
-        "w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500",
+        "w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-ark-ink placeholder:text-gray-400 focus:border-ark-blue-500 focus:outline-none focus:ring-1 focus:ring-ark-blue-500",
         className,
       )}
       {...props}
@@ -29,13 +29,13 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
 }
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={clsx("rounded-lg border border-gray-200 bg-white p-4 shadow-sm", className)}>{children}</div>;
+  return <div className={clsx("rounded-xl border border-gray-200/70 bg-white p-4 shadow-sm", className)}>{children}</div>;
 }
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-600">{label}</span>
+      <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</span>
       {children}
     </label>
   );
@@ -48,11 +48,11 @@ export function ErrorText({ children }: { children: ReactNode }) {
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ark-ink/40 px-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-lg">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+          <h2 className="text-sm font-semibold text-ark-ink">{title}</h2>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-ark-ink" aria-label="Close">
             ✕
           </button>
         </div>
@@ -65,10 +65,10 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 export function Badge({ children, color = "gray" }: { children: ReactNode; color?: "gray" | "green" | "yellow" | "red" | "blue" | "purple" }) {
   const colors: Record<string, string> = {
     gray: "bg-gray-100 text-gray-700",
-    green: "bg-green-100 text-green-700",
-    yellow: "bg-yellow-100 text-yellow-700",
+    green: "bg-emerald-100 text-emerald-700",
+    yellow: "bg-amber-100 text-amber-700",
     red: "bg-red-100 text-red-700",
-    blue: "bg-blue-100 text-blue-700",
+    blue: "bg-ark-blue-100 text-ark-blue-700",
     purple: "bg-purple-100 text-purple-700",
   };
   return <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", colors[color])}>{children}</span>;

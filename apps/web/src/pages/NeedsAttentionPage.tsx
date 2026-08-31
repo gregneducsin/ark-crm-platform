@@ -28,7 +28,7 @@ function ItemMessages({ item }: { item: NeedsAttentionItem }) {
     <div className="space-y-2 px-4 pb-3">
       {data.messages.map((m) => (
         <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
-          <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-blue-600 text-white")}>
+          <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {m.subject && <p className="mb-0.5 font-semibold">{m.subject}</p>}
             <p className="whitespace-pre-wrap">{m.body}</p>
           </div>
@@ -47,7 +47,7 @@ function NeedsAttentionRow({ item }: { item: NeedsAttentionItem }) {
     <Card className="p-0">
       <button onClick={() => setExpanded((e) => !e)} className="block w-full px-4 py-3 text-left hover:bg-gray-50">
         <div className="flex items-center justify-between">
-          <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
+          <span className="flex items-center gap-2 text-sm font-medium text-ark-ink">
             <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-label="Needs attention" />
             {item.firstName} {item.lastName}
             <Badge color={item.channel === "sms" ? "blue" : "purple"}>{CHANNEL_LABEL[item.channel]}</Badge>
@@ -62,7 +62,7 @@ function NeedsAttentionRow({ item }: { item: NeedsAttentionItem }) {
         <div className="border-t border-gray-100">
           <ItemMessages item={item} />
           <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
-            <a href={`/conversations?personId=${item.personId}`} className="text-xs font-medium text-blue-600 hover:underline">
+            <a href={`/conversations?personId=${item.personId}`} className="text-xs font-medium text-ark-blue-600 hover:underline">
               Open full thread to reply →
             </a>
             <Button
@@ -89,7 +89,7 @@ export function NeedsAttentionPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Needs Attention</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Needs Attention</h1>
         {data && <p className="text-sm text-gray-500">{data.items.length} flagged across SMS and email</p>}
       </div>
       <p className="text-xs text-gray-400">

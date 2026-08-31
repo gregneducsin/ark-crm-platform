@@ -37,7 +37,7 @@ export function InboxLayout({ children }: { children: ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
-              className={"flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium " + (active ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+              className={"flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors " + (active ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-ark-surface")}
             >
               {item.label}
               {item.count > 0 && <Badge color={active ? "gray" : "red"}>{item.count}</Badge>}

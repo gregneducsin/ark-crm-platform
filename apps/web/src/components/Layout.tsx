@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
+import clsx from "clsx";
 import type { AuthUser } from "@luma/shared";
 import { useCurrentUser, useLogout } from "../hooks/useAuth";
 import { useNeedsAttentionList } from "../hooks/useNeedsAttention";
@@ -38,28 +39,30 @@ export function Layout({ children }: { children: ReactNode }) {
   const visibleNavItems = NAV_ITEMS.filter((item) => !role || item.roles.includes(role));
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-ark-surface">
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-[1800px] items-center justify-between px-4 py-3">
-          <nav className="flex items-center gap-4">
-            <span className="mr-2 text-sm font-semibold text-gray-900">Ark Health</span>
-            {visibleNavItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={
-                  "flex items-center gap-1.5 " +
-                  ((location === item.href ||
-                    (item.href === "/payroll/employees" && location.startsWith("/payroll")) ||
-                    (item.href === "/inbox" && location.startsWith("/inbox")))
-                    ? "text-sm font-medium text-blue-600"
-                    : "text-sm font-medium text-gray-600 hover:text-gray-900")
-                }
-              >
-                {item.label}
-                {item.href === "/inbox" && needsAttentionCount + unmatchedContactsCount > 0 && <Badge color="red">{needsAttentionCount + unmatchedContactsCount}</Badge>}
-              </Link>
-            ))}
+          <nav className="flex items-center gap-1">
+            <span className="mr-3 text-base font-extrabold tracking-tight text-ark-ink">Ark Health</span>
+            {visibleNavItems.map((item) => {
+              const isActive =
+                location === item.href ||
+                (item.href === "/payroll/employees" && location.startsWith("/payroll")) ||
+                (item.href === "/inbox" && location.startsWith("/inbox"));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={clsx(
+                    "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
+                    isActive ? "bg-ark-blue-50 text-ark-blue-700" : "text-gray-600 hover:bg-ark-surface hover:text-ark-ink",
+                  )}
+                >
+                  {item.label}
+                  {item.href === "/inbox" && needsAttentionCount + unmatchedContactsCount > 0 && <Badge color="red">{needsAttentionCount + unmatchedContactsCount}</Badge>}
+                </Link>
+              );
+            })}
           </nav>
           <div className="flex items-center gap-3">
             {data?.user && <span className="text-sm text-gray-500">{data.user.email}</span>}

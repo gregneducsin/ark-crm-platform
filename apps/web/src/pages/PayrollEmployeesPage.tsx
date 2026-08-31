@@ -12,7 +12,7 @@ export function PayrollEmployeesPage() {
     <div className="space-y-4">
       <PayrollSubNav />
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Employees</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Employees</h1>
         <Button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New employee"}</Button>
       </div>
 

@@ -16,7 +16,7 @@ function SummaryTile({ label, value }: { label: string; value: string | number }
   return (
     <Card>
       <p className="text-xs font-medium uppercase text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-ark-ink">{value}</p>
     </Card>
   );
 }
@@ -30,7 +30,7 @@ function SummaryBar() {
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm text-gray-500">
-          Summary for <span className="font-medium text-gray-900">{periodLabel}</span>
+          Summary for <span className="font-medium text-ark-ink">{periodLabel}</span>
         </p>
         <select
           className="rounded-md border border-gray-300 px-2 py-1 text-sm"
@@ -101,7 +101,7 @@ function SortHeader({
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`flex items-center gap-1 font-medium uppercase ${active ? "text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+        className={`flex items-center gap-1 font-medium uppercase ${active ? "text-ark-ink" : "text-gray-500 hover:text-gray-700"}`}
       >
         {label}
         <span className="text-[10px]">{active ? (sortDir === "asc" ? "▲" : "▼") : ""}</span>
@@ -164,7 +164,7 @@ export function LeadsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Leads</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Leads</h1>
         {canEdit && <Button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New lead"}</Button>}
       </div>
 
@@ -256,7 +256,7 @@ export function LeadsPage() {
                 return (
                   <tr key={c.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                     <td className="px-3 py-2">
-                      <Link href={`/customers/${c.id}`} className="font-medium text-blue-600 hover:underline">
+                      <Link href={`/customers/${c.id}`} className="font-medium text-ark-blue-600 hover:underline">
                         {c.firstName} {c.lastName}
                       </Link>
                       <div className="text-xs text-gray-400">{c.personNumber}</div>

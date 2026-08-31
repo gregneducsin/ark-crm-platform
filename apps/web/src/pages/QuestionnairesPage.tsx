@@ -14,7 +14,7 @@ function SummaryTile({ label, value }: { label: string; value: string | number }
   return (
     <Card>
       <p className="text-xs font-medium uppercase text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-ark-ink">{value}</p>
     </Card>
   );
 }
@@ -43,7 +43,7 @@ function SortHeader({
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`flex items-center gap-1 font-medium uppercase ml-auto ${active ? "text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+        className={`flex items-center gap-1 font-medium uppercase ml-auto ${active ? "text-ark-ink" : "text-gray-500 hover:text-gray-700"}`}
       >
         {label}
         <span className="text-[10px]">{active ? (sortDir === "asc" ? "▲" : "▼") : ""}</span>
@@ -97,14 +97,14 @@ export function QuestionnairesPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Questionnaires</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Questionnaires</h1>
         <p className="text-sm text-gray-500">Performance by questionnaire source.</p>
       </div>
 
       <Card>
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm text-gray-500">
-            Summary for <span className="font-medium text-gray-900">{periodLabel}</span>
+            Summary for <span className="font-medium text-ark-ink">{periodLabel}</span>
           </p>
           <select
             className="rounded-md border border-gray-300 px-2 py-1 text-sm"
@@ -152,7 +152,7 @@ export function QuestionnairesPage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.questionnaireId} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-900">{r.questionnaireId}</td>
+                  <td className="px-4 py-2 font-medium text-ark-ink">{r.questionnaireId}</td>
                   <td className="px-4 py-2 text-right text-gray-700">{r.leads}</td>
                   <td className="px-4 py-2 text-right text-gray-700">{r.customers}</td>
                   <td className="px-4 py-2 text-right text-gray-700">{r.conversionRate}%</td>

@@ -14,7 +14,7 @@ export function PayrollSubNav() {
         <Link
           key={t.href}
           href={t.href}
-          className={"rounded px-3 py-1.5 text-sm font-medium " + (location.startsWith(t.href) ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+          className={"rounded px-3 py-1.5 text-sm font-medium " + (location.startsWith(t.href) ? "bg-ark-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
         >
           {t.label}
         </Link>

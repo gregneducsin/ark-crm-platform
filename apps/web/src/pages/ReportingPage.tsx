@@ -31,7 +31,7 @@ function FunnelSection() {
 
   return (
     <Card>
-      <h2 className="text-sm font-semibold text-gray-900">Lead → Purchase Funnel</h2>
+      <h2 className="text-sm font-semibold text-ark-ink">Lead → Purchase Funnel</h2>
       <p className="mt-1 text-xs text-gray-400">All-time, distinct customers at each stage. Percentage is of the stage immediately before it.</p>
       {isLoading && <p className="mt-4 text-sm text-gray-400">Loading…</p>}
       {data && (
@@ -39,7 +39,7 @@ function FunnelSection() {
           {stages.map((s) => (
             <div key={s.label}>
               <p className="text-xs font-medium uppercase text-gray-400">{s.label}</p>
-              <p className="mt-1 text-2xl font-semibold text-gray-900">{s.value}</p>
+              <p className="mt-1 text-2xl font-semibold text-ark-ink">{s.value}</p>
               {s.ofPrevious !== null && <p className="text-xs text-gray-400">{s.ofPrevious} of previous stage</p>}
             </div>
           ))}
@@ -57,7 +57,7 @@ function MessagingSection() {
 
   return (
     <Card>
-      <h2 className="text-sm font-semibold text-gray-900">Messaging</h2>
+      <h2 className="text-sm font-semibold text-ark-ink">Messaging</h2>
       <p className="mt-1 text-xs text-gray-400">All-time message volume and average response time (an outbound reply directly following an inbound message), by channel.</p>
       {isLoading && <p className="mt-4 text-sm text-gray-400">Loading…</p>}
       {data && (
@@ -77,7 +77,7 @@ function MessagingSection() {
                 const rt = data.responseTimes.find((r) => r.channel === v.channel);
                 return (
                   <tr key={v.channel} className="border-b border-gray-100">
-                    <td className="py-2 pr-4 font-medium capitalize text-gray-900">{v.channel}</td>
+                    <td className="py-2 pr-4 font-medium capitalize text-ark-ink">{v.channel}</td>
                     <td className="py-2 pr-4 text-gray-600">{v.inbound}</td>
                     <td className="py-2 pr-4 text-gray-600">{v.outbound}</td>
                     <td className="py-2 pr-4 text-gray-600">{formatDuration(rt?.avgResponseSeconds ?? null)}</td>
@@ -96,7 +96,7 @@ function MessagingSection() {
 export function ReportingPage() {
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold text-gray-900">Reporting</h1>
+      <h1 className="text-xl font-semibold text-ark-ink">Reporting</h1>
       <FunnelSection />
       <MessagingSection />
     </div>

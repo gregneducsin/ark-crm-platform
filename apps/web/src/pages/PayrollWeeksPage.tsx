@@ -19,7 +19,7 @@ export function PayrollWeeksPage() {
     <div className="space-y-4">
       <PayrollSubNav />
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Payroll weeks</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Payroll weeks</h1>
         <Button onClick={() => setShowCreate((s) => !s)}>{showCreate ? "Cancel" : "New week"}</Button>
       </div>
 
@@ -40,7 +40,7 @@ export function PayrollWeeksPage() {
               {data?.weeks.map((w) => (
                 <tr key={w.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2">
-                    <Link href={`/payroll/weeks/${w.id}`} className="font-medium text-blue-600 hover:underline">
+                    <Link href={`/payroll/weeks/${w.id}`} className="font-medium text-ark-blue-600 hover:underline">
                       {w.weekStart} – {w.weekEnd}
                     </Link>
                   </td>

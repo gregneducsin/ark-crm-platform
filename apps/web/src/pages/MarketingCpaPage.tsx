@@ -96,7 +96,7 @@ function Row({ label, value, emphasize }: { label: string; value: string; emphas
   return (
     <div className="flex items-center justify-between">
       <span className="text-gray-500">{label}</span>
-      <span className={emphasize ? "text-base font-semibold text-gray-900" : "font-medium text-gray-800"}>{value}</span>
+      <span className={emphasize ? "text-base font-semibold text-ark-ink" : "font-medium text-gray-800"}>{value}</span>
     </div>
   );
 }
@@ -133,20 +133,20 @@ export function MarketingCpaPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Marketing CPA</h1>
+        <h1 className="text-xl font-semibold text-ark-ink">Marketing CPA</h1>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border border-gray-300 bg-white p-0.5 text-sm">
             <button
               type="button"
               onClick={() => setMode("weekly")}
-              className={`rounded px-3 py-1 ${mode === "weekly" ? "bg-blue-600 text-white" : "text-gray-600"}`}
+              className={`rounded px-3 py-1 ${mode === "weekly" ? "bg-ark-blue-600 text-white" : "text-gray-600"}`}
             >
               Weekly
             </button>
             <button
               type="button"
               onClick={() => setMode("monthly")}
-              className={`rounded px-3 py-1 ${mode === "monthly" ? "bg-blue-600 text-white" : "text-gray-600"}`}
+              className={`rounded px-3 py-1 ${mode === "monthly" ? "bg-ark-blue-600 text-white" : "text-gray-600"}`}
             >
               Monthly
             </button>
@@ -173,7 +173,7 @@ export function MarketingCpaPage() {
               ← Prev
             </button>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-900">
+              <p className="text-sm font-medium text-ark-ink">
                 {currentWeek.weekStart} – {currentWeek.weekEnd}
               </p>
               <Button variant="secondary" className="mt-1" onClick={() => setShowManageSpend(true)}>
@@ -209,7 +209,7 @@ export function MarketingCpaPage() {
             >
               ← Prev
             </button>
-            <p className="text-sm font-medium text-gray-900">{monthLabel(currentMonth[0])}</p>
+            <p className="text-sm font-medium text-ark-ink">{monthLabel(currentMonth[0])}</p>
             <button
               type="button"
               onClick={() => setMonthIndex((i) => Math.min(i + 1, months.length - 1))}
@@ -251,7 +251,7 @@ export function MarketingCpaPage() {
                       setMode("weekly");
                       setWeekIndex(weeks.length - 1 - idx);
                     }}
-                    className="font-medium text-blue-600 hover:underline"
+                    className="font-medium text-ark-blue-600 hover:underline"
                   >
                     {w.weekStart} – {w.weekEnd}
                   </button>
@@ -260,7 +260,7 @@ export function MarketingCpaPage() {
                 <td className="px-4 py-2 text-right text-gray-700">{w.combined.closedDeals}</td>
                 <td className="px-4 py-2 text-right text-gray-700">{w.metaFormFill.cpa === null ? "—" : `$${w.metaFormFill.cpa.toFixed(2)}`}</td>
                 <td className="px-4 py-2 text-right text-gray-700">{w.ecommerce.cpa === null ? "—" : `$${w.ecommerce.cpa.toFixed(2)}`}</td>
-                <td className="px-4 py-2 text-right font-medium text-gray-900">
+                <td className="px-4 py-2 text-right font-medium text-ark-ink">
                   {w.combined.cpa === null ? "—" : `$${w.combined.cpa.toFixed(2)}`}
                 </td>
               </tr>
