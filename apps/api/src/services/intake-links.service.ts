@@ -1,4 +1,4 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, intakeLinkTokensTable, followUpJobsTable, type IntakeLinkToken } from "@luma/db";
 import { generateRawToken, hashToken } from "../lib/crypto.js";
 
@@ -119,4 +119,15 @@ export async function handleIntakeLinkClick(rawToken: string): Promise<{ redirec
 
     return { redirectUrl };
   });
+}
+
+/** Whether the most recently minted intake link for this person has been clicked. */
+export async function hasClickedMostRecentIntakeLink(personId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ clickedAt: intakeLinkTokensTable.clickedAt })
+    .from(intakeLinkTokensTable)
+    .where(eq(intakeLinkTokensTable.personId, personId))
+    .orderBy(desc(intakeLinkTokensTable.createdAt))
+    .limit(1);
+  return row?.clickedAt != null;
 }

@@ -2,6 +2,7 @@ import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db, abandonedCartTriggersTable, conversationsTable, customersTable, purchasesTable, questionnaireEventsTable } from "@luma/db";
 import { getOrCreateConversation, appendMessage, updateConversationState } from "./conversations.service.js";
 import { scheduleLeadCheckin } from "./lead-checkin.service.js";
+import { hasClickedMostRecentIntakeLink } from "./intake-links.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
 import { renderAbandonedCartOpener, renderAbandonedCartFollowUp } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
@@ -75,6 +76,28 @@ export async function sweepAbandonedCartTriggers(): Promise<AbandonedCartSweepRe
       await db
         .update(abandonedCartTriggersTable)
         .set({ status: "cancelled", cancelledReason: eligible.reason })
+        .where(eq(abandonedCartTriggersTable.id, trigger.id));
+      cancelledCount++;
+      continue;
+    }
+
+    // The person may already have clicked their intake link by the time this
+    // fires — most commonly via the parallel abandoned-cart email sequence,
+    // armed off the same event (abandoned-cart-email.service.ts), which
+    // mints and sends a real clickable link in its opener email on the same
+    // 10-minute delay. Sending "want me to send the link?" now reads as out
+    // of touch — they're already in the Bask questionnaire, and clicking
+    // already armed the provider_check_in follow-up 2 hours out (see
+    // handleIntakeLinkClick in intake-links.service.ts), so this trigger
+    // just steps aside for it. Unlike already_purchased/opted_out/
+    // no_longer_abandoned above, this isn't an exit from the funnel, so the
+    // 6-day lead check-in — normally armed inside sendOpener below, the only
+    // place that does it for a Bask-only lead — still needs arming here.
+    if (await hasClickedMostRecentIntakeLink(trigger.personId)) {
+      await scheduleLeadCheckin(trigger.personId);
+      await db
+        .update(abandonedCartTriggersTable)
+        .set({ status: "cancelled", cancelledReason: "already_clicked_intake_link" })
         .where(eq(abandonedCartTriggersTable.id, trigger.id));
       cancelledCount++;
       continue;

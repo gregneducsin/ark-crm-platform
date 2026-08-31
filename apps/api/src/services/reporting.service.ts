@@ -5,13 +5,28 @@ import { db } from "@luma/db";
  * Lead → questionnaire → purchase funnel, optionally scoped to a date
  * range. Each stage counts distinct customers, not events — a customer who
  * abandoned and later restarted the questionnaire is still one person in
- * "started", not two. Each stage is scoped by the date column that best
- * represents when that stage's event actually happened (a customer's own
- * leadReceivedDate for "leads," when a questionnaire row was created for
- * "started," when it was last updated while submitted for "submitted,"
- * the purchase's own purchaseDate for "purchased"/"revenue" — matching how
- * every other revenue figure in the app is scoped) — not a single shared
- * column, since these are four different kinds of events.
+ * "started," not two.
+ *
+ * True cohort funnel: the range picks a COHORT of leads (whoever's own
+ * leadReceivedDate falls in it), and every later stage asks "did this ever
+ * happen for someone in that cohort," not "did this happen within the
+ * range." Earlier versions of this query scoped each stage by whichever
+ * date column that stage's own event happened on — started by when the
+ * questionnaire row was created, submitted by when it was last updated,
+ * purchased by purchaseDate — which meant a customer could show up in
+ * "purchased" this week for a questionnaire they'd submitted three weeks
+ * ago, producing e.g. 0 submitted / 10 purchased in the same window even
+ * though every one of those 10 purchases traces back to a real submission.
+ * Scoping every stage to the same cohort instead guarantees each stage is a
+ * subset of the one above it, the way a funnel actually reads.
+ *
+ * This makes `purchased`/`revenue` here answer a genuinely different
+ * question than the Orders tab or Marketing CPA for the same range: those
+ * scope by the purchase's own purchaseDate (period cash flow — "how much
+ * came in this week"), while this tile scopes by the purchasing customer's
+ * leadReceivedDate (cohort conversion — "how much has this week's cohort
+ * generated so far, including sales that close after the window"). The two
+ * are expected to disagree; that's not a bug to reconcile.
  */
 export interface FunnelSummary {
   readonly totalLeads: number;
@@ -29,21 +44,7 @@ export interface DateRange {
 }
 
 export async function getFunnelSummary(range?: DateRange): Promise<FunnelSummary> {
-  // "to" is inclusive of the whole day, so the upper bound used in the
-  // query is exclusive-of-the-next-day — this matters for the timestamp
-  // columns (questionnaire/purchase events), where a bare "<= to" would
-  // silently exclude anything that happened after midnight on that day.
-  const leadsWhere = range ? sql`WHERE lead_received_date BETWEEN ${range.from} AND ${range.to}` : sql``;
-  const startedWhere = range ? sql`WHERE created_at >= ${range.from} AND created_at < (${range.to}::date + 1)` : sql``;
-  const submittedWhere = range
-    ? sql`WHERE status = 'submitted' AND updated_at >= ${range.from} AND updated_at < (${range.to}::date + 1)`
-    : sql`WHERE status = 'submitted'`;
-  // purchase_date, not created_at — every other revenue/purchase figure in
-  // the app (Orders tab, Marketing CPA) scopes by purchase_date, and a
-  // webhook that's retried or delayed can insert a purchase row well after
-  // the date it actually happened on. Scoping by created_at here made this
-  // tile silently disagree with the Orders tab for the same date range.
-  const purchasedWhere = range ? sql`WHERE status = 'completed' AND purchase_date BETWEEN ${range.from} AND ${range.to}` : sql`WHERE status = 'completed'`;
+  const cohortWhere = range ? sql`WHERE lead_received_date BETWEEN ${range.from} AND ${range.to}` : sql``;
 
   const [row] = await db.execute<{
     total_leads: string;
@@ -52,12 +53,15 @@ export async function getFunnelSummary(range?: DateRange): Promise<FunnelSummary
     purchased: string;
     revenue: string;
   }>(sql`
+    WITH cohort AS (
+      SELECT id FROM customers ${cohortWhere}
+    )
     SELECT
-      (SELECT count(*) FROM customers ${leadsWhere}) AS total_leads,
-      (SELECT count(DISTINCT person_id) FROM questionnaire_events ${startedWhere}) AS questionnaire_started,
-      (SELECT count(DISTINCT person_id) FROM questionnaire_events ${submittedWhere}) AS questionnaire_submitted,
-      (SELECT count(DISTINCT customer_id) FROM purchases ${purchasedWhere}) AS purchased,
-      (SELECT COALESCE(sum(amount_paid), 0) FROM purchases ${purchasedWhere}) AS revenue
+      (SELECT count(*) FROM cohort) AS total_leads,
+      (SELECT count(DISTINCT person_id) FROM questionnaire_events WHERE person_id IN (SELECT id FROM cohort)) AS questionnaire_started,
+      (SELECT count(DISTINCT person_id) FROM questionnaire_events WHERE person_id IN (SELECT id FROM cohort) AND status = 'submitted') AS questionnaire_submitted,
+      (SELECT count(DISTINCT customer_id) FROM purchases WHERE customer_id IN (SELECT id FROM cohort) AND status = 'completed') AS purchased,
+      (SELECT COALESCE(sum(amount_paid), 0) FROM purchases WHERE customer_id IN (SELECT id FROM cohort) AND status = 'completed') AS revenue
   `).then((r) => r.rows);
 
   return {

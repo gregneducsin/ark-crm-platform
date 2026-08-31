@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, questionnaireEventsTable, purchasesTable, abandonedCartTriggersTable, leadCheckinTriggersTable } from "@luma/db";
+import { db, customersTable, questionnaireEventsTable, purchasesTable, abandonedCartTriggersTable, leadCheckinTriggersTable, intakeLinkTokensTable } from "@luma/db";
 import { setCustomerSmsDnd } from "./dnd.service.js";
 
 const sendMessageMock = vi.fn();
@@ -206,6 +206,33 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
     expect(trigger.cancelledReason).toBe("no_longer_abandoned");
+  });
+
+  it("cancels the $20 opener but still arms the 6-day check-in when the person already clicked their intake link (e.g. via the parallel email sequence)", async () => {
+    sendMessageMock.mockClear();
+    const personId = await seedCustomer();
+    const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
+    await scheduleAbandonedCartOpener(personId, questionnaireEventId);
+    await backdateTrigger(personId);
+
+    await db.insert(intakeLinkTokensTable).values({
+      personId,
+      tokenHash: `hash-${crypto.randomUUID()}`,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      clickedAt: new Date(),
+    });
+
+    const result = await sweepAbandonedCartTriggers();
+    expect(result.cancelledCount).toBe(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
+    expect(trigger.status).toBe("cancelled");
+    expect(trigger.cancelledReason).toBe("already_clicked_intake_link");
+
+    const [checkin] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
+    expect(checkin).toBeDefined();
+    expect(checkin.status).toBe("pending");
   });
 
   it("cancels when the customer is do-not-disturb by the time it's due", async () => {
