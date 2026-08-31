@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, lte, or, sql, getTableColumns } from "drizzle-orm";
 import { db, customersTable, purchasesTable, purchaseClassificationAuditsTable, type PurchaseStatus } from "@luma/db";
 import type { CreatePurchaseRequest, ListPurchasesQuery, PurchasesSummaryQuery, UpdatePurchaseRequest } from "@luma/shared";
-import { setCustomerSmsDnd, setCustomerEmailDnd } from "./dnd.service.js";
+import { setCustomerSmsDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone } from "./dnd.service.js";
 
 export async function listPurchasesForCustomer(customerId: string) {
   return db
@@ -152,6 +152,10 @@ export async function createPurchase(customerId: string, input: CreatePurchaseRe
   // channels independently — see dnd.service.ts's setCustomerSmsDnd docstring.
   await setCustomerSmsDnd(customerId, false);
   await setCustomerEmailDnd(customerId, false);
+  // The mirror image: any other, still-unpurchased lead sharing this same
+  // phone number stops getting marketing texts/emails — see
+  // silenceOtherLeadsSharingPhone's docstring.
+  await silenceOtherLeadsSharingPhone(customerId);
 
   return purchase;
 }
