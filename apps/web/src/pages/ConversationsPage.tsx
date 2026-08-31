@@ -1,33 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
-import {
-  useConversationsList,
-  useConversationDetail,
-  useClearNeedsAttention,
-  useSendStaffReply,
-  type ConversationChannel,
-} from "../hooks/useConversations";
+import type { ConversationPersona, UnifiedConversationChannel, UnifiedMessage } from "@luma/shared";
+import { useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply } from "../hooks/useUnifiedConversations";
 import { Badge, Card, Button, Input } from "../components/ui";
 import { UpcomingTriggerBanner } from "../components/UpcomingTriggerBanner";
 import { CollapsibleCustomerNotes } from "../components/CustomerNotesCard";
 import { ApiError } from "../hooks/useAuth";
 import { formatTime, formatDate } from "../lib/formatTime";
 
-function ChannelToggle({ channel, onChange }: { channel: ConversationChannel; onChange: (c: ConversationChannel) => void }) {
-  return (
-    <div className="flex gap-1">
-      {(["sms", "email"] as const).map((c) => (
-        <button
-          key={c}
-          onClick={() => onChange(c)}
-          className={"rounded px-2 py-1 text-xs font-medium uppercase " + (channel === c ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600")}
-        >
-          {c}
-        </button>
-      ))}
-    </div>
-  );
-}
+const BOT_NAME: Record<ConversationPersona, string> = { sales: "Alexis", support: "Sophie" };
+const PERSONA_LABEL: Record<ConversationPersona, string> = { sales: "Sales", support: "Support" };
+const CHANNEL_LABEL: Record<UnifiedConversationChannel, string> = { sms: "SMS", email: "Email" };
 
 const SENTIMENT_COLOR: Record<string, "green" | "gray" | "red"> = {
   positive: "green",
@@ -51,6 +34,15 @@ function SenderBadge({ sentBy, staffEmail, botName }: { sentBy: "ai" | "staff" |
   );
 }
 
+/** Which pipeline a message came from — the piece of context the old separate pages got for free from which tab you were on, now that everything's interleaved. */
+function ThreadBadge({ persona, channel }: { persona: ConversationPersona; channel: UnifiedConversationChannel }) {
+  return (
+    <span className={"rounded px-1.5 py-0.5 text-[10px] font-medium uppercase " + (persona === "sales" ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600")}>
+      {PERSONA_LABEL[persona]} · {CHANNEL_LABEL[channel]}
+    </span>
+  );
+}
+
 function relativeTime(iso: string | null): string {
   if (!iso) return "";
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -62,32 +54,6 @@ function relativeTime(iso: string | null): string {
   return formatDate(iso);
 }
 
-function ResponseRateSummary({ channel }: { channel: ConversationChannel }) {
-  const { data } = useConversationsList(channel);
-  const stats = data?.stats;
-  const ratePct = stats ? Math.round(stats.responseRate * 100) : null;
-
-  return (
-    <Card className="mb-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase text-gray-400">Contacted</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalContacted ?? "…"}</p>
-        </div>
-        <div>
-          <p className="text-xs font-medium uppercase text-gray-400">Responded</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalResponded ?? "…"}</p>
-        </div>
-        <div>
-          <p className="text-xs font-medium uppercase text-gray-400">Response rate</p>
-          <p className="mt-1 text-2xl font-semibold text-gray-900">{ratePct === null ? "…" : `${ratePct}%`}</p>
-        </div>
-      </div>
-      <p className="mt-2 text-xs text-gray-400">Each contact counted once, regardless of how many messages went back and forth.</p>
-    </Card>
-  );
-}
-
 type LeadSourceFilter = "all" | "abandoned_cart" | "meta_form";
 
 const LEAD_SOURCE_FILTER_LABELS: Record<LeadSourceFilter, string> = {
@@ -96,18 +62,35 @@ const LEAD_SOURCE_FILTER_LABELS: Record<LeadSourceFilter, string> = {
   meta_form: "Meta leads",
 };
 
-function ConversationList({
-  channel,
-  onChannelChange,
-  selectedPersonId,
-  onSelect,
-}: {
-  channel: ConversationChannel;
-  onChannelChange: (c: ConversationChannel) => void;
-  selectedPersonId: string | null;
-  onSelect: (personId: string, firstName: string, lastName: string) => void;
-}) {
-  const { data, isLoading } = useConversationsList(channel);
+/** Sales-only — support was never covered by this stat on the old Conversations tab either. */
+function SalesResponseSummary() {
+  const { data } = useUnifiedConversationsList();
+  const stats = data?.salesStats;
+  const ratePct = stats ? Math.round(stats.responseRate * 100) : null;
+
+  return (
+    <Card className="mb-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase text-gray-400">Sales contacted</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalContacted ?? "…"}</p>
+        </div>
+        <div>
+          <p className="text-xs font-medium uppercase text-gray-400">Sales responded</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">{stats?.totalResponded ?? "…"}</p>
+        </div>
+        <div>
+          <p className="text-xs font-medium uppercase text-gray-400">Response rate</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">{ratePct === null ? "…" : `${ratePct}%`}</p>
+        </div>
+      </div>
+      <p className="mt-2 text-xs text-gray-400">Sales (Alexis) leads only, each contact counted once regardless of channel or how many messages went back and forth.</p>
+    </Card>
+  );
+}
+
+function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: string | null; onSelect: (personId: string, firstName: string, lastName: string) => void }) {
+  const { data, isLoading } = useUnifiedConversationsList();
   const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
   const [leadSourceFilter, setLeadSourceFilter] = useState<LeadSourceFilter>("all");
   const [search, setSearch] = useState("");
@@ -129,10 +112,7 @@ function ConversationList({
       <div className="border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Conversations</h2>
-          <div className="flex items-center gap-2">
-            {attentionCount > 0 && <Badge color="red">{attentionCount} need attention</Badge>}
-            <ChannelToggle channel={channel} onChange={onChannelChange} />
-          </div>
+          {attentionCount > 0 && <Badge color="red">{attentionCount} need attention</Badge>}
         </div>
         <div className="mt-2 flex gap-1">
           <button
@@ -159,23 +139,16 @@ function ConversationList({
             </button>
           ))}
         </div>
-        <Input
-          className="mt-2"
-          placeholder="Search by name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <Input className="mt-2" placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <div className="flex-1 overflow-y-auto">
         {isLoading && <p className="p-4 text-sm text-gray-400">Loading…</p>}
         {data && visible.length === 0 && <p className="p-4 text-sm text-gray-400">Nothing matches these filters.</p>}
         {visible.map((c) => (
           <button
-            key={c.id}
+            key={c.personId}
             onClick={() => onSelect(c.personId, c.firstName, c.lastName)}
-            className={
-              "block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedPersonId === c.personId ? "bg-blue-50" : "")
-            }
+            className={"block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 " + (selectedPersonId === c.personId ? "bg-blue-50" : "")}
           >
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
@@ -189,6 +162,10 @@ function ConversationList({
               {c.leadSource === "meta_form" && <Badge color="purple">Meta lead</Badge>}
               <SentimentBadge sentiment={c.lastSentiment} />
             </div>
+            <div className="mt-1 flex gap-1">
+              {c.hasSalesThread && <Badge color="blue">Sales</Badge>}
+              {c.hasSupportThread && <Badge color="gray">Support</Badge>}
+            </div>
           </button>
         ))}
       </div>
@@ -196,26 +173,52 @@ function ConversationList({
   );
 }
 
-/** A staff-authored reply — sent through the real SMS or email provider (per channel) and logged into the conversation like any other outbound message. */
-function StaffReplyBox({ conversationId, channel }: { conversationId: string; channel: ConversationChannel }) {
+interface ReplyTarget {
+  persona: ConversationPersona;
+  channel: UnifiedConversationChannel;
+}
+
+/** A staff-authored reply — sent through whichever real pipeline (persona x channel) is picked, and logged into that thread like any other outbound message. */
+function StaffReplyBox({ personId, targets, defaultTarget }: { personId: string; targets: ReplyTarget[]; defaultTarget: ReplyTarget }) {
+  const [target, setTarget] = useState<ReplyTarget>(defaultTarget);
   const [text, setText] = useState("");
-  const sendReply = useSendStaffReply();
+  const sendReply = useSendUnifiedStaffReply();
 
   function handleSend() {
     const body = text.trim();
     if (!body || sendReply.isPending) return;
     sendReply.mutate(
-      { conversationId, body, channel },
+      { personId, persona: target.persona, channel: target.channel, body },
       { onSuccess: (data) => { if (data.sent) setText(""); } },
     );
   }
 
+  if (targets.length === 0) {
+    return <p className="text-xs text-gray-400">No thread to reply on for this contact yet.</p>;
+  }
+
   return (
     <div className="mt-2">
+      {targets.length > 1 && (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {targets.map((t) => {
+            const active = t.persona === target.persona && t.channel === target.channel;
+            return (
+              <button
+                key={`${t.persona}-${t.channel}`}
+                onClick={() => setTarget(t)}
+                className={"rounded px-2 py-1 text-[11px] font-medium " + (active ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+              >
+                Reply as {BOT_NAME[t.persona]} ({CHANNEL_LABEL[t.channel]})
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <Input
           className="flex-1"
-          placeholder={channel === "email" ? "Reply as staff (email)…" : "Reply as staff…"}
+          placeholder={target.channel === "email" ? "Reply as staff (email)…" : "Reply as staff…"}
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={sendReply.isPending}
@@ -224,7 +227,7 @@ function StaffReplyBox({ conversationId, channel }: { conversationId: string; ch
           {sendReply.isPending ? "Sending…" : "Send reply"}
         </Button>
       </div>
-      {channel === "email" && (
+      {target.channel === "email" && (
         <p className="mt-1 text-[11px] text-gray-400">Sent as an email, greeted and signed off the same way an AI-drafted reply would be.</p>
       )}
       {sendReply.isSuccess && sendReply.data.sent === false && (
@@ -240,68 +243,41 @@ function StaffReplyBox({ conversationId, channel }: { conversationId: string; ch
   );
 }
 
-function ConversationDetailPanel({
-  personId,
-  firstName,
-  lastName,
-  channel,
-  onChannelChange,
-}: {
-  personId: string;
-  firstName: string;
-  lastName: string;
-  channel: ConversationChannel;
-  onChannelChange: (c: ConversationChannel) => void;
-}) {
-  // The list for this channel is already being fetched (and polled) for the
-  // left-hand list whenever that channel is the one being browsed — reusing
-  // it here (React Query dedupes identical in-flight/cached queries) is how
-  // we resolve "does this contact have a conversation on this channel" and
-  // its conversationId without a dedicated lookup endpoint.
-  const { data: listData, isLoading: listLoading } = useConversationsList(channel);
-  const summary = listData?.conversations.find((c) => c.personId === personId);
-  const { data, isLoading: detailLoading } = useConversationDetail(summary?.id ?? null, channel);
-  const clearAttention = useClearNeedsAttention();
+type ChannelFilter = "all" | UnifiedConversationChannel;
+
+const CHANNEL_FILTER_LABELS: Record<ChannelFilter, string> = { all: "All", sms: "SMS", email: "Email" };
+
+function ConversationDetailPanel({ personId, firstName, lastName }: { personId: string; firstName: string; lastName: string }) {
+  const { data, isLoading } = useUnifiedConversationDetail(personId);
+  const clearAttention = useClearAllNeedsAttention();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
+
+  const channelsPresent = useMemo(() => new Set((data?.messages ?? []).map((m) => m.channel)), [data?.messages]);
+  const visibleMessages = useMemo(
+    () => (channelFilter === "all" ? (data?.messages ?? []) : (data?.messages ?? []).filter((m) => m.channel === channelFilter)),
+    [data?.messages, channelFilter],
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [data?.messages.length]);
+  }, [visibleMessages.length]);
+
+  // Reset back to "All" when switching contacts, so a filter picked for one
+  // lead doesn't silently hide the other channel's messages for the next.
+  useEffect(() => {
+    setChannelFilter("all");
+  }, [personId]);
 
   const header = (
     <div className="border-b border-gray-200 px-4 py-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-900">
-          {firstName} {lastName}
-        </p>
-        <ChannelToggle channel={channel} onChange={onChannelChange} />
-      </div>
+      <p className="text-sm font-semibold text-gray-900">
+        {firstName} {lastName}
+      </p>
     </div>
   );
 
-  if (listLoading) {
-    return (
-      <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
-        {header}
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-gray-400">Loading…</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (!summary) {
-    return (
-      <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
-        {header}
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-gray-400">No {channel === "email" ? "email" : "text"} conversation for this contact yet.</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (detailLoading || !data) {
+  if (isLoading || !data) {
     return (
       <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
         {header}
@@ -312,7 +288,16 @@ function ConversationDetailPanel({
     );
   }
 
-  const { conversation, customer, messages } = data;
+  const { customer, sales, support, messages, availableReplyTargets } = data;
+  const needsAttention = Boolean(sales?.needsAttention || support?.needsAttention);
+  const needsAttentionReason = [sales?.needsAttention ? sales.needsAttentionReason : null, support?.needsAttention ? support.needsAttentionReason : null]
+    .filter((r): r is string => Boolean(r))
+    .join(" | ");
+
+  const lastMessage = messages.at(-1);
+  const defaultTarget: ReplyTarget =
+    (lastMessage && availableReplyTargets.find((t) => t.persona === lastMessage.persona && t.channel === lastMessage.channel)) ||
+    availableReplyTargets[0] || { persona: "sales", channel: "sms" };
 
   return (
     <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
@@ -322,33 +307,31 @@ function ConversationDetailPanel({
             <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
               {customer.firstName} {customer.lastName}
               {customer.hasQualifyingPurchase && <Badge color="green">Purchased</Badge>}
-              {conversation.needsAttention && <Badge color="red">Needs attention</Badge>}
+              {needsAttention && <Badge color="red">Needs attention</Badge>}
             </p>
             <p className="text-xs text-gray-400">
-              {channel === "email" ? customer.email ?? "No email on file" : customer.phone ?? "No phone on file"}
+              {[customer.phone, customer.email].filter(Boolean).join(" · ") || "No contact info on file"}
             </p>
-            <UpcomingTriggerBanner personId={conversation.personId} />
+            <UpcomingTriggerBanner personId={customer.id} />
           </div>
           <div className="flex flex-wrap items-start justify-end gap-1">
-            <ChannelToggle channel={channel} onChange={onChannelChange} />
-            {conversation.leadSource === "meta_form" && <Badge color="purple">Meta lead</Badge>}
-            {conversation.selectedProduct && <Badge color="blue">{conversation.selectedProduct}</Badge>}
-            {conversation.promoOffered && <Badge color="green">$20 promo offered</Badge>}
-            {conversation.linkProvided && <Badge color="gray">link sent</Badge>}
-            {conversation.objectionStage > 0 && <Badge color="yellow">objection stage {conversation.objectionStage}</Badge>}
+            {sales?.leadSource === "meta_form" && <Badge color="purple">Meta lead</Badge>}
+            {sales?.selectedProduct && <Badge color="blue">{sales.selectedProduct}</Badge>}
+            {sales?.promoOffered && <Badge color="green">$20 promo offered</Badge>}
+            {sales?.linkProvided && <Badge color="gray">link sent</Badge>}
+            {sales?.linkProvided && (sales.intakeLinkClicked ? <Badge color="green">link clicked</Badge> : <Badge color="gray">link not clicked</Badge>)}
+            {sales && sales.objectionStage > 0 && <Badge color="yellow">objection stage {sales.objectionStage}</Badge>}
+            {support?.prescriptionWritten && <Badge color="blue">prescription written</Badge>}
+            {support?.orderShipped && <Badge color="green">shipped{support.trackingNumber ? `: ${support.trackingNumber}` : ""}</Badge>}
+            {support?.reviewRequested && <Badge color="gray">review requested</Badge>}
+            {support?.reviewSentiment && <SentimentBadge sentiment={support.reviewSentiment} />}
           </div>
         </div>
-        {conversation.needsAttention && (
+        {needsAttention && (
           <div className="mt-2 rounded-md bg-red-50 px-3 py-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs text-red-700">
-                {conversation.needsAttentionReason ?? "This conversation needs staff attention."}
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => clearAttention.mutate({ conversationId: conversation.id, channel })}
-                disabled={clearAttention.isPending}
-              >
+              <p className="text-xs text-red-700">{needsAttentionReason || "This conversation needs staff attention."}</p>
+              <Button variant="secondary" onClick={() => clearAttention.mutate(personId)} disabled={clearAttention.isPending}>
                 {clearAttention.isPending ? "Marking…" : "Mark reviewed"}
               </Button>
             </div>
@@ -357,19 +340,35 @@ function ConversationDetailPanel({
       </div>
 
       <div className="border-b border-gray-200 px-4 py-2">
-        <CollapsibleCustomerNotes customerId={conversation.personId} />
+        <CollapsibleCustomerNotes customerId={personId} />
       </div>
 
+      {channelsPresent.size > 1 && (
+        <div className="flex gap-1 border-b border-gray-200 px-4 py-2">
+          {(Object.keys(CHANNEL_FILTER_LABELS) as ChannelFilter[]).map((key) => (
+            <button
+              key={key}
+              onClick={() => setChannelFilter(key)}
+              className={"rounded px-2 py-1 text-xs font-medium " + (channelFilter === key ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600")}
+            >
+              {CHANNEL_FILTER_LABELS[key]}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && <p className="text-sm text-gray-400">No messages yet.</p>}
-        {messages.map((m, i) => {
+        {visibleMessages.length === 0 && (
+          <p className="text-sm text-gray-400">{messages.length === 0 ? "No messages yet." : "No messages on this channel."}</p>
+        )}
+        {visibleMessages.map((m: UnifiedMessage, i) => {
           // A bare time ("6:16 PM") with no date reads identically whether
           // the next message came 20 minutes or 6 days later — this divider
           // makes the actual gap between sends visible without staff having
           // to hover/click each timestamp to check.
-          const showDateDivider = i === 0 || formatDate(m.createdAt) !== formatDate(messages[i - 1].createdAt);
+          const showDateDivider = i === 0 || formatDate(m.createdAt) !== formatDate(visibleMessages[i - 1].createdAt);
           return (
-            <div key={m.id}>
+            <div key={`${m.persona}-${m.channel}-${m.id}`}>
               {showDateDivider && (
                 <div className="my-3 flex items-center justify-center">
                   <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">{formatDate(m.createdAt)}</span>
@@ -377,18 +376,20 @@ function ConversationDetailPanel({
               )}
               <div className={m.direction === "inbound" ? "text-left" : "text-right"}>
                 <div className={"inline-flex max-w-[75%] flex-col gap-1 " + (m.direction === "inbound" ? "items-start" : "items-end")}>
+                  <ThreadBadge persona={m.persona} channel={m.channel} />
                   {m.subject && <span className="px-1 text-[11px] font-medium text-gray-500">{m.subject}</span>}
                   <span
                     className={
                       m.direction === "inbound"
                         ? "inline-block whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
-                        : "inline-block whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-left text-sm text-white"
+                        : "inline-block whitespace-pre-wrap rounded-lg px-3 py-2 text-left text-sm text-white " +
+                          (m.persona === "sales" ? "bg-blue-600" : "bg-purple-600")
                     }
                   >
                     {m.body}
                   </span>
                   <div className="flex items-center gap-2 px-1">
-                    {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName="Alexis" />}
+                    {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName={BOT_NAME[m.persona]} />}
                     <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>
                     <SentimentBadge sentiment={m.sentiment} />
                   </div>
@@ -400,10 +401,8 @@ function ConversationDetailPanel({
       </div>
 
       <div className="border-t border-gray-200 p-3">
-        <StaffReplyBox conversationId={conversation.id} channel={channel} />
-        <p className="mt-1 text-xs text-gray-400">
-          {channel === "sms" ? "You can also text the customer directly anytime." : "You can also reply from your own email client anytime."}
-        </p>
+        <StaffReplyBox personId={personId} targets={availableReplyTargets} defaultTarget={defaultTarget} />
+        <p className="mt-1 text-xs text-gray-400">You can also text or email the customer directly anytime.</p>
       </div>
     </Card>
   );
@@ -413,70 +412,41 @@ interface SelectedContact {
   personId: string;
   firstName: string;
   lastName: string;
-  /** The detail panel's own channel — independent of the list's channel, so toggling it doesn't change what the list is browsing or lose the selection. */
-  channel: ConversationChannel;
 }
 
 export function ConversationsPage() {
-  // Lets NeedsAttentionPage link directly into the right channel tab (e.g. /conversations?channel=email).
+  // CustomerDetailPage and NeedsAttentionPage link here as /conversations?personId=...
   const search = useSearch();
   const params = new URLSearchParams(search);
-  const initialChannel: ConversationChannel = params.get("channel") === "email" ? "email" : "sms";
   const deepLinkPersonId = params.get("personId");
-  const [listChannel, setListChannel] = useState<ConversationChannel>(initialChannel);
   const [selected, setSelected] = useState<SelectedContact | null>(null);
   const deepLinkResolved = useRef(false);
 
-  // CustomerDetailPage links here as /conversations?personId=... — find that
-  // person's conversation once the list loads and select it. Keeps trying
-  // across a manual list-channel toggle (the person may only exist on the
-  // other channel) until it succeeds; a manual selection or lack of a
-  // personId param disables this entirely.
-  const { data: listData } = useConversationsList(listChannel);
+  const { data: listData } = useUnifiedConversationsList();
   useEffect(() => {
     if (!deepLinkPersonId || deepLinkResolved.current || selected !== null || !listData) return;
     const match = listData.conversations.find((c) => c.personId === deepLinkPersonId);
     if (match) {
-      setSelected({ personId: match.personId, firstName: match.firstName, lastName: match.lastName, channel: listChannel });
+      setSelected({ personId: match.personId, firstName: match.firstName, lastName: match.lastName });
       deepLinkResolved.current = true;
     }
-  }, [deepLinkPersonId, listData, listChannel, selected]);
-
-  function handleListChannelChange(c: ConversationChannel) {
-    setListChannel(c);
-    setSelected(null);
-  }
+  }, [deepLinkPersonId, listData, selected]);
 
   function handleSelect(personId: string, firstName: string, lastName: string) {
     deepLinkResolved.current = true;
-    setSelected({ personId, firstName, lastName, channel: listChannel });
-  }
-
-  function handleDetailChannelChange(c: ConversationChannel) {
-    setSelected((prev) => (prev ? { ...prev, channel: c } : prev));
+    setSelected({ personId, firstName, lastName });
   }
 
   return (
     <div>
-      <ResponseRateSummary channel={listChannel} />
+      <SalesResponseSummary />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="md:col-span-1">
-          <ConversationList
-            channel={listChannel}
-            onChannelChange={handleListChannelChange}
-            selectedPersonId={selected?.personId ?? null}
-            onSelect={handleSelect}
-          />
+          <ConversationList selectedPersonId={selected?.personId ?? null} onSelect={handleSelect} />
         </div>
         <div className="md:col-span-2">
           {selected ? (
-            <ConversationDetailPanel
-              personId={selected.personId}
-              firstName={selected.firstName}
-              lastName={selected.lastName}
-              channel={selected.channel}
-              onChannelChange={handleDetailChannelChange}
-            />
+            <ConversationDetailPanel personId={selected.personId} firstName={selected.firstName} lastName={selected.lastName} />
           ) : (
             <Card className="flex h-[calc(100vh-268px)] items-center justify-center">
               <p className="text-sm text-gray-400">Select a conversation to view it.</p>

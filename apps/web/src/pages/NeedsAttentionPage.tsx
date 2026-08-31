@@ -18,9 +18,6 @@ function relativeTime(iso: string | null): string {
 const CHANNEL_LABEL: Record<NeedsAttentionChannel, string> = { sms: "SMS", email: "Email" };
 const PERSONA_LABEL: Record<NeedsAttentionPersona, string> = { alexis: "Alexis", sophie: "Sophie" };
 
-/** Where staff go for the full thread + reply box, once they've decided this item needs more than a glance. */
-const CHANNEL_PAGE: Record<NeedsAttentionPersona, string> = { alexis: "/conversations", sophie: "/support" };
-
 function ItemMessages({ item }: { item: NeedsAttentionItem }) {
   const { data, isLoading } = useNeedsAttentionMessages(item.channel, item.persona, item.conversationId);
 
@@ -65,7 +62,7 @@ function NeedsAttentionRow({ item }: { item: NeedsAttentionItem }) {
         <div className="border-t border-gray-100">
           <ItemMessages item={item} />
           <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
-            <a href={`${CHANNEL_PAGE[item.persona]}?channel=${item.channel}`} className="text-xs font-medium text-blue-600 hover:underline">
+            <a href={`/conversations?personId=${item.personId}`} className="text-xs font-medium text-blue-600 hover:underline">
               Open full thread to reply →
             </a>
             <Button

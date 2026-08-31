@@ -15,7 +15,6 @@ import { PayrollWeekDetailPage } from "./pages/PayrollWeekDetailPage";
 import { MarketingCpaPage } from "./pages/MarketingCpaPage";
 import { QuestionnairesPage } from "./pages/QuestionnairesPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
-import { SupportPage } from "./pages/SupportPage";
 import { NeedsAttentionPage } from "./pages/NeedsAttentionPage";
 import { UnmatchedContactsPage } from "./pages/UnmatchedContactsPage";
 import { ReportingPage } from "./pages/ReportingPage";
@@ -108,10 +107,9 @@ export default function App() {
         </ProtectedRoute>
       </Route>
 
+      {/* Conversations and Support merged into one interleaved view — old bookmarks/links to /support still land somewhere useful. */}
       <Route path="/support">
-        <ProtectedRoute roles={["admin", "customer_service"]}>
-          <SupportPage />
-        </ProtectedRoute>
+        <Redirect to="/conversations" />
       </Route>
 
       <Route path="/inbox">

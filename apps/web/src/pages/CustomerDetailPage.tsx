@@ -47,12 +47,6 @@ export function CustomerDetailPage() {
           >
             View in Conversations →
           </Link>
-          <Link
-            href={`/support?personId=${customer.id}`}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            View in Support →
-          </Link>
         </div>
       </div>
 
