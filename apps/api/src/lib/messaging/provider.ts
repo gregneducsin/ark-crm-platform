@@ -96,6 +96,14 @@ function buildKnowledgeSection(catalog: readonly KnowledgeTopic[]): string {
 
 // ── Objection-handling section builder ────────────────────────────────────────
 
+/** Resolves an ObjectionStageScript.nextQuestion (a single string, or 2+ equally-valid variants) to one string for this turn's prompt. */
+export function resolveNextQuestion(nextQuestion: string | readonly string[] | undefined): string | undefined {
+  if (Array.isArray(nextQuestion)) {
+    return nextQuestion[Math.floor(Math.random() * nextQuestion.length)];
+  }
+  return nextQuestion as string | undefined;
+}
+
 function buildObjectionSection(objectionStage: 0 | 1 | 2, lastObjectionKey: ObjectionKey | null): string {
   const lines: string[] = [
     "OBJECTION HANDLING — use these exact scripts when the patient raises one of the objections below.",
@@ -122,8 +130,8 @@ function buildObjectionSection(objectionStage: 0 | 1 | 2, lastObjectionKey: Obje
 
   for (const o of OBJECTION_LIBRARY) {
     lines.push(`[objection: ${o.key}]`);
-    lines.push(`REBUTTAL — reply: "${o.rebuttal.reply}" nextQuestion: "${o.rebuttal.nextQuestion}" (requires knowledgeTopicsUsed to include one of: ${o.rebuttal.requiredTopics.join(", ") || "none required"})`);
-    lines.push(`SECOND_ATTEMPT — reply: "${o.secondAttempt.reply}" nextQuestion: "${o.secondAttempt.nextQuestion}"`);
+    lines.push(`REBUTTAL — reply: "${o.rebuttal.reply}" nextQuestion: "${resolveNextQuestion(o.rebuttal.nextQuestion)}" (requires knowledgeTopicsUsed to include one of: ${o.rebuttal.requiredTopics.join(", ") || "none required"})`);
+    lines.push(`SECOND_ATTEMPT — reply: "${o.secondAttempt.reply}" nextQuestion: "${resolveNextQuestion(o.secondAttempt.nextQuestion)}"`);
     lines.push(`STAND_DOWN (action=pause, no nextQuestion) — reply: "${o.standDown.reply}"`);
     lines.push("");
   }

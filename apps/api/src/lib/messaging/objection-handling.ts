@@ -38,8 +38,14 @@ export const OBJECTION_KEYS = ["price", "think_about_it", "not_qualified", "is_l
 
 export interface ObjectionStageScript {
   readonly reply: string;
-  /** Present for the rebuttal and secondAttempt stages; absent for standDown. */
-  readonly nextQuestion?: string;
+  /**
+   * Present for the rebuttal and secondAttempt stages; absent for standDown.
+   * An array is 2+ approved variants that mean the same thing — the caller
+   * (buildObjectionSection in provider.ts) picks one at random per turn, the
+   * same reasoning as pickVariant in follow-up-templates.ts: every lead
+   * getting the exact same byte-for-byte question reads as templated.
+   */
+  readonly nextQuestion?: string | readonly string[];
   readonly requiredTopics: readonly string[];
 }
 
@@ -66,7 +72,7 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
       // an anchor already at or above what we can offer, or gives something
       // concrete to actually respond to instead of guessing at a number.
       reply: "No pressure at all.",
-      nextQuestion: "What price were you hoping for?",
+      nextQuestion: ["What price were you hoping for?", "What are you paying now for something similar?"],
       requiredTopics: [],
     },
     standDown: {
@@ -205,7 +211,7 @@ export function getObjectionScript(key: ObjectionKey): ObjectionScript | undefin
  * used verbatim — never rewritten to imply Alexis is human. It is not staged;
  * the same disclosure applies every time the question is asked.
  */
-export const AI_DISCLOSURE_SCRIPT: ObjectionStageScript & { readonly allowedParaphrase: false } = {
+export const AI_DISCLOSURE_SCRIPT: Omit<ObjectionStageScript, "nextQuestion"> & { readonly nextQuestion: string; readonly allowedParaphrase: false } = {
   reply:
     "I'm an automated assistant here with the Ark Health team, and I'm here to help you get started. If you'd rather talk to a person, I can get one looped in.",
   nextQuestion: "Want me to go ahead and get you started on the questionnaire?",

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { OBJECTION_LIBRARY, getObjectionScript, AI_DISCLOSURE_SCRIPT } from "./objection-handling.js";
 import { getTopicByKey } from "./knowledge-catalog.js";
 import { interactivePostCheck } from "./safety.js";
+import { resolveNextQuestion } from "./provider.js";
 import type { ClaudeInteractiveResult } from "./types.js";
 
 const EM_DASH_RE = /—|--/;
@@ -46,14 +47,16 @@ describe("OBJECTION_LIBRARY structure", () => {
 
   for (const objection of OBJECTION_LIBRARY) {
     describe(`objection: ${objection.key}`, () => {
-      it("rebuttal and secondAttempt each have a single trailing question, no em dashes", () => {
+      it("rebuttal and secondAttempt each have a single trailing question, no em dashes — every variant, if more than one", () => {
         for (const stage of [objection.rebuttal, objection.secondAttempt]) {
           expect(stage.nextQuestion, `${objection.key} nextQuestion`).toBeDefined();
-          const nq = stage.nextQuestion!;
-          expect(nq.trim().endsWith("?")).toBe(true);
-          expect((nq.match(/\?/g) ?? []).length).toBe(1);
+          const variants = Array.isArray(stage.nextQuestion) ? stage.nextQuestion : [stage.nextQuestion!];
+          for (const nq of variants) {
+            expect(nq.trim().endsWith("?")).toBe(true);
+            expect((nq.match(/\?/g) ?? []).length).toBe(1);
+            expect(EM_DASH_RE.test(nq)).toBe(false);
+          }
           expect(EM_DASH_RE.test(stage.reply)).toBe(false);
-          expect(EM_DASH_RE.test(nq)).toBe(false);
         }
       });
 
@@ -75,13 +78,13 @@ describe("OBJECTION_LIBRARY structure", () => {
         expect(objection.secondAttempt.reply).not.toBe(objection.rebuttal.reply);
       });
 
-      it("rebuttal and secondAttempt pass interactivePostCheck as a reply action with declared topics", () => {
+      it("rebuttal and secondAttempt pass interactivePostCheck as a reply action with declared topics — every variant, if more than one", () => {
         for (const stage of [objection.rebuttal, objection.secondAttempt]) {
-          const result = interactivePostCheck(
-            baseResult({ reply: stage.reply, nextQuestion: stage.nextQuestion ?? null, knowledgeTopicsUsed: [...stage.requiredTopics] }),
-            null,
-          );
-          expect(result.ok, `${objection.key} stage should pass postCheck: ${!result.ok ? result.code : ""}`).toBe(true);
+          const variants = Array.isArray(stage.nextQuestion) ? stage.nextQuestion : [stage.nextQuestion ?? null];
+          for (const nq of variants) {
+            const result = interactivePostCheck(baseResult({ reply: stage.reply, nextQuestion: nq, knowledgeTopicsUsed: [...stage.requiredTopics] }), null);
+            expect(result.ok, `${objection.key} stage should pass postCheck: ${!result.ok ? result.code : ""}`).toBe(true);
+          }
         }
       });
 
@@ -92,10 +95,11 @@ describe("OBJECTION_LIBRARY structure", () => {
 
       it("rebuttal citing its required topics is rejected when those topics aren't in the permitted set for the turn (proves topic gating is real)", () => {
         if (objection.rebuttal.requiredTopics.length === 0) return;
+        const nq = objection.rebuttal.nextQuestion;
         const result = interactivePostCheck(
           baseResult({
             reply: objection.rebuttal.reply,
-            nextQuestion: objection.rebuttal.nextQuestion ?? null,
+            nextQuestion: (Array.isArray(nq) ? nq[0] : nq) ?? null,
             knowledgeTopicsUsed: [...objection.rebuttal.requiredTopics],
           }),
           null,
@@ -106,6 +110,23 @@ describe("OBJECTION_LIBRARY structure", () => {
       });
     });
   }
+});
+
+describe("price objection secondAttempt — discovery question alternates", () => {
+  it("has both a price-anchor question and a current-spend question, not a repeat of either the rebuttal or a single fixed close", () => {
+    const nq = getObjectionScript("price")!.secondAttempt.nextQuestion;
+    expect(nq).toEqual(["What price were you hoping for?", "What are you paying now for something similar?"]);
+  });
+
+  it("resolveNextQuestion actually alternates between both variants over many calls, not just structurally listing them", () => {
+    const nq = getObjectionScript("price")!.secondAttempt.nextQuestion;
+    const seen = new Set(Array.from({ length: 30 }, () => resolveNextQuestion(nq)));
+    expect(seen).toEqual(new Set(["What price were you hoping for?", "What are you paying now for something similar?"]));
+  });
+
+  it("resolveNextQuestion passes a plain string straight through unchanged (rebuttal / every other objection's stages)", () => {
+    expect(resolveNextQuestion("Want to see the payment plan options?")).toBe("Want to see the payment plan options?");
+  });
 });
 
 describe("AI_DISCLOSURE_SCRIPT", () => {
