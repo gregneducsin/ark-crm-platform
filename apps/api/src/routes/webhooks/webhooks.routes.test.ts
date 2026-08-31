@@ -8,6 +8,7 @@ const ORDER_SECRET = "test-order-secret";
 const QUESTIONNAIRE_SECRET = "test-questionnaire-secret";
 const PAYMENT_FAILED_SECRET = "test-payment-failed-secret";
 const PAYMENT_SUCCEEDED_SECRET = "test-payment-succeeded-secret";
+const REFUND_SECRET = "test-refund-secret";
 const PRESCRIPTION_WRITTEN_SECRET = "test-prescription-written-secret";
 const ORDER_SHIPPED_SECRET = "test-order-shipped-secret";
 const IBLUSEND_SECRET = "test-iblusend-secret";
@@ -28,6 +29,7 @@ describe("Webhooks", () => {
     process.env.QUESTIONNAIRE_WEBHOOK_SECRET = QUESTIONNAIRE_SECRET;
     process.env.FAILED_PAYMENT_WEBHOOK_SECRET = PAYMENT_FAILED_SECRET;
     process.env.PAYMENT_SUCCEEDED_WEBHOOK_SECRET = PAYMENT_SUCCEEDED_SECRET;
+    process.env.REFUND_WEBHOOK_SECRET = REFUND_SECRET;
     process.env.PRESCRIPTION_WRITTEN_WEBHOOK_SECRET = PRESCRIPTION_WRITTEN_SECRET;
     process.env.ORDER_SHIPPED_WEBHOOK_SECRET = ORDER_SHIPPED_SECRET;
     process.env.IBLUSEND_WEBHOOK_SECRET = IBLUSEND_SECRET;
@@ -1219,6 +1221,209 @@ describe("Webhooks", () => {
 
       const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
       expect(purchases).toHaveLength(0);
+    });
+  });
+
+  describe("Bask payment-refunded", () => {
+    it("flips a completed purchase to refunded and flags the support conversation for staff, without notifying the customer", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable, supportConversationsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Refund", lastName: "Test", email: "refund-test@example.com", phone: "+15551110104", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-refund1" });
+      await db.insert(purchasesTable).values({
+        customerId: customer!.id,
+        purchaseDate: "2026-02-01",
+        orderNumber: "BASK-REFUND-1",
+        productName: "Program",
+        amountPaid: "199.00",
+        status: "completed",
+        ecommerceOrderId: "txn-refund-1",
+        orderClassification: "first_order",
+        orderClassificationSource: "manual",
+      });
+
+      sendMessageMock.mockClear();
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          eventId: "bask-refund-evt-1",
+          transactionId: "txn-refund-1",
+          externalPersonId: "bask-person-refund1",
+          amount: "199.00",
+        });
+      expect(res.status).toBe(200);
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchase.status).toBe("refunded");
+
+      const [conversation] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.personId, customer!.id));
+      expect(conversation.needsAttention).toBe(true);
+      expect(conversation.needsAttentionReason).toContain("txn-refund-1");
+      expect(conversation.needsAttentionReason).toContain("$199.00");
+    });
+
+    it("converts a bare-integer cents amount to dollars in the needsAttention reason", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable, supportConversationsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Cents", lastName: "Refund", email: "refund-cents@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-refund-cents" });
+      await db.insert(purchasesTable).values({
+        customerId: customer!.id,
+        purchaseDate: "2026-02-01",
+        orderNumber: "BASK-REFUND-CENTS",
+        productName: "Program",
+        amountPaid: "510.00",
+        status: "completed",
+        ecommerceOrderId: "txn-refund-cents",
+        orderClassification: "first_order",
+        orderClassificationSource: "manual",
+      });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          eventId: "bask-refund-evt-cents",
+          transactionId: "txn-refund-cents",
+          externalPersonId: "bask-person-refund-cents",
+          amount: "51000",
+        });
+      expect(res.status).toBe(200);
+
+      const [conversation] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.personId, customer!.id));
+      expect(conversation.needsAttentionReason).toContain("$510.00");
+    });
+
+    it("does not touch a purchase that isn't currently completed (e.g. already refunded)", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Already", lastName: "Refunded", email: "refund-already@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-refund-already" });
+      await db.insert(purchasesTable).values({
+        customerId: customer!.id,
+        purchaseDate: "2026-02-01",
+        orderNumber: "BASK-REFUND-ALREADY",
+        productName: "Program",
+        amountPaid: "199.00",
+        status: "refunded",
+        ecommerceOrderId: "txn-refund-already",
+        orderClassification: "first_order",
+        orderClassificationSource: "manual",
+      });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          eventId: "bask-refund-evt-already",
+          transactionId: "txn-refund-already",
+          externalPersonId: "bask-person-refund-already",
+          amount: "199.00",
+        });
+      expect(res.status).toBe(200);
+
+      const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchase.status).toBe("refunded");
+    });
+
+    it("leaves everything untouched and does not crash when no matching purchase is found", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "No", lastName: "MatchingRefund", email: "refund-nomatch@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-refund-nomatch" });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          eventId: "bask-refund-evt-nomatch",
+          transactionId: "txn-refund-nomatch-does-not-exist",
+          externalPersonId: "bask-person-refund-nomatch",
+          amount: "49.99",
+        });
+      expect(res.status).toBe(200);
+
+      const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchases).toHaveLength(0);
+    });
+
+    it("records the event even when no customer matches, for reporting only", async () => {
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          eventId: "bask-refund-evt-no-customer",
+          transactionId: "txn-refund-no-customer",
+          externalPersonId: "bask-person-refund-does-not-exist",
+          amount: "49.99",
+        });
+      expect(res.status).toBe(200);
+
+      const [event] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, "bask-refund-evt-no-customer"));
+      expect(event.status).toBe("processed");
+      expect(event.personId).toBeNull();
+    });
+
+    it("rejects a missing secret with 401", async () => {
+      const res = await request(app).post("/api/webhooks/bask-payment-refunded").send({});
+      expect(res.status).toBe(401);
+    });
+
+    it("is idempotent on a duplicate eventId — the second delivery is a no-op", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Dup", lastName: "Refund", email: "refund-dup@example.com", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "bask-person-refund-dup" });
+      await db.insert(purchasesTable).values({
+        customerId: customer!.id,
+        purchaseDate: "2026-02-01",
+        orderNumber: "BASK-REFUND-DUP",
+        productName: "Program",
+        amountPaid: "199.00",
+        status: "completed",
+        ecommerceOrderId: "txn-refund-dup",
+        orderClassification: "first_order",
+        orderClassificationSource: "manual",
+      });
+
+      const payload = {
+        eventId: "bask-refund-evt-dup",
+        transactionId: "txn-refund-dup",
+        externalPersonId: "bask-person-refund-dup",
+        amount: "199.00",
+      };
+      const first = await request(app).post("/api/webhooks/bask-payment-refunded").set("x-webhook-secret", REFUND_SECRET).send(payload);
+      expect(first.status).toBe(200);
+      expect(first.body.duplicate).toBe(false);
+
+      const second = await request(app).post("/api/webhooks/bask-payment-refunded").set("x-webhook-secret", REFUND_SECRET).send(payload);
+      expect(second.status).toBe(200);
+      expect(second.body.duplicate).toBe(true);
     });
   });
 

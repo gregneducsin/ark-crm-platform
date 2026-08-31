@@ -15,6 +15,7 @@ import type {
   BaskQuestionnaireWebhookRequest,
   BaskPaymentFailedWebhookRequest,
   BaskPaymentSucceededWebhookRequest,
+  BaskPaymentRefundedWebhookRequest,
   BaskPrescriptionWrittenWebhookRequest,
   BaskOrderShippedWebhookRequest,
 } from "@luma/shared";
@@ -28,6 +29,7 @@ import {
   handlePrescriptionWritten,
   handleOrderShipped,
   handlePaymentFailed,
+  handleRefund,
 } from "./order-fulfillment.service.js";
 import { setCustomerSmsDnd, setCustomerEmailDnd } from "./dnd.service.js";
 import { normalizePhone } from "../lib/phone.js";
@@ -559,6 +561,50 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
       }
     } else {
       logger.warn({ transactionId: payload.transactionId }, "payment-succeeded webhook: could not resolve a customer — recorded for reporting only");
+    }
+
+    await markWebhookEventProcessed(recorded.id, customerId);
+  } catch (err) {
+    await markWebhookEventFailed(recorded.id, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+  return { duplicate: false };
+}
+
+/**
+ * Flips a completed purchase to "refunded" and flags the support
+ * conversation for a person to review — no automated customer notification
+ * (see handleRefund's own docstring for why). A no-op beyond recording the
+ * event (for reporting only) when there's no matching customer or no
+ * "completed" purchase to correct — e.g. it was already refunded, or is in
+ * some other state a refund shouldn't silently overwrite.
+ */
+export async function handleBaskPaymentRefundedWebhook(payload: BaskPaymentRefundedWebhookRequest): Promise<{ duplicate: boolean }> {
+  const recorded = await recordWebhookEventIfNew("bask_payment_refunded", payload.eventId, payload);
+  if (!recorded) return { duplicate: true };
+
+  try {
+    // No email field in this payload (unlike payment-failed/succeeded) —
+    // matching is externalPersonId only, no email fallback.
+    const customerId = await tryFindCustomerByExternalIdentityOrEmail("bask", payload.externalPersonId);
+    const amount = normalizeFailedPaymentAmount(payload.amount);
+
+    if (customerId) {
+      const [purchase] = await db
+        .select({ id: purchasesTable.id, status: purchasesTable.status })
+        .from(purchasesTable)
+        .where(and(eq(purchasesTable.customerId, customerId), eq(purchasesTable.ecommerceOrderId, payload.transactionId)));
+
+      if (purchase && purchase.status === "completed") {
+        await db.update(purchasesTable).set({ status: "refunded" }).where(eq(purchasesTable.id, purchase.id));
+        await handleRefund(customerId, payload.transactionId, amount);
+      } else if (!purchase) {
+        logger.warn({ customerId, transactionId: payload.transactionId }, "payment-refunded webhook: no matching purchase found — recorded for reporting only");
+      } else {
+        logger.warn({ customerId, transactionId: payload.transactionId, status: purchase.status }, "payment-refunded webhook: matching purchase is not 'completed' — recorded for reporting only");
+      }
+    } else {
+      logger.warn({ transactionId: payload.transactionId }, "payment-refunded webhook: could not resolve a customer — recorded for reporting only");
     }
 
     await markWebhookEventProcessed(recorded.id, customerId);

@@ -268,6 +268,24 @@ export async function handlePaymentFailed(personId: string, isFirstOrder: boolea
   }
 }
 
+/**
+ * Internal-only, unlike handlePaymentFailed above — no automated SMS/email
+ * to the customer. A refund is usually already communicated to the customer
+ * by Bask or by whoever processed it; this just makes sure a person sees it
+ * and decides what (if anything) needs to happen next (pausing their
+ * account/access, following up on why). Flagging the support conversation
+ * already fires the standard needs-attention Slack alert (see
+ * updateSupportConversationState), so nothing else needs wiring here.
+ */
+export async function handleRefund(personId: string, transactionId: string, amount: string | undefined): Promise<void> {
+  const conversation = await getOrCreateSupportConversation(personId);
+  const amountText = amount ? `$${amount}` : "an unknown amount";
+  await updateSupportConversationState(conversation.id, {
+    needsAttention: true,
+    needsAttentionReason: `A payment was refunded (${amountText}, transaction ${transactionId}) — needs a person to review why and whether anything else should happen (e.g. pausing their account).`,
+  });
+}
+
 export interface ReviewRequestSweepResult {
   readonly sentCount: number;
   readonly failedCount: number;

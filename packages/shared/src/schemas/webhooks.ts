@@ -120,6 +120,41 @@ export const baskPaymentSucceededWebhookRequestSchema = z.object({
 });
 export type BaskPaymentSucceededWebhookRequest = z.infer<typeof baskPaymentSucceededWebhookRequestSchema>;
 
+// ── Bask payment-refunded webhook ───────────────────────────────────────────────
+//
+// Bask's own event is `{ type: "paymentRefunded", data: { patientId,
+// transactionId, amount, status, transactionResponse, date, paymentMethod,
+// testMode, sessionId, treatmentId } }` (owner-supplied, confirmed real) —
+// no eventId of its own, so the Zap must synthesize one for idempotency
+// (same requirement as every other Bask webhook here), and no email field,
+// so customer matching is by externalPersonId only, no email fallback.
+// Field names below are the flat, camelCase Zap-mapped shape this app's
+// other Bask webhooks all use, not Bask's raw nested envelope directly —
+// map `data.patientId` -> `externalPersonId`, `data.date` -> `refundDate`,
+// `data.paymentMethod` -> `paymentMethodType`, matching the "Data X" ->
+// camelCase convention already used for bask-prescription-written.
+//
+// `amount`'s cents-vs-dollars format is unconfirmed for this specific event
+// (bask-payment-failed's `amount` arrives as bare cents, bask-payment-
+// succeeded's arrives as dollars — the two other Bask payment webhooks
+// disagree with each other) — apply the same conservative
+// cents-if-no-decimal-point conversion bask-payment-failed uses until a
+// real delivery confirms which format this one actually sends.
+export const baskPaymentRefundedWebhookRequestSchema = z.object({
+  eventId: z.string().min(1),
+  transactionId: z.string().min(1),
+  externalPersonId: z.string().min(1), // Bask's "data.patientId"
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  status: z.string().optional(),
+  transactionResponse: z.string().optional(),
+  refundDate: z.string().datetime().optional(), // Bask's "data.date"
+  paymentMethodType: z.string().optional(), // Bask's "data.paymentMethod"
+  testMode: z.boolean().optional(),
+  sessionId: z.string().optional(),
+  treatmentId: z.string().optional(),
+});
+export type BaskPaymentRefundedWebhookRequest = z.infer<typeof baskPaymentRefundedWebhookRequestSchema>;
+
 // ── Bask prescription-written webhook ──────────────────────────────────────────
 //
 // SPECULATIVE — designed from Bask's raw trigger field labels (Data Patient
