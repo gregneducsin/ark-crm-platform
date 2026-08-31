@@ -1,4 +1,4 @@
-import { Route, Switch } from "wouter";
+import { Redirect, Route, Switch } from "wouter";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -6,6 +6,7 @@ import { LeadsPage } from "./pages/LeadsPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { FailedPaymentsPage } from "./pages/FailedPaymentsPage";
 import { WebhookEventsPage } from "./pages/WebhookEventsPage";
+import { AdminLayout } from "./components/AdminLayout";
 import { CustomerDetailPage } from "./pages/CustomerDetailPage";
 import { PayrollEmployeesPage } from "./pages/PayrollEmployeesPage";
 import { PayrollWeeksPage } from "./pages/PayrollWeeksPage";
@@ -56,9 +57,23 @@ export default function App() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/webhook-log">
+      <Route path="/admin">
+        <Redirect to="/admin/webhook-log" />
+      </Route>
+
+      <Route path="/admin/webhook-log">
         <ProtectedRoute roles={["admin", "manager"]}>
-          <WebhookEventsPage />
+          <AdminLayout>
+            <WebhookEventsPage />
+          </AdminLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/admin/marketing-cpa">
+        <ProtectedRoute roles={["admin"]}>
+          <AdminLayout>
+            <MarketingCpaPage />
+          </AdminLayout>
         </ProtectedRoute>
       </Route>
 
@@ -77,12 +92,6 @@ export default function App() {
       <Route path="/payroll/weeks/:id">
         <ProtectedRoute roles={["admin", "manager"]}>
           <PayrollWeekDetailPage />
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/marketing-cpa">
-        <ProtectedRoute roles={["admin"]}>
-          <MarketingCpaPage />
         </ProtectedRoute>
       </Route>
 
