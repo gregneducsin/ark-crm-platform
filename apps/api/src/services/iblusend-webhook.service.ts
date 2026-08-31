@@ -14,13 +14,27 @@ import { logger } from "../lib/logger.js";
 // while iBluSend always sends E.164 ("+1..."). An exact-match lookup here
 // silently misses those real customers, which is exactly how a real
 // inbound text from an existing customer went unanswered.
+//
+// Two customer records can legitimately share a phone number — e.g. an old
+// test/lead signup left the same number on file as a since-purchased
+// customer. Without a tiebreaker this matched an arbitrary row (whichever
+// Postgres happened to return), which once sent a real customer's "thank
+// you" reply to a stale unsold-lead record — Sophie's support conversation
+// never saw it, and Alexis answered as if they hadn't purchased yet. Prefer
+// whichever match already has a support conversation: per
+// dispatchInboundMessage below, that only exists off a real purchase, so it
+// identifies which of several same-number records this text actually
+// belongs to today. Among ties, prefer the most recently created record.
 async function findCustomerIdByPhone(phone: string): Promise<string | undefined> {
   const key = phoneMatchKey(phone);
   if (key.length !== 10) return undefined;
   const [row] = await db
     .select({ id: customersTable.id })
     .from(customersTable)
-    .where(sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`);
+    .leftJoin(supportConversationsTable, eq(supportConversationsTable.personId, customersTable.id))
+    .where(sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`)
+    .orderBy(sql`${supportConversationsTable.id} is null`, sql`${customersTable.createdAt} desc`)
+    .limit(1);
   return row?.id;
 }
 
