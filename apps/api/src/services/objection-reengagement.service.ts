@@ -16,18 +16,22 @@ const MAX_SEND_ATTEMPTS = 3;
 const RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 
 /**
- * Arms a one-time, 2-weeks-out re-engagement text for a lead whose "not
- * ready yet" hesitation just reached STAND_DOWN on the think_about_it
- * objection (see alexis-dispatch.service.ts / alexis-email-dispatch.service.ts,
- * and the standDown comment on think_about_it in objection-handling.ts).
- * "No problem, I'll leave it here for whenever you're ready" shouldn't mean
- * the outreach actually stops forever — this is that follow-through.
+ * Arms a one-time, 2-weeks-out re-engagement text for a lead who just
+ * reached STAND_DOWN on the think_about_it or price objection (see
+ * alexis-dispatch.service.ts / alexis-email-dispatch.service.ts, and each
+ * objection's standDown comment in objection-handling.ts). "No problem,
+ * I'll leave it here for whenever you're ready" / "we're here whenever the
+ * timing's better" shouldn't mean the outreach actually stops forever —
+ * this is that follow-through.
  *
  * onConflictDoNothing on personId: only the first time this fires for a
  * given lead ever arms anything, same one-lifetime-event convention as
- * scheduleLeadCheckin. If they hit stand-down on this objection more than
- * once in the same or a later conversation, the original 2-week timer
- * (or its outcome) already covers it.
+ * scheduleLeadCheckin — shared across BOTH objections, not one timer each,
+ * so standing down on price then later think_about_it (or vice versa) in
+ * the same lead's journey still only ever gets the one re-engagement text.
+ * If they hit stand-down on either objection more than once in the same or
+ * a later conversation, the original 2-week timer (or its outcome) already
+ * covers it.
  */
 export async function scheduleObjectionReengagement(personId: string, leadSource: "abandoned_cart" | "meta_form" = "abandoned_cart"): Promise<void> {
   await db

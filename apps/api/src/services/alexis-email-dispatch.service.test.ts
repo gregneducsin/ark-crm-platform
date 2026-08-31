@@ -134,6 +134,22 @@ describe("processInboundEmail", () => {
     expect(trigger.status).toBe("pending");
   });
 
+  it("schedules a 2-week re-engagement text once price reaches stand-down over email too — not just think_about_it", async () => {
+    runAlexisTurnMock.mockClear();
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValueOnce({ messageId: "<reply-price-standdown@example.com>" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "price", objectionStage: 2, nextQuestion: null }));
+
+    const personId = await seedCustomer();
+    await processInboundEmail(personId, "Question about pricing", "still too much for me", "<inbound-price-standdown@example.com>");
+
+    const { db, objectionReengagementTriggersTable } = await import("@luma/db");
+    const { eq } = await import("drizzle-orm");
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger).toBeDefined();
+    expect(trigger.status).toBe("pending");
+  });
+
   it("greets the customer by first name and signs off as Alexis — Claude's draft is only the substantive reply, not a full email", async () => {
     runAlexisTurnMock.mockClear();
     sendEmailMock.mockClear();

@@ -153,10 +153,10 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
       : {}),
   });
 
-  // "No problem, I'll leave it here for whenever you're ready" is a
-  // stand-down for THIS conversation, not the end of outreach — see
-  // objection-reengagement.service.ts.
-  if (result.objectionKey === "think_about_it" && result.objectionStage === 2) {
+  // A stand-down ("I'll leave it here for whenever you're ready" / "we're
+  // here whenever the timing's better") is terminal for THIS conversation,
+  // not the end of outreach — see objection-reengagement.service.ts.
+  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price") && result.objectionStage === 2) {
     await scheduleObjectionReengagement(personId, conversation.leadSource);
   }
 

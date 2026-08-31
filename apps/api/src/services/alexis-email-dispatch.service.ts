@@ -193,7 +193,7 @@ async function processInboundEmailLocked(
 
   // Same follow-through as the SMS side — see the identical comment in
   // alexis-dispatch.service.ts.
-  if (result.objectionKey === "think_about_it" && result.objectionStage === 2) {
+  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price") && result.objectionStage === 2) {
     await scheduleObjectionReengagement(personId, conversation.leadSource);
   }
 

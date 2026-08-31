@@ -111,13 +111,27 @@ describe("processInboundMessage", () => {
     expect(trigger.status).toBe("pending");
   });
 
-  it("does NOT schedule a re-engagement text for a different objection reaching stage 2, or think_about_it at an earlier stage", async () => {
+  it("schedules a 2-week re-engagement text once price reaches stand-down too — not just think_about_it", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_price_standdown" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "price", objectionStage: 2, nextQuestion: null }));
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "no thanks, still too much");
+
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger).toBeDefined();
+    expect(trigger.status).toBe("pending");
+  });
+
+  it("does NOT schedule a re-engagement text for a different objection reaching stage 2, or think_about_it/price at an earlier stage", async () => {
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();
     sendMessageMock.mockResolvedValue({ providerMessageId: "msg_other" });
 
     const otherObjectionPersonId = await seedCustomer();
-    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "price", objectionStage: 2, nextQuestion: null }));
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "not_qualified", objectionStage: 2, nextQuestion: null }));
     await processInboundMessage(otherObjectionPersonId, "no thanks");
     let triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, otherObjectionPersonId));
     expect(triggers).toHaveLength(0);
@@ -126,6 +140,12 @@ describe("processInboundMessage", () => {
     runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "think_about_it", objectionStage: 0 }));
     await processInboundMessage(earlyStagePersonId, "let me think about it");
     triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, earlyStagePersonId));
+    expect(triggers).toHaveLength(0);
+
+    const earlyPricePersonId = await seedCustomer();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "price", objectionStage: 1, nextQuestion: "What price were you hoping for?" }));
+    await processInboundMessage(earlyPricePersonId, "too expensive");
+    triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, earlyPricePersonId));
     expect(triggers).toHaveLength(0);
   });
 

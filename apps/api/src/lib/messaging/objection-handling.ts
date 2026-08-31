@@ -75,6 +75,11 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
       nextQuestion: ["What price were you hoping for?", "What are you paying now for something similar?"],
       requiredTopics: [],
     },
+    // Terminal for THIS conversation, but not the end of outreach — same as
+    // think_about_it's standDown below, reaching stand-down here arms a
+    // one-time re-engagement text 2 weeks out (see
+    // objection-reengagement.service.ts) — "we're here whenever the timing's
+    // better" shouldn't mean the outreach actually stops forever.
     standDown: {
       reply: "No worries, we're here whenever the timing's better.",
       requiredTopics: [],
