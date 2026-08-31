@@ -2,6 +2,7 @@ import { Router, type Router as RouterType } from "express";
 import { ibluSendWebhookEnvelopeSchema } from "@luma/shared";
 import { createIbluSendWebhookAuth } from "../../middleware/webhookAuth.js";
 import { handleIbluSendWebhook } from "../../services/iblusend-webhook.service.js";
+import { respondToInvalidWebhookPayload } from "../../lib/webhook-validation.js";
 
 export function createIbluSendMessageWebhookRouter(): RouterType {
   const router: RouterType = Router();
@@ -11,7 +12,7 @@ export function createIbluSendMessageWebhookRouter(): RouterType {
     try {
       const parsed = ibluSendWebhookEnvelopeSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: "Invalid payload.", details: parsed.error.issues });
+        await respondToInvalidWebhookPayload("iblusend_message", req, res, parsed.error);
         return;
       }
       const result = await handleIbluSendWebhook(parsed.data);

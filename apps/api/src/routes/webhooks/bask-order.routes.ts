@@ -2,6 +2,7 @@ import { Router, type Router as RouterType } from "express";
 import { baskOrderWebhookRequestSchema } from "@luma/shared";
 import { createWebhookAuth } from "../../middleware/webhookAuth.js";
 import { handleBaskOrderWebhook } from "../../services/webhooks.service.js";
+import { respondToInvalidWebhookPayload } from "../../lib/webhook-validation.js";
 
 export function createBaskOrderWebhookRouter(): RouterType {
   const router: RouterType = Router();
@@ -11,7 +12,7 @@ export function createBaskOrderWebhookRouter(): RouterType {
     try {
       const parsed = baskOrderWebhookRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: "Invalid payload.", details: parsed.error.issues });
+        await respondToInvalidWebhookPayload("bask_order", req, res, parsed.error);
         return;
       }
       const result = await handleBaskOrderWebhook(parsed.data);

@@ -140,12 +140,26 @@ describe("Webhooks", () => {
       expect(identityB.personId).toBe(customerB.id);
     });
 
-    it("rejects an invalid payload with 400", async () => {
+    it("rejects an invalid payload with 400, and records it as a failed webhook_events row for the portal's Webhook Log", async () => {
       const res = await request(app)
         .post("/api/webhooks/ghl-lead")
         .set("x-webhook-secret", GHL_SECRET)
         .send({ eventId: "bad" }); // missing required fields
       expect(res.status).toBe(400);
+      expect(res.body.details).toBeTruthy();
+
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { desc, eq } = await import("drizzle-orm");
+      const [failedRow] = await db
+        .select()
+        .from(webhookEventsTable)
+        .where(eq(webhookEventsTable.source, "ghl_lead"))
+        .orderBy(desc(webhookEventsTable.receivedAt))
+        .limit(1);
+      expect(failedRow.status).toBe("failed");
+      expect(failedRow.personId).toBeNull();
+      expect(failedRow.errorMessage).toContain("contactId");
+      expect(failedRow.rawPayload).toEqual({ eventId: "bad" });
     });
 
     it("persists the payload's leadType onto the created customer", async () => {

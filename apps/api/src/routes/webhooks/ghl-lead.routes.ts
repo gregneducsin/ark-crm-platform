@@ -2,6 +2,7 @@ import { Router, type Router as RouterType } from "express";
 import { ghlLeadWebhookRequestSchema } from "@luma/shared";
 import { createWebhookAuth } from "../../middleware/webhookAuth.js";
 import { handleGhlLeadWebhook } from "../../services/webhooks.service.js";
+import { respondToInvalidWebhookPayload } from "../../lib/webhook-validation.js";
 
 export function createGhlLeadWebhookRouter(): RouterType {
   const router: RouterType = Router();
@@ -11,7 +12,7 @@ export function createGhlLeadWebhookRouter(): RouterType {
     try {
       const parsed = ghlLeadWebhookRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: "Invalid payload.", details: parsed.error.issues });
+        await respondToInvalidWebhookPayload("ghl_lead", req, res, parsed.error);
         return;
       }
       const result = await handleGhlLeadWebhook(parsed.data);

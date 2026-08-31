@@ -5,6 +5,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { LeadsPage } from "./pages/LeadsPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { FailedPaymentsPage } from "./pages/FailedPaymentsPage";
+import { WebhookEventsPage } from "./pages/WebhookEventsPage";
 import { CustomerDetailPage } from "./pages/CustomerDetailPage";
 import { PayrollEmployeesPage } from "./pages/PayrollEmployeesPage";
 import { PayrollWeeksPage } from "./pages/PayrollWeeksPage";
@@ -52,6 +53,12 @@ export default function App() {
       <Route path="/failed-payments">
         <ProtectedRoute roles={["admin", "manager"]}>
           <FailedPaymentsPage />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/webhook-log">
+        <ProtectedRoute roles={["admin", "manager"]}>
+          <WebhookEventsPage />
         </ProtectedRoute>
       </Route>
 
