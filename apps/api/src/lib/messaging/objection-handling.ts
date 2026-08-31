@@ -60,8 +60,13 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
       requiredTopics: ["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer"],
     },
     secondAttempt: {
+      // Discovery, not another price pitch — repeating or lowering the price
+      // a second time reads as haggling against yourself and never
+      // surfaces the real gap. Asking what they had in mind either reveals
+      // an anchor already at or above what we can offer, or gives something
+      // concrete to actually respond to instead of guessing at a number.
       reply: "No pressure at all.",
-      nextQuestion: "Ready to fill out the questionnaire so we can see what applies to you?",
+      nextQuestion: "What price were you hoping for?",
       requiredTopics: [],
     },
     standDown: {
