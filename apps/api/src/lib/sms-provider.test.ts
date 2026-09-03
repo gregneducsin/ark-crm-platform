@@ -32,6 +32,23 @@ describe("getSmsProvider", () => {
     expect(() => getSmsProvider()).toThrow(/IBLUSEND_API_KEY/);
   });
 
+  it("alerts Slack when SMS_PROVIDER is unset, not just a warn log — this is exactly the failure mode that went unnoticed in production", () => {
+    notifySlackMock.mockClear();
+    delete process.env.SMS_PROVIDER;
+    expect(() => getSmsProvider()).toThrow();
+    expect(notifySlackMock).toHaveBeenCalledTimes(1);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/SMS send failed/);
+  });
+
+  it("alerts Slack when SMS_PROVIDER=iblusend but IBLUSEND_API_KEY is unset", () => {
+    notifySlackMock.mockClear();
+    process.env.SMS_PROVIDER = "iblusend";
+    delete process.env.IBLUSEND_API_KEY;
+    expect(() => getSmsProvider()).toThrow();
+    expect(notifySlackMock).toHaveBeenCalledTimes(1);
+    expect(notifySlackMock.mock.calls[0][0]).toMatch(/SMS send failed/);
+  });
+
   it("returns an iBluSend provider when both SMS_PROVIDER and IBLUSEND_API_KEY are set", () => {
     process.env.SMS_PROVIDER = "iblusend";
     process.env.IBLUSEND_API_KEY = "iblu_test_abc123";

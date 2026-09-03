@@ -94,17 +94,31 @@ function withFailureAlert(provider: SmsProvider): SmsProvider {
   };
 }
 
+/**
+ * Every caller does `getSmsProvider().sendMessage(...)` inside its own
+ * try/catch — so when this throws (misconfigured SMS_PROVIDER/API key), the
+ * error lands in that same catch and gets logged, exactly like a real send
+ * failure. But withFailureAlert below only wraps a provider this function
+ * has already returned — it can never run for an error thrown from in here,
+ * so a config problem alerted nobody, ever, at any of this app's dozen-plus
+ * call sites: a real production gap (real leads got zero outreach —
+ * abandoned-cart openers and Alexis's live replies alike — with nothing
+ * beyond a warn-level log line to show for it). Alert here too, before
+ * throwing, so every SMS failure mode — misconfigured or a real send error —
+ * pings the same Slack channel the same way.
+ */
 export function getSmsProvider(): SmsProvider {
   const provider = process.env.SMS_PROVIDER;
-  if (!provider) {
-    throw new SmsProviderNotConfiguredError();
-  }
   if (provider === "iblusend") {
     const apiKey = process.env.IBLUSEND_API_KEY;
     if (!apiKey) {
+      void notifySlack("SMS send failed — SMS_PROVIDER is 'iblusend' but IBLUSEND_API_KEY is not set.");
       throw new Error("SMS_PROVIDER is 'iblusend' but IBLUSEND_API_KEY is not set.");
     }
     return withFailureAlert(new IbluSendProvider(apiKey));
   }
+  void notifySlack(
+    provider ? `SMS send failed — unrecognized SMS_PROVIDER value: ${provider}` : "SMS send failed — no SMS provider is configured (SMS_PROVIDER is unset).",
+  );
   throw new SmsProviderNotConfiguredError();
 }
