@@ -43,3 +43,18 @@ export async function notifySlack(message: string): Promise<void> {
     logger.warn({ reason: err instanceof Error ? err.message : String(err) }, "Slack notification failed");
   }
 }
+
+/**
+ * Every SMS-related alert (send failures, provider misconfiguration, the
+ * SMS trigger sweeps in index.ts) routes through here instead of calling
+ * notifySlack directly. All Slack alerts in this app share one
+ * SLACK_WEBHOOK_URL — there's no per-category webhook — so muting just the
+ * SMS category without also silencing needs-attention/webhook-failure/email
+ * alerts needs its own switch. SMS_SLACK_ALERTS_DISABLED=true mutes this
+ * category alone; every other alert type keeps calling notifySlack directly
+ * and is unaffected.
+ */
+export async function notifySmsSlack(message: string): Promise<void> {
+  if (process.env.SMS_SLACK_ALERTS_DISABLED === "true") return;
+  await notifySlack(message);
+}

@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import { getSmsProvider, SmsProviderNotConfiguredError } from "./sms-provider.js";
 
 const notifySlackMock = vi.fn();
-vi.mock("./slack.js", () => ({ notifySlack: (...args: unknown[]) => notifySlackMock(...args) }));
+vi.mock("./slack.js", () => ({ notifySmsSlack: (...args: unknown[]) => notifySlackMock(...args) }));
 
 describe("getSmsProvider", () => {
   const originalProvider = process.env.SMS_PROVIDER;

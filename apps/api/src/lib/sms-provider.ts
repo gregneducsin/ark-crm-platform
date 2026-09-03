@@ -1,4 +1,4 @@
-import { notifySlack } from "./slack.js";
+import { notifySmsSlack } from "./slack.js";
 
 /**
  * Outbound SMS provider abstraction. getSmsProvider() throws until one is
@@ -87,7 +87,7 @@ function withFailureAlert(provider: SmsProvider): SmsProvider {
         // Slack is a ping to go look, not a dump of the error itself (a
         // verbose provider error was also what tripped Slack's own
         // block-text length limit before notifySlack started truncating).
-        void notifySlack(`SMS send failed — ${to}`);
+        void notifySmsSlack(`SMS send failed — ${to}`);
         throw err;
       }
     },
@@ -112,12 +112,12 @@ export function getSmsProvider(): SmsProvider {
   if (provider === "iblusend") {
     const apiKey = process.env.IBLUSEND_API_KEY;
     if (!apiKey) {
-      void notifySlack("SMS send failed — SMS_PROVIDER is 'iblusend' but IBLUSEND_API_KEY is not set.");
+      void notifySmsSlack("SMS send failed — SMS_PROVIDER is 'iblusend' but IBLUSEND_API_KEY is not set.");
       throw new Error("SMS_PROVIDER is 'iblusend' but IBLUSEND_API_KEY is not set.");
     }
     return withFailureAlert(new IbluSendProvider(apiKey));
   }
-  void notifySlack(
+  void notifySmsSlack(
     provider ? `SMS send failed — unrecognized SMS_PROVIDER value: ${provider}` : "SMS send failed — no SMS provider is configured (SMS_PROVIDER is unset).",
   );
   throw new SmsProviderNotConfiguredError();

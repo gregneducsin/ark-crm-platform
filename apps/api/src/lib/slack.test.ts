@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { notifySlack } from "./slack.js";
+import { notifySlack, notifySmsSlack } from "./slack.js";
 
 describe("notifySlack", () => {
   const original = process.env.SLACK_WEBHOOK_URL;
@@ -74,5 +74,51 @@ describe("notifySlack", () => {
     await notifySlack("short message");
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ message: "short message" });
+  });
+});
+
+describe("notifySmsSlack", () => {
+  const originalWebhook = process.env.SLACK_WEBHOOK_URL;
+  const originalDisabled = process.env.SMS_SLACK_ALERTS_DISABLED;
+
+  afterEach(() => {
+    if (originalWebhook === undefined) delete process.env.SLACK_WEBHOOK_URL;
+    else process.env.SLACK_WEBHOOK_URL = originalWebhook;
+    if (originalDisabled === undefined) delete process.env.SMS_SLACK_ALERTS_DISABLED;
+    else process.env.SMS_SLACK_ALERTS_DISABLED = originalDisabled;
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards to notifySlack when SMS_SLACK_ALERTS_DISABLED is unset", async () => {
+    process.env.SLACK_WEBHOOK_URL = "https://hooks.slack.com/triggers/T000/1/abc";
+    delete process.env.SMS_SLACK_ALERTS_DISABLED;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await notifySmsSlack("SMS send failed — +15551234567");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call Slack at all when SMS_SLACK_ALERTS_DISABLED=true, even with a webhook configured — this is the per-app switch for muting only SMS alerts", async () => {
+    process.env.SLACK_WEBHOOK_URL = "https://hooks.slack.com/triggers/T000/1/abc";
+    process.env.SMS_SLACK_ALERTS_DISABLED = "true";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await notifySmsSlack("SMS send failed — +15551234567");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still no-ops when SMS_SLACK_ALERTS_DISABLED is unset but SLACK_WEBHOOK_URL is also unset", async () => {
+    delete process.env.SLACK_WEBHOOK_URL;
+    delete process.env.SMS_SLACK_ALERTS_DISABLED;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await notifySmsSlack("SMS send failed — +15551234567");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
