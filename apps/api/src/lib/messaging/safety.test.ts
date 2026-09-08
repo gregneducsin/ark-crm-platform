@@ -325,7 +325,7 @@ describe("interactivePostCheck: pricing and financing claims", () => {
   });
 
   it("allows dollar amounts with a pricing topic declared", () => {
-    const result = check(reply({ reply: "That plan is $117 per month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
+    const result = check(reply({ reply: "That plan is $90 per month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
     expect(result.ok).toBe(true);
   });
 
@@ -341,11 +341,11 @@ describe("interactivePostCheck: pricing and financing claims", () => {
     expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
   });
 
-  it("allows every real approved figure across both products, all plan lengths, and the promo-adjusted month-to-month prices", () => {
+  it("allows every real approved figure across both products, all plan lengths, and the promo-adjusted plan totals", () => {
     const approvedReplies = [
-      "Semaglutide is $175 a month month-to-month, $117 a month ($350 total) for 3 months, $108 a month ($650 total) for 6 months, or $92 a month ($1,100 total) for 12 months.",
-      "Tirzepatide is $225 a month month-to-month, $188 a month ($565 total) for 3 months, $175 a month ($1,050 total) for 6 months, or $125 a month ($1,500 total) for 12 months.",
-      "With $40 off, semaglutide is $135 and tirzepatide is $185 for the first month.",
+      "Semaglutide is $169 a month month-to-month, $90 a month ($270 total) for 3 months, or $99 a month ($594 total) for 6 months.",
+      "Tirzepatide is $225 a month month-to-month, $170 a month ($510 total) for 3 months, or $172 a month ($1,035 total) for 6 months.",
+      "With $40 off, semaglutide is $129 month-to-month, $230 for the 3-month plan, or $554 for the 6-month plan. Tirzepatide is $185 month-to-month, $470 for the 3-month plan, or $995 for the 6-month plan.",
     ];
     for (const text of approvedReplies) {
       const result = check(reply({ reply: text, knowledgeTopicsUsed: ["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer"] }));

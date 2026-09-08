@@ -660,24 +660,27 @@ function normalizeDollarAmount(raw: string): string {
 
 /**
  * Every dollar figure that ever appears in approved pricing content: the two
- * product catalogs (semaglutide/tirzepatide, all four plan lengths, monthly
- * and total, plus the "save $X" figure each plan states), the $40 promo
- * discount itself, and the two promo-adjusted month-to-month prices the
- * prompt tells Claude to quote once promoOffered is true (see provider.ts's
- * promoState text). Declaring a pricing topic only proves Claude cited *a*
- * topic — it says nothing about whether the number it then quotes is one of
- * these. This closes that gap: once any pricing topic is declared, every
- * dollar amount in the reply must be a member of this set (compared after
+ * product catalogs (semaglutide/tirzepatide — only 1/3/6-month plans exist;
+ * there is no 12-month tier), monthly and total, plus the "save $X" figure
+ * each plan states, the $40 promo discount itself, and the six promo-adjusted
+ * plan totals the prompt tells Claude to quote once promoOffered is true (see
+ * provider.ts's promoState text) — the discount applies flat to whichever
+ * plan the patient signs up for, not just the month-to-month option.
+ * Declaring a pricing topic only proves Claude cited *a* topic — it says
+ * nothing about whether the number it then quotes is one of these. This
+ * closes that gap: once any pricing topic is declared, every dollar amount in
+ * the reply must be a member of this set (compared after
  * normalizeDollarAmount), not just "a topic was mentioned somewhere."
  */
 const APPROVED_DOLLAR_AMOUNTS = new Set([
   "40", // promo discount amount
-  // semaglutide: month-to-month, 3/6/12-month monthly + total + save
-  "175", "117", "350", "108", "650", "400", "92", "1100", "1000",
-  // tirzepatide: month-to-month, 3/6/12-month monthly + total + save
-  "225", "188", "565", "110", "1050", "300", "125", "1500", "1200",
-  // promo-adjusted month-to-month prices (promoState in provider.ts)
-  "135", "185",
+  // semaglutide: month-to-month, 3/6-month monthly + total + save
+  "169", "90", "270", "237", "99", "594", "420",
+  // tirzepatide: month-to-month, 3/6-month monthly + total + save
+  "225", "170", "510", "165", "172", "1035", "315",
+  // promo-adjusted plan totals (promoState in provider.ts) — semaglutide
+  // month-to-month/3-month/6-month, then tirzepatide the same
+  "129", "230", "554", "185", "470", "995",
 ]);
 
 /**

@@ -692,7 +692,7 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
         <p class="paragraph">You started the process to access physician-guided treatment with real support from our licensed medical team. Don't let a few unanswered questions stand between you and your goals.</p>
 
         <div class="price-box">
-          <p class="price-row">Compounded Semaglutide — <span class="price-value">$175/mo</span></p>
+          <p class="price-row">Compounded Semaglutide — <span class="price-value">$169/mo</span></p>
           <p class="price-row">Compounded Tirzepatide — <span class="price-value">$225/mo</span></p>
         </div>
 
@@ -794,7 +794,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
         <p class="paragraph">Once it's gone, it's gone — but you can still lock in your discount and get started on physician-guided treatment in just a few minutes.</p>
 
         <div class="price-box">
-          <p class="price-row">Compounded Semaglutide — <span class="price-value">$175/mo</span></p>
+          <p class="price-row">Compounded Semaglutide — <span class="price-value">$169/mo</span></p>
           <p class="price-row">Compounded Tirzepatide — <span class="price-value">$225/mo</span></p>
         </div>
 
@@ -896,7 +896,7 @@ export function renderAbandonedCartEducationalEmail(firstName: string, ctaUrl: s
         <p class="paragraph">You don't have to have it all figured out before you start. You just have to be ready to try something that works differently than what you've tried before.</p>
 
         <div class="price-box">
-          <p class="price-row">Compounded Semaglutide — <span class="price-value">$175/mo</span></p>
+          <p class="price-row">Compounded Semaglutide — <span class="price-value">$169/mo</span></p>
           <p class="price-row">Compounded Tirzepatide — <span class="price-value">$225/mo</span></p>
         </div>
 
@@ -995,7 +995,7 @@ export function renderAbandonedCartPlanComparisonEmail(firstName: string, ctaUrl
 
           <div class="plan-card">
             <p class="plan-name">Compounded Semaglutide</p>
-            <p class="plan-price">$175/mo</p>
+            <p class="plan-price">$169/mo</p>
             <p class="plan-desc">The same active ingredient found in Ozempic&reg; and Wegovy&reg;. A weekly injection
               that helps regulate appetite and support steady, sustainable weight loss alongside nutrition and lifestyle
               changes.</p>

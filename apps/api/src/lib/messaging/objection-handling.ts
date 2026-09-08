@@ -61,7 +61,7 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
     key: "price",
     rebuttal: {
       reply:
-        "Totally understand. With $40 off your first month, semaglutide starts at $135 and tirzepatide at $185. That includes provider review, medication, and shipping.",
+        "Totally understand. With $40 off, semaglutide starts at $129 and tirzepatide at $185. That includes provider review, medication, and shipping.",
       nextQuestion: "Want to see the payment plan options?",
       requiredTopics: ["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer"],
     },

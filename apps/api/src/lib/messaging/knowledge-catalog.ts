@@ -88,23 +88,25 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
   },
 
   // ── Semaglutide pricing ────────────────────────────────────────────────────
-  // Source: Ark Health transparent-pricing page (owner-supplied 2026-08-25).
-  // Exact prices: $175/mo (month-to-month), $117/mo ($350 total, 3-mo, save $175),
-  // $108/mo ($650 total, 6-mo, save $400), $92/mo ($1,100 total, 12-mo, save $1,000)
+  // Source: Ark Health / Bask product catalog (owner-confirmed 2026-09-08 against
+  // the live Bask variant list — corrects a stale $175 month-to-month figure that
+  // had been carried over from an earlier pricing page). No 12-month plan — Bask
+  // only offers 1/3/6-month variants for this product.
+  // Exact prices: $169/mo (month-to-month), $90/mo ($270 total, 3-mo, save $237),
+  // $99/mo ($594 total, 6-mo, save $420)
   {
     key: "semaglutide_pricing",
     approvedText:
       "Semaglutide pricing: " +
-      "Month-to-month: $175 per month, no commitment. " +
-      "3-month plan: $117 per month, $350 billed every 3 months (save $175 vs. month-to-month). " +
-      "6-month plan: $108 per month, $650 billed every 6 months (save $400 vs. month-to-month). " +
-      "12-month plan: $92 per month, $1,100 billed annually (save $1,000 vs. month-to-month). " +
+      "Month-to-month: $169 per month, no commitment. " +
+      "3-month plan: $90 per month, $270 billed every 3 months (save $237 vs. month-to-month). " +
+      "6-month plan: $99 per month, $594 billed every 6 months (save $420 vs. month-to-month). " +
       "When quoting a multi-month plan, clearly state both the monthly equivalent and the total plan price. " +
       "Never quote prices, discounts, promotions, coupon codes, or membership rates outside these amounts.",
     allowedParaphrase: true,
     legalStatus: "approved",
     clinicalStatus: "approved",
-    lastReviewedDate: "2026-08-25",
+    lastReviewedDate: "2026-09-08",
     prohibitedClaims: [
       "invented_price",
       "invented_discount",
@@ -120,23 +122,27 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
   },
 
   // ── Tirzepatide pricing ────────────────────────────────────────────────────
-  // Source: Ark Health transparent-pricing page (owner-supplied 2026-08-25).
-  // Exact prices: $225/mo (month-to-month), $188/mo ($565 total, 3-mo, save $110),
-  // $175/mo ($1,050 total, 6-mo, save $300), $125/mo ($1,500 total, 12-mo, save $1,200)
+  // Source: Ark Health / Bask product catalog (owner-confirmed 2026-09-08 against
+  // the live Bask variant list). No 12-month plan — Bask only offers 1/3/6-month
+  // variants for this product. The 6-month monthly-equivalent ($1,035 / 6 =
+  // $172.50) is rounded down to a whole dollar for display, same convention as
+  // every other monthly-equivalent figure in this catalog — the $1,035 total is
+  // the exact, authoritative billed amount.
+  // Exact prices: $225/mo (month-to-month), $170/mo ($510 total, 3-mo, save $165),
+  // $172/mo ($1,035 total, 6-mo, save $315)
   {
     key: "tirzepatide_pricing",
     approvedText:
       "Tirzepatide pricing: " +
       "Month-to-month: $225 per month, no commitment. " +
-      "3-month plan: $188 per month, $565 billed every 3 months (save $110 vs. month-to-month). " +
-      "6-month plan: $175 per month, $1,050 billed every 6 months (save $300 vs. month-to-month). " +
-      "12-month plan: $125 per month, $1,500 billed annually (save $1,200 vs. month-to-month). " +
+      "3-month plan: $170 per month, $510 billed every 3 months (save $165 vs. month-to-month). " +
+      "6-month plan: $172 per month, $1,035 billed every 6 months (save $315 vs. month-to-month). " +
       "When quoting a multi-month plan, clearly state both the monthly equivalent and the total plan price. " +
       "Never quote prices, discounts, promotions, coupon codes, or membership rates outside these amounts.",
     allowedParaphrase: true,
     legalStatus: "approved",
     clinicalStatus: "approved",
-    lastReviewedDate: "2026-08-25",
+    lastReviewedDate: "2026-09-08",
     prohibitedClaims: [
       "invented_price",
       "invented_discount",
@@ -597,15 +603,21 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
   // SOURCE: alexis-promotion-v1 (separately versioned; not part of alexis-knowledge-v1).
   // Approved by the owner who attested that medical staff and legal reviewed the terms.
   // approvedAt: null — owner has not supplied an explicit approval date.
+  // The $40 applies flat to whichever plan the customer signs up for (owner-confirmed
+  // 2026-09-08) — a multi-month plan is billed as one upfront total with no separate
+  // "first month" charge to discount, so the offer is $40 off the plan, not
+  // specifically off a first month's payment. The "first_month_offer" key name is
+  // kept as the existing internal identifier for this promo; it no longer describes
+  // the mechanic literally.
   {
     key: "first_month_offer",
     approvedText:
-      "New customers can receive $40 off their first month. " +
+      "New customers can receive $40 off their plan. " +
       "The discount is automatically applied and cannot be combined with another promotion.",
     allowedParaphrase: true,
     legalStatus: "approved",
     clinicalStatus: "approved",
-    lastReviewedDate: "2026-08-15",
+    lastReviewedDate: "2026-09-08",
     alexisSourceVersion: "alexis-promotion-v1",
     prohibitedClaims: [
       "eligibility_after_prior_purchase", // discount applies to new customers only

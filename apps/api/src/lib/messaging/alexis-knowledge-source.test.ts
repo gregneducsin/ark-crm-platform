@@ -101,11 +101,12 @@ describe("LK-08: all 17 expected section names are present", () => {
 });
 
 // ── LK-09..LK-10: Exact pricing values ───────────────────────────────────────
-// Ark Health's own pricing (owner-supplied 2026-08-25, from Ark's
-// transparent-pricing page) — no longer the alexis-knowledge-v1 values, so
-// these check against Ark's numbers instead of "matching the Alexis
-// document" (see ALEXIS_V1_TOPIC_KEYS's comment for why these two topics are
-// exempt from the document-consistency checks elsewhere in this file).
+// Ark Health's own pricing (owner-confirmed 2026-09-08 against the live Bask
+// variant list) — no longer the alexis-knowledge-v1 values, so these check
+// against Ark's numbers instead of "matching the Alexis document" (see
+// ALEXIS_V1_TOPIC_KEYS's comment for why these two topics are exempt from the
+// document-consistency checks elsewhere in this file). No 12-month plan —
+// Bask only offers 1/3/6-month variants for either product.
 
 describe("LK-09: semaglutide pricing values match Ark Health's approved pricing", () => {
   const topic = getTopicByKey("semaglutide_pricing");
@@ -114,32 +115,28 @@ describe("LK-09: semaglutide pricing values match Ark Health's approved pricing"
     expect(topic).toBeDefined();
   });
 
-  it("month-to-month price is $175", () => {
-    expect(topic?.approvedText).toContain("$175 per month");
+  it("month-to-month price is $169", () => {
+    expect(topic?.approvedText).toContain("$169 per month");
   });
 
-  it("3-month price is $117 per month", () => {
-    expect(topic?.approvedText).toContain("$117 per month");
+  it("3-month price is $90 per month", () => {
+    expect(topic?.approvedText).toContain("$90 per month");
   });
 
-  it("3-month total is $350", () => {
-    expect(topic?.approvedText).toContain("$350 billed every 3 months");
+  it("3-month total is $270", () => {
+    expect(topic?.approvedText).toContain("$270 billed every 3 months");
   });
 
-  it("6-month price is $108 per month", () => {
-    expect(topic?.approvedText).toContain("$108 per month");
+  it("6-month price is $99 per month", () => {
+    expect(topic?.approvedText).toContain("$99 per month");
   });
 
-  it("6-month total is $650", () => {
-    expect(topic?.approvedText).toContain("$650 billed every 6 months");
+  it("6-month total is $594", () => {
+    expect(topic?.approvedText).toContain("$594 billed every 6 months");
   });
 
-  it("12-month price is $92 per month", () => {
-    expect(topic?.approvedText).toContain("$92 per month");
-  });
-
-  it("12-month total is $1,100", () => {
-    expect(topic?.approvedText).toContain("$1,100 billed annually");
+  it("has no 12-month plan", () => {
+    expect(topic?.approvedText).not.toContain("12-month");
   });
 });
 
@@ -154,28 +151,24 @@ describe("LK-10: tirzepatide pricing values match Ark Health's approved pricing"
     expect(topic?.approvedText).toContain("$225 per month");
   });
 
-  it("3-month price is $188 per month", () => {
-    expect(topic?.approvedText).toContain("$188 per month");
+  it("3-month price is $170 per month", () => {
+    expect(topic?.approvedText).toContain("$170 per month");
   });
 
-  it("3-month total is $565", () => {
-    expect(topic?.approvedText).toContain("$565 billed every 3 months");
+  it("3-month total is $510", () => {
+    expect(topic?.approvedText).toContain("$510 billed every 3 months");
   });
 
-  it("6-month price is $175 per month", () => {
-    expect(topic?.approvedText).toContain("$175 per month");
+  it("6-month price is $172 per month", () => {
+    expect(topic?.approvedText).toContain("$172 per month");
   });
 
-  it("6-month total is $1,050", () => {
-    expect(topic?.approvedText).toContain("$1,050 billed every 6 months");
+  it("6-month total is $1,035", () => {
+    expect(topic?.approvedText).toContain("$1,035 billed every 6 months");
   });
 
-  it("12-month price is $125 per month", () => {
-    expect(topic?.approvedText).toContain("$125 per month");
-  });
-
-  it("12-month total is $1,500", () => {
-    expect(topic?.approvedText).toContain("$1,500 billed annually");
+  it("has no 12-month plan", () => {
+    expect(topic?.approvedText).not.toContain("12-month");
   });
 });
 

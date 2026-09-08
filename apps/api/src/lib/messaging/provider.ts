@@ -196,11 +196,13 @@ function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readon
     : "No signup link has been sent yet.";
 
   const promoState = body.promoOffered
-    ? "The $40-off first-month offer has already been mentioned this session. Set promoOffered:true on every remaining turn — the discount link is what gets sent. " +
-      "This also changes the month-to-month price you quote from here on: semaglutide month-to-month is $135 (not $175), tirzepatide month-to-month is $185 (not $225). " +
-      "The 3-month, 6-month, and 12-month monthly/total figures are unaffected — the discount is only on the first month. " +
-      "If the patient asks the price directly, quote the discounted month-to-month figure, not the plain one from the pricing topic — do not make them ask about the promo separately to get the real number."
-    : "The $40-off first-month offer has not been mentioned yet. Only mention it via the first_month_offer knowledge topic, and only set promoOffered:true on the turn where you actually use it.";
+    ? "The $40-off offer has already been mentioned this session. Set promoOffered:true on every remaining turn — the discount link is what gets sent. " +
+      "This also changes every plan's total price you quote from here on — the $40 applies flat to whichever plan the patient signs up for, not just the no-commitment month-to-month option: " +
+      "semaglutide is $129 month-to-month (not $169), $230 for the 3-month plan (not $270), $554 for the 6-month plan (not $594); " +
+      "tirzepatide is $185 month-to-month (not $225), $470 for the 3-month plan (not $510), $995 for the 6-month plan (not $1,035). " +
+      "The monthly-equivalent figures for the 3-month/6-month plans (e.g. \"$90/month\") are unaffected by the promo — only the total due at signup changes. " +
+      "If the patient asks the price directly, quote the discounted total for whichever plan they're asking about, not the plain one from the pricing topic — do not make them ask about the promo separately to get the real number."
+    : "The $40-off offer has not been mentioned yet. Only mention it via the first_month_offer knowledge topic, and only set promoOffered:true on the turn where you actually use it.";
 
   const knowledgeSection = buildKnowledgeSection(knowledgeCatalog);
   const objectionSection = buildObjectionSection(body.objectionStage, body.objectionKey);
