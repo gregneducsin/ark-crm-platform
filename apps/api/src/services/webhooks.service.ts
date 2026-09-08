@@ -180,6 +180,12 @@ async function tryFindCustomerByExternalIdentityOrEmail(system: string, external
 
 const occurredDate = (iso: string) => iso.slice(0, 10);
 
+/**
+ * Bask questionnaireId excluded from the abandoned-cart SMS opener
+ * (2026-09-08, at the owner's direction) — see handleBaskQuestionnaireWebhook.
+ */
+const EXCLUDED_ABANDONED_CART_SMS_QUESTIONNAIRE_ID = "9562";
+
 /** The exact leadType value GHL sends for a Meta (Facebook/Instagram) lead-gen form submission. */
 const META_FORM_FILL_LEAD_TYPE = "meta form fill";
 const isMetaFormFillLead = (leadType?: string): boolean => (leadType ?? "").trim().toLowerCase() === META_FORM_FILL_LEAD_TYPE;
@@ -448,8 +454,14 @@ export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireW
     // plan_comparison — see abandoned-cart-email.service.ts). Both are
     // idempotent per questionnaire event, so a duplicate "abandoned"
     // delivery for the same questionnaire can't double-schedule either.
+    //
+    // Questionnaire 9562 is excluded from the SMS opener specifically
+    // (2026-09-08, at the owner's direction) — the email sequence still
+    // arms normally for it.
     if (payload.status === "abandoned") {
-      await scheduleAbandonedCartOpener(customerId, event.id);
+      if (payload.questionnaireId.trim() !== EXCLUDED_ABANDONED_CART_SMS_QUESTIONNAIRE_ID) {
+        await scheduleAbandonedCartOpener(customerId, event.id);
+      }
       await scheduleAbandonedCartEmailSequence(customerId, event.id);
     }
 

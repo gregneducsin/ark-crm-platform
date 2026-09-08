@@ -777,6 +777,31 @@ describe("Webhooks", () => {
       expect(triggers).toHaveLength(1);
     });
 
+    it("excludes questionnaireId 9562 from the abandoned-cart SMS opener but still arms the email sequence", async () => {
+      const payload = {
+        eventId: "bask-q-evt-excluded-9562",
+        externalPersonId: "bask-person-excluded-9562",
+        email: "excluded-9562@example.com",
+        firstName: "Excluded",
+        lastName: "Questionnaire",
+        questionnaireId: "9562",
+        status: "abandoned" as const,
+        occurredAt: new Date().toISOString(),
+      };
+      const res = await request(app).post("/api/webhooks/bask-questionnaire").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(payload);
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, abandonedCartTriggersTable, abandonedCartEmailTriggersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "excluded-9562@example.com"));
+
+      const smsTriggers = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, customer!.id));
+      expect(smsTriggers).toEqual([]);
+
+      const emailTriggers = await db.select().from(abandonedCartEmailTriggersTable).where(eq(abandonedCartEmailTriggersTable.personId, customer!.id));
+      expect(emailTriggers.length).toBeGreaterThan(0);
+    });
+
     it("categorizes a customer created directly from an abandoned questionnaire (no prior GHL lead)", async () => {
       const payload = {
         eventId: "bask-q-evt-abandoned-only",
