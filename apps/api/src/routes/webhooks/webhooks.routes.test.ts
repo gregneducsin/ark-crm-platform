@@ -200,9 +200,8 @@ describe("Webhooks", () => {
       expect(customer.leadReceivedDate).toBe(new Date().toISOString().slice(0, 10));
     });
 
-    it("fires the meta-lead opener instantly for leadType 'Meta Form Fill'", async () => {
+    it("creates the lead for leadType 'Meta Form Fill' but does not fire the opener while Meta outreach is paused", async () => {
       sendMessageMock.mockClear();
-      sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_meta_webhook" });
 
       const payload = {
         eventId: "ghl-evt-meta-1",
@@ -217,23 +216,19 @@ describe("Webhooks", () => {
       const res = await request(app).post("/api/webhooks/ghl-lead").set("x-webhook-secret", GHL_SECRET).send(payload);
       expect(res.status).toBe(200);
 
-      // Wording is randomized (see renderMetaLeadOpener's variants) — "what
-      // state you're" is the substring common to all of them.
-      expect(sendMessageMock).toHaveBeenCalledWith("+15557770000", expect.stringContaining("what state you're"));
+      // See META_LEAD_OUTREACH_ENABLED in webhooks.service.ts — Meta-lead
+      // automated SMS/email is paused; only abandoned-cart leads currently
+      // get automated texting. The lead itself is still created and tagged.
+      expect(sendMessageMock).not.toHaveBeenCalled();
 
       const { db, customersTable, metaLeadEmailTriggersTable } = await import("@luma/db");
       const { eq } = await import("drizzle-orm");
       const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "meta-lead-webhook@example.com"));
-      const { getOrCreateConversation, listMessages } = await import("../../services/conversations.service.js");
-      const conversation = await getOrCreateConversation(customer!.id);
-      expect(conversation.leadSource).toBe("meta_form");
-      const messages = await listMessages(conversation.id);
-      expect(messages.length).toBe(1);
+      expect(customer).toBeDefined();
+      expect(customer!.leadType).toBe("Meta Form Fill");
 
-      // The same 4-step email nurture sequence the abandoned-cart flow gets,
-      // armed alongside the instant SMS opener above.
       const emailTriggers = await db.select().from(metaLeadEmailTriggersTable).where(eq(metaLeadEmailTriggersTable.personId, customer!.id));
-      expect(emailTriggers.map((t) => t.step).sort()).toEqual(["educational", "opener", "plan_comparison", "urgency"]);
+      expect(emailTriggers).toEqual([]);
     });
 
     it("matches leadType case-insensitively and does not fire the opener for other lead types", async () => {

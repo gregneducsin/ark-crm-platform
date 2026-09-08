@@ -184,6 +184,16 @@ const occurredDate = (iso: string) => iso.slice(0, 10);
 const META_FORM_FILL_LEAD_TYPE = "meta form fill";
 const isMetaFormFillLead = (leadType?: string): boolean => (leadType ?? "").trim().toLowerCase() === META_FORM_FILL_LEAD_TYPE;
 
+/**
+ * Meta-lead automated outreach is paused (2026-09-08, at the owner's
+ * direction) — abandoned-cart is the only lead source that currently gets
+ * automated SMS/email. A Meta lead is still created and logged below
+ * (findOrCreateCustomerByExternalIdentity runs unconditionally), it just
+ * doesn't get the automated opener text/email sent. Flip this back to true
+ * to resume Meta-lead outreach.
+ */
+const META_LEAD_OUTREACH_ENABLED = false;
+
 export async function handleGhlLeadWebhook(payload: GhlLeadWebhookRequest): Promise<{ duplicate: boolean }> {
   const recorded = await recordWebhookEventIfNew("ghl_lead", payload.eventId, payload);
   if (!recorded) return { duplicate: true };
@@ -203,8 +213,9 @@ export async function handleGhlLeadWebhook(payload: GhlLeadWebhookRequest): Prom
 
     // Meta form-fill leads are cold outreach — respond as fast as possible,
     // so the opener fires synchronously on this same request, not off a
-    // scheduled sweep like the abandoned-cart trigger.
-    if (isMetaFormFillLead(payload.leadType)) {
+    // scheduled sweep like the abandoned-cart trigger. Currently paused —
+    // see META_LEAD_OUTREACH_ENABLED.
+    if (isMetaFormFillLead(payload.leadType) && META_LEAD_OUTREACH_ENABLED) {
       await sendMetaLeadOpener(customerId);
       await scheduleMetaLeadEmailSequence(customerId);
     }
