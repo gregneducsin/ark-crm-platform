@@ -70,7 +70,7 @@ export interface ClaudeInteractiveResult {
   /**
    * True when Claude used the first_month_offer knowledge topic at any point
    * in this session. Determines which signup link variant gets minted on
-   * action=send_form (the $20-off promo URL vs. the plain one) — decided at
+   * action=send_form (the $40-off promo URL vs. the plain one) — decided at
    * link-mint time, not guessed later, since the click happens hours after
    * the conversation ends and carries no memory of what was discussed.
    */

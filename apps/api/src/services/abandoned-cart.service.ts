@@ -179,7 +179,7 @@ async function sendOpener(personId: string): Promise<SendResult> {
   try {
     const result = await getSmsProvider().sendMessage(customer.phone, text);
     await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
-    // The opener promises $20 off directly — the eventual send_form in the
+    // The opener promises $40 off directly — the eventual send_form in the
     // reply-driven conversation must use the promo link, not the plain one.
     await updateConversationState(conversation.id, { promoOffered: true });
     return { ok: true, providerMessageId: result.providerMessageId };

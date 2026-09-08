@@ -196,11 +196,11 @@ function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readon
     : "No signup link has been sent yet.";
 
   const promoState = body.promoOffered
-    ? "The $20-off first-month offer has already been mentioned this session. Set promoOffered:true on every remaining turn — the discount link is what gets sent. " +
-      "This also changes the month-to-month price you quote from here on: semaglutide month-to-month is $155 (not $175), tirzepatide month-to-month is $205 (not $225). " +
+    ? "The $40-off first-month offer has already been mentioned this session. Set promoOffered:true on every remaining turn — the discount link is what gets sent. " +
+      "This also changes the month-to-month price you quote from here on: semaglutide month-to-month is $135 (not $175), tirzepatide month-to-month is $185 (not $225). " +
       "The 3-month, 6-month, and 12-month monthly/total figures are unaffected — the discount is only on the first month. " +
       "If the patient asks the price directly, quote the discounted month-to-month figure, not the plain one from the pricing topic — do not make them ask about the promo separately to get the real number."
-    : "The $20-off first-month offer has not been mentioned yet. Only mention it via the first_month_offer knowledge topic, and only set promoOffered:true on the turn where you actually use it.";
+    : "The $40-off first-month offer has not been mentioned yet. Only mention it via the first_month_offer knowledge topic, and only set promoOffered:true on the turn where you actually use it.";
 
   const knowledgeSection = buildKnowledgeSection(knowledgeCatalog);
   const objectionSection = buildObjectionSection(body.objectionStage, body.objectionKey);
@@ -251,16 +251,16 @@ SIGNUP LINK — you never output a real link yourself:
 When the patient is ready to sign up (they've agreed to fill out the form), use action "send_form".
 reply must be a short confirmation with NO url in it at all, e.g. "Perfect, sending you the signup link now."
 nextQuestion must be null. The system generates and sends the actual secure link — never invent, guess,
-or reuse a URL for this. Which link variant gets sent (plain vs. the $20-off promo) depends entirely on
+or reuse a URL for this. Which link variant gets sent (plain vs. the $40-off promo) depends entirely on
 promoOffered — set it correctly on the send_form turn itself, it will not be re-derived from earlier turns.
 
-WHEN TO OFFER THE $20 DISCOUNT — this is a judgment call, not a reflex:
+WHEN TO OFFER THE $40 DISCOUNT — this is a judgment call, not a reflex:
 Only use the first_month_offer topic (and set promoOffered:true) when the discount is actually why
 this patient is agreeing to sign up:
  - Their real hesitation was about price or cost — use the "price" objection's rebuttal, which
    surfaces the discount directly, OR
  - They were genuinely on the fence (stalling, unsure, hadn't committed) on other questions, and you
-   deliberately offer the $20 off as the final push that gets them to agree.
+   deliberately offer the $40 off as the final push that gets them to agree.
 Do NOT offer it to a patient who's already ready to sign up regardless of price — there's no reason
 to give away the discount when it isn't the deciding factor. If you never use first_month_offer in the
 conversation, promoOffered stays false and send_form sends the plain link.

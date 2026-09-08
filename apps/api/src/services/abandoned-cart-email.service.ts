@@ -122,7 +122,7 @@ export interface AbandonedCartEmailSweepResult {
  * Sends every due step across every lead's sequence, unless no longer
  * eligible (rechecked now, not trusted from schedule time — same reasoning
  * as sweepAbandonedCartTriggers). Each step mints a fresh per-lead
- * $20-off intake link at send time (not pre-computed when the sequence was
+ * $40-off intake link at send time (not pre-computed when the sequence was
  * armed) — the token has a 24-hour TTL, and a step firing 10 days out needs
  * a link that's actually still valid when the recipient clicks it. Clicking
  * arms the same 2-hour follow-up job SMS-driven signups get.
@@ -199,7 +199,7 @@ export async function sweepAbandonedCartEmailTriggers(): Promise<AbandonedCartEm
         .update(abandonedCartEmailTriggersTable)
         .set({ status: "sent", sentAt: sql`now()`, messageId: result.messageId })
         .where(eq(abandonedCartEmailTriggersTable.id, trigger.id));
-      // The opener step promises $20 off directly — the eventual send_form
+      // The opener step promises $40 off directly — the eventual send_form
       // in the reply-driven conversation must use the promo link, not the
       // plain one. Same reasoning as the SMS opener's identical line.
       if (step === "opener") {

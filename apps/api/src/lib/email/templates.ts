@@ -696,7 +696,7 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
           <p class="price-row">Compounded Tirzepatide — <span class="price-value">$225/mo</span></p>
         </div>
 
-        <p class="paragraph"><strong>Finish now and get $20 off your first month</strong> — our way of helping you take that next step.</p>
+        <p class="paragraph"><strong>Finish now and get $40 off your first month</strong> — our way of helping you take that next step.</p>
 
         <div class="cta-wrapper">
           <a href="${ctaUrl}" class="cta-button">Finish My Visit Now</a>
@@ -734,7 +734,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Your $20 off expires soon — finish your Ark Health visit</title>
+<title>Your $40 off expires soon — finish your Ark Health visit</title>
 <!--[if mso]>
 <noscript>
 <xml>
@@ -784,7 +784,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
       <td class="body-content">
         <p class="greeting">Dear ${name},</p>
 
-        <p class="paragraph">Quick reminder — your $20 off first month offer is about to expire, and your Ark Health visit is still sitting unfinished.</p>
+        <p class="paragraph">Quick reminder — your $40 off first month offer is about to expire, and your Ark Health visit is still sitting unfinished.</p>
 
         <div class="expiry-box">
           <p class="expiry-label">Offer Expires</p>
@@ -799,7 +799,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
         </div>
 
         <div class="cta-wrapper">
-          <a href="${ctaUrl}" class="cta-button">Claim My $20 Off</a>
+          <a href="${ctaUrl}" class="cta-button">Claim My $40 Off</a>
         </div>
 
         <p class="paragraph">It only takes a few minutes to complete, and our clinical team will review your visit as soon as it's submitted.</p>
@@ -823,7 +823,7 @@ export function renderAbandonedCartUrgencyEmail(firstName: string, ctaUrl: strin
 </div>
 </body>
 </html>`;
-  return { subject: "Your $20 off expires soon — finish your Ark Health visit", html };
+  return { subject: "Your $40 off expires soon — finish your Ark Health visit", html };
 }
 
 /** Abandoned-cart drip step 3 ("educational") — fires 7 days after abandonment. Same ctaUrl-minting requirement as renderAbandonedCartOpenerEmail. */

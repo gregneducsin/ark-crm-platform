@@ -661,7 +661,7 @@ function normalizeDollarAmount(raw: string): string {
 /**
  * Every dollar figure that ever appears in approved pricing content: the two
  * product catalogs (semaglutide/tirzepatide, all four plan lengths, monthly
- * and total, plus the "save $X" figure each plan states), the $20 promo
+ * and total, plus the "save $X" figure each plan states), the $40 promo
  * discount itself, and the two promo-adjusted month-to-month prices the
  * prompt tells Claude to quote once promoOffered is true (see provider.ts's
  * promoState text). Declaring a pricing topic only proves Claude cited *a*
@@ -671,13 +671,13 @@ function normalizeDollarAmount(raw: string): string {
  * normalizeDollarAmount), not just "a topic was mentioned somewhere."
  */
 const APPROVED_DOLLAR_AMOUNTS = new Set([
-  "20", // promo discount amount
+  "40", // promo discount amount
   // semaglutide: month-to-month, 3/6/12-month monthly + total + save
   "175", "117", "350", "108", "650", "400", "92", "1100", "1000",
   // tirzepatide: month-to-month, 3/6/12-month monthly + total + save
   "225", "188", "565", "110", "1050", "300", "125", "1500", "1200",
   // promo-adjusted month-to-month prices (promoState in provider.ts)
-  "155", "205",
+  "135", "185",
 ]);
 
 /**
@@ -685,7 +685,7 @@ const APPROVED_DOLLAR_AMOUNTS = new Set([
  * When first_month_offer is the sole pricing topic declared (no product pricing topic),
  * any dollar amount in the reply must match this; other amounts are invented discounts.
  */
-const APPROVED_PROMOTION_AMOUNT_RE = /\$20\b/;
+const APPROVED_PROMOTION_AMOUNT_RE = /\$40\b/;
 
 /**
  * Affirmative stacking claim — always blocked.
@@ -699,7 +699,7 @@ const PROMOTION_STACKING_RE = /\bcan\s+be\s+combin(ed|able)\s+with\b|\bstack(abl
 
 /**
  * Non-new-customer eligibility claim — always blocked when first_month_offer is declared.
- * Catches language that implies returning or previous customers qualify for the $20 offer.
+ * Catches language that implies returning or previous customers qualify for the $40 offer.
  */
 const PROMOTION_ELIGIBILITY_VIOLATION_RE =
   /\b(returning|previous|prior|existing)\s+(customers?|patients?)\s+(can|are)\s+(also\s+)?(get|receive|eligible?|qualify)\b/i;
@@ -965,7 +965,7 @@ export function interactivePostCheck(
       }
 
       // Invented discount amount — when first_month_offer is the only pricing topic
-      // (no product pricing topic declared), any dollar amount must be exactly $20.
+      // (no product pricing topic declared), any dollar amount must be exactly $40.
       const hasProductPricingTopic = raw.knowledgeTopicsUsed.some((k) => PRODUCT_PRICING_TOPIC_KEYS.has(k));
       if (!hasProductPricingTopic && DOLLAR_AMOUNT_RE.test(reply) && !APPROVED_PROMOTION_AMOUNT_RE.test(reply)) {
         return { ok: false, code: "UNSUPPORTED_PRICING_CLAIM" };

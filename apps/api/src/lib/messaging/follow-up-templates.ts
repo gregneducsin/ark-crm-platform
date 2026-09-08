@@ -18,7 +18,7 @@
  * given step still satisfies the same structural rules (checked in this
  * file's tests): one trailing question mark where a question mark is
  * expected, none where it isn't, no em dash, same required content (the
- * $20 offer, asking about state, etc).
+ * $40 offer, asking about state, etc).
  */
 
 function pickVariant(variants: readonly string[]): string {
@@ -55,7 +55,7 @@ export function renderFollowUpMessage(step: FollowUpMessageStep, firstName: stri
  * The very first outbound message to a lead who abandoned the Bask
  * questionnaire — fired 10 minutes after Bask's `abandoned` webhook event,
  * 24/7, no monitored-hours window. Fixed template, not AI-drafted, same
- * reasoning as the follow-up nudges above. Mentions the $20-off offer
+ * reasoning as the follow-up nudges above. Mentions the $40-off offer
  * directly but deliberately does not include a link — if the customer
  * responds with interest, the normal Alexis conversation loop (runAlexisTurn)
  * takes over and mints the real link via action=send_form.
@@ -63,8 +63,8 @@ export function renderFollowUpMessage(step: FollowUpMessageStep, firstName: stri
 export function renderAbandonedCartOpener(firstName: string): string {
   const name = firstName.trim() || "there";
   return pickVariant([
-    `Hi ${name}, this is Alexis with Ark Health. I noticed you started your online visit but didn't get a chance to finish it. Complete your enrollment now and get $20 off your first month. Want me to send the link to get started?`,
-    `Hi ${name}, this is Alexis with Ark Health. Looks like you started your online visit but didn't quite finish it. Complete your enrollment and get $20 off your first month. Want the link so you can pick back up?`,
+    `Hi ${name}, this is Alexis with Ark Health. I noticed you started your online visit but didn't get a chance to finish it. Complete your enrollment now and get $40 off your first month. Want me to send the link to get started?`,
+    `Hi ${name}, this is Alexis with Ark Health. Looks like you started your online visit but didn't quite finish it. Complete your enrollment and get $40 off your first month. Want the link so you can pick back up?`,
   ]);
 }
 
@@ -82,8 +82,8 @@ export function renderAbandonedCartOpener(firstName: string): string {
 export function renderAbandonedCartFollowUp(firstName: string): string {
   const name = firstName.trim() || "there";
   return pickVariant([
-    `Hey ${name}, noticed you started your online visit but didn't get a chance to finish it. Complete your enrollment now and get $20 off your first month. Want me to send the link to get started?`,
-    `Hey ${name}, looks like you started your online visit but didn't quite finish it. Complete your enrollment and get $20 off your first month. Want the link so you can pick back up?`,
+    `Hey ${name}, noticed you started your online visit but didn't get a chance to finish it. Complete your enrollment now and get $40 off your first month. Want me to send the link to get started?`,
+    `Hey ${name}, looks like you started your online visit but didn't quite finish it. Complete your enrollment and get $40 off your first month. Want the link so you can pick back up?`,
   ]);
 }
 

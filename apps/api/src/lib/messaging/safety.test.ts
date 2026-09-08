@@ -345,7 +345,7 @@ describe("interactivePostCheck: pricing and financing claims", () => {
     const approvedReplies = [
       "Semaglutide is $175 a month month-to-month, $117 a month ($350 total) for 3 months, $108 a month ($650 total) for 6 months, or $92 a month ($1,100 total) for 12 months.",
       "Tirzepatide is $225 a month month-to-month, $188 a month ($565 total) for 3 months, $175 a month ($1,050 total) for 6 months, or $125 a month ($1,500 total) for 12 months.",
-      "With $20 off, semaglutide is $155 and tirzepatide is $205 for the first month.",
+      "With $40 off, semaglutide is $135 and tirzepatide is $185 for the first month.",
     ];
     for (const text of approvedReplies) {
       const result = check(reply({ reply: text, knowledgeTopicsUsed: ["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer"] }));
@@ -417,9 +417,9 @@ describe("interactivePostCheck: insurance-acceptance negation", () => {
 // ── Post-check: promotion rules ───────────────────────────────────────────────
 
 describe("interactivePostCheck: first_month_offer promotion rules", () => {
-  it("allows the approved $20 offer language", () => {
+  it("allows the approved $40 offer language", () => {
     const result = check(
-      reply({ reply: "New customers get $20 off their first month.", knowledgeTopicsUsed: ["first_month_offer"] }),
+      reply({ reply: "New customers get $40 off their first month.", knowledgeTopicsUsed: ["first_month_offer"] }),
     );
     expect(result.ok).toBe(true);
   });

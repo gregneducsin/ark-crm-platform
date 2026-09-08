@@ -108,7 +108,7 @@ export interface MetaLeadEmailSweepResult {
 /**
  * Sends every due step across every Meta lead's sequence, unless no longer
  * eligible (rechecked now, not trusted from schedule time). Each step mints
- * a fresh per-lead $20-off intake link at send time — see the identical
+ * a fresh per-lead $40-off intake link at send time — see the identical
  * reasoning on sweepAbandonedCartEmailTriggers.
  *
  * Safe to call repeatedly, including from overlapping sweep runs — same
@@ -183,7 +183,7 @@ export async function sweepMetaLeadEmailTriggers(): Promise<MetaLeadEmailSweepRe
         .set({ status: "sent", sentAt: sql`now()`, messageId: result.messageId })
         .where(eq(metaLeadEmailTriggersTable.id, trigger.id));
       // Same reasoning as the abandoned-cart sequence's identical line — the
-      // opener promises $20 off directly, so the eventual send_form in the
+      // opener promises $40 off directly, so the eventual send_form in the
       // reply-driven conversation must use the promo link, not the plain one.
       if (step === "opener") {
         await updateEmailConversationState(emailConversation.id, { promoOffered: true });

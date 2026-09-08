@@ -91,7 +91,7 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"));
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"));
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
@@ -125,7 +125,7 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"));
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"));
     expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.not.stringContaining("this is Alexis"));
 
     // Lands in the SAME conversation, not a second one.
@@ -208,7 +208,7 @@ describe("sweepAbandonedCartTriggers", () => {
     expect(trigger.cancelledReason).toBe("no_longer_abandoned");
   });
 
-  it("cancels the $20 opener but still arms the 6-day check-in when the person already clicked their intake link (e.g. via the parallel email sequence)", async () => {
+  it("cancels the $40 opener but still arms the 6-day check-in when the person already clicked their intake link (e.g. via the parallel email sequence)", async () => {
     sendMessageMock.mockClear();
     const personId = await seedCustomer();
     const questionnaireEventId = await seedAbandonedQuestionnaire(personId);

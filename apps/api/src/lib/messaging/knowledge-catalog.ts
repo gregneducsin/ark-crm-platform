@@ -600,7 +600,7 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
   {
     key: "first_month_offer",
     approvedText:
-      "New customers can receive $20 off their first month. " +
+      "New customers can receive $40 off their first month. " +
       "The discount is automatically applied and cannot be combined with another promotion.",
     allowedParaphrase: true,
     legalStatus: "approved",

@@ -49,9 +49,9 @@ describe("renderAbandonedCartOpener", () => {
     expect(text).not.toMatch(/—|--/);
   });
 
-  it("mentions the $20 offer and does not include a link", () => {
+  it("mentions the $40 offer and does not include a link", () => {
     const text = renderAbandonedCartOpener("Jamie");
-    expect(text).toContain("$20 off");
+    expect(text).toContain("$40 off");
     expect(text).not.toMatch(/https?:\/\//);
   });
 
