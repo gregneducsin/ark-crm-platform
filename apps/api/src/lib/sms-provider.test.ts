@@ -92,13 +92,17 @@ describe("getSmsProvider", () => {
       await expect(getSmsProvider().sendMessage("+15551234567", "Hello there")).rejects.toThrow(/429/);
     });
 
-    it("throws when the response is missing message_id", async () => {
+    it("treats a 200 response missing message_id as sent, not a failure — a thrown error here caused a real duplicate text (retried by a caller's retry logic even though the message had already gone out)", async () => {
       process.env.SMS_PROVIDER = "iblusend";
       process.env.IBLUSEND_API_KEY = "iblu_test_abc123";
+      notifySlackMock.mockClear();
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) }));
 
-      await expect(getSmsProvider().sendMessage("+15551234567", "Hello there")).rejects.toThrow(/message_id/);
+      const result = await getSmsProvider().sendMessage("+15551234567", "Hello there");
+      expect(result).toEqual({ providerMessageId: null });
+      expect(notifySlackMock).toHaveBeenCalledTimes(1);
+      expect(notifySlackMock.mock.calls[0][0]).toMatch(/unexpected iBluSend response shape/);
     });
 
     it("alerts Slack on a send failure, then still rejects with the original error", async () => {

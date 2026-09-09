@@ -9,7 +9,13 @@ import { notifySmsSlack } from "./slack.js";
  */
 
 export interface SmsSendResult {
-  readonly providerMessageId: string;
+  /**
+   * Null specifically means iBluSend accepted the send (HTTP 200) but its
+   * response body didn't have the message_id field in the shape we expect —
+   * see the comment on that branch in IbluSendProvider.sendMessage for why
+   * this is treated as sent, not thrown as a failure.
+   */
+  readonly providerMessageId: string | null;
 }
 
 export interface SmsProvider {
@@ -62,9 +68,21 @@ class IbluSendProvider implements SmsProvider {
       throw new Error(`iBluSend send failed: ${res.status} ${text}`);
     }
 
+    // A 200 here means iBluSend accepted and almost certainly dispatched the
+    // message — a missing message_id in the body is a response-shape
+    // problem (a schema drift on their end, a malformed-but-still-2xx
+    // response), not evidence the text didn't go out. Treating this as a
+    // thrown failure is exactly what caused a real customer to get the same
+    // lead-check-in text three times: every caller in this codebase that
+    // retries on a thrown send error (lead-checkin.service.ts, among
+    // others) would re-send the identical message on the assumption the
+    // first attempt never reached the customer, when it likely had. Alert
+    // so someone investigates the response shape, but don't throw — a
+    // caller with retry logic must not re-send over this.
     const json = (await res.json()) as { message_id?: string };
     if (!json.message_id) {
-      throw new Error("iBluSend send response missing message_id.");
+      void notifySmsSlack(`SMS send to ${to} got an unexpected iBluSend response shape (no message_id) — treating as sent, not retrying. Response body should be checked.`);
+      return { providerMessageId: null };
     }
     return { providerMessageId: json.message_id };
   }

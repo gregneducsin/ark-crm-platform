@@ -127,7 +127,7 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
   return { sentCount, cancelledCount, failedCount };
 }
 
-type SendResult = { ok: true; providerMessageId: string; body: string } | { ok: false; reason: string };
+type SendResult = { ok: true; providerMessageId: string | null; body: string } | { ok: false; reason: string };
 
 async function attemptSend(personId: string, messageStep: "provider_check_in" | "intake_questions_check_in"): Promise<SendResult> {
   const [customer] = await db
