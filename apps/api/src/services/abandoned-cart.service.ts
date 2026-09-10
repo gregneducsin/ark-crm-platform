@@ -178,7 +178,7 @@ async function sendOpener(personId: string): Promise<SendResult> {
 
   try {
     const result = await getSmsProvider().sendMessage(customer.phone, text);
-    await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+    await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     // The opener promises $40 off directly — the eventual send_form in the
     // reply-driven conversation must use the promo link, not the plain one.
     await updateConversationState(conversation.id, { promoOffered: true });
@@ -188,7 +188,7 @@ async function sendOpener(personId: string): Promise<SendResult> {
     logger.warn({ personId, reason }, "abandoned-cart opener send failed");
     // Still logged for visibility even though the send failed — this is what
     // Alexis's opener would have said, once a provider exists.
-    await appendMessage(conversation.id, "outbound", text, {});
+    await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     await updateConversationState(conversation.id, { promoOffered: true });
     return { ok: false, reason };
   }

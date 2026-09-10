@@ -123,7 +123,7 @@ export async function sweepObjectionReengagementTriggers(): Promise<ObjectionRee
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId: trigger.personId, reason }, "objection re-engagement send failed");
-      await appendMessage(conversation.id, "outbound", text, {});
+      await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
       await db
         .update(objectionReengagementTriggersTable)
         .set({ status: "failed", failureReason: reason, attemptCount: nextAttemptCount })
@@ -139,7 +139,7 @@ export async function sweepObjectionReengagementTriggers(): Promise<ObjectionRee
     sentCount++;
 
     try {
-      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log objection re-engagement into the conversation");
     }

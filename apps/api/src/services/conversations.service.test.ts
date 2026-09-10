@@ -298,6 +298,7 @@ describe("sendStaffReply", () => {
       providerMessageId: "msg_staff_1",
       sentBy: "staff",
       sentByStaffEmail: "staff@example.com",
+      deliveryStatus: "sent",
     });
 
     const updated = await getConversationDetail(conversation.id);
@@ -336,7 +337,7 @@ describe("sendStaffReply", () => {
 
     expect(result).toEqual({ sent: false, reason: "send_failed" });
     const messages = await listMessages(conversation.id);
-    expect(messages[0]).toMatchObject({ direction: "outbound", body: "trying to reply", providerMessageId: null });
+    expect(messages[0]).toMatchObject({ direction: "outbound", body: "trying to reply", providerMessageId: null, deliveryStatus: "failed" });
 
     const updated = await getConversationDetail(conversation.id);
     expect(updated?.conversation.needsAttention).toBe(true);

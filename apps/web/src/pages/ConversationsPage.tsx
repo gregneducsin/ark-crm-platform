@@ -23,6 +23,12 @@ function SentimentBadge({ sentiment }: { sentiment: "positive" | "neutral" | "ne
   return <Badge color={SENTIMENT_COLOR[sentiment]}>{sentiment}</Badge>;
 }
 
+/** Flags an outbound SMS that never actually reached the customer (the provider call itself failed) — distinct from providerMessageId being absent, which can also happen on a message that did send. */
+function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "sent" | "failed" | null | undefined }) {
+  if (deliveryStatus !== "failed") return null;
+  return <Badge color="red">Not delivered</Badge>;
+}
+
 /** Marks who actually wrote an outbound message — the bot vs a staff member typing into the reply box — so the timeline reads as one continuous conversation but staff can still tell AI from human, and which human, at a glance. */
 function SenderBadge({ sentBy, staffEmail, botName }: { sentBy: "ai" | "staff" | null | undefined; staffEmail: string | null | undefined; botName: string }) {
   if (!sentBy) return null;
@@ -392,6 +398,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                     {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName={BOT_NAME[m.persona]} />}
                     <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>
                     <SentimentBadge sentiment={m.sentiment} />
+                    {m.direction === "outbound" && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}
                   </div>
                 </div>
               </div>

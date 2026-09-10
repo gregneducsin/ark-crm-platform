@@ -116,7 +116,7 @@ export async function sendStaffReply(conversationId: string, body: string, staff
     logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "staff reply send failed");
   }
 
-  await appendMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail });
+  await appendMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail, deliveryStatus: sendFailed ? "failed" : "sent" });
   if (sendFailed) return { sent: false, reason: "send_failed" };
 
   await clearNeedsAttention(conversationId);
@@ -132,6 +132,7 @@ export async function appendMessage(
     providerMessageId?: string | null;
     sentBy?: "ai" | "staff" | null;
     sentByStaffEmail?: string | null;
+    deliveryStatus?: "sent" | "failed" | null;
   } = {},
 ): Promise<ConversationMessage> {
   const [row] = await db
@@ -144,6 +145,7 @@ export async function appendMessage(
       providerMessageId: opts.providerMessageId ?? null,
       sentBy: opts.sentBy ?? (direction === "outbound" ? "ai" : null),
       sentByStaffEmail: opts.sentByStaffEmail ?? null,
+      deliveryStatus: opts.deliveryStatus ?? null,
     })
     .returning();
   return row;

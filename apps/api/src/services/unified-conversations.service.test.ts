@@ -128,6 +128,25 @@ describe("getUnifiedConversationDetail", () => {
     expect(detail!.availableReplyTargets).toHaveLength(4);
   });
 
+  it("surfaces deliveryStatus for SMS messages (both sales and support) but not for email", async () => {
+    const personId = await seedCustomer();
+    const salesSms = await getOrCreateConversation(personId);
+    const salesEmail = await getOrCreateEmailConversation(personId);
+    const supportSms = await getOrCreateSupportConversation(personId);
+
+    await appendMessage(salesSms.id, "outbound", "sales sms sent", { deliveryStatus: "sent" });
+    await appendMessage(salesSms.id, "outbound", "sales sms failed", { deliveryStatus: "failed" });
+    await appendSupportMessage(supportSms.id, "outbound", "support sms failed", { deliveryStatus: "failed" });
+    await appendEmailMessage(salesEmail.id, "outbound", "subj", "sales email");
+
+    const detail = await getUnifiedConversationDetail(personId);
+    const byBody = new Map(detail!.messages.map((m) => [m.body, m.deliveryStatus]));
+    expect(byBody.get("sales sms sent")).toBe("sent");
+    expect(byBody.get("sales sms failed")).toBe("failed");
+    expect(byBody.get("support sms failed")).toBe("failed");
+    expect(byBody.get("sales email")).toBeFalsy();
+  });
+
   it("reports hasQualifyingPurchase from a completed purchase", async () => {
     const personId = await seedCustomer();
     await getOrCreateConversation(personId).then((c) => appendMessage(c.id, "outbound", "hi"));

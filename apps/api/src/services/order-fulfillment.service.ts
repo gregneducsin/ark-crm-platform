@@ -68,11 +68,11 @@ export async function sendOrderReceivedOpener(personId: string): Promise<void> {
     const text = renderOrderReceivedMessage(customer.firstName);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId, reason }, "order-received opener send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     }
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "order-received opener SMS not sent");
@@ -110,11 +110,11 @@ export async function sendRefillOrderReceivedNotice(personId: string): Promise<v
     const text = renderRefillOrderReceivedMessage(customer.firstName);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId, reason }, "refill order-received notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     }
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "refill order-received notice SMS not sent");
@@ -143,10 +143,10 @@ export async function handlePrescriptionWritten(personId: string): Promise<void>
     const text = renderPrescriptionWrittenMessage(customer.firstName);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "prescription-written notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     }
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "prescription-written notice not sent");
@@ -180,10 +180,10 @@ export async function handleOrderShipped(personId: string, trackingNumber: strin
     const text = renderOrderShippedMessage(customer.firstName, trackingNumber);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "order-shipped notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     }
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "order-shipped notice not sent");
@@ -245,10 +245,10 @@ export async function handlePaymentFailed(personId: string, isFirstOrder: boolea
     const text = isFirstOrder ? renderPaymentFailedFirstOrderMessage(customer.firstName) : renderPaymentFailedRecurringMessage(customer.firstName);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "payment-failed notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
     }
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "payment-failed notice not sent");
@@ -359,7 +359,7 @@ export async function sweepReviewRequestTriggers(): Promise<ReviewRequestSweepRe
       result = await getSmsProvider().sendMessage(customer.phone, text);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      await appendSupportMessage(conversation.id, "outbound", text, {});
+      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
       await db
         .update(reviewRequestTriggersTable)
         .set({ status: "failed", failureReason: reason, attemptCount: nextAttemptCount })
@@ -377,7 +377,7 @@ export async function sweepReviewRequestTriggers(): Promise<ReviewRequestSweepRe
     // request email (see templates.ts), so this stays SMS-only for now.
 
     try {
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
       // Only flip reviewRequested once the text is actually confirmed sent —
       // setting it on a failed attempt (as this used to) made Sophie's
       // conversation loop treat the patient's next reply as a sentiment

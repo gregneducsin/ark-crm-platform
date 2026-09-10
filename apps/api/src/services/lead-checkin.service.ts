@@ -118,7 +118,7 @@ export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId: trigger.personId, reason }, "lead check-in send failed");
-      await appendMessage(conversation.id, "outbound", text, {});
+      await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
       await db
         .update(leadCheckinTriggersTable)
         .set({ status: "failed", failureReason: reason, variant, attemptCount: nextAttemptCount })
@@ -134,7 +134,7 @@ export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult
     sentCount++;
 
     try {
-      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId });
+      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log lead check-in into the conversation");
     }

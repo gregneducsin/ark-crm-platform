@@ -41,17 +41,19 @@ async function sendAndLog(personId: string, conversationId: string, phone: strin
   }
 
   let providerMessageId: string | null = null;
+  let deliveryStatus: "sent" | "failed" = "failed";
   if (phone) {
     try {
       const result = await getSmsProvider().sendMessage(phone, text);
       providerMessageId = result.providerMessageId;
+      deliveryStatus = "sent";
     } catch (err) {
       logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "outbound Alexis message send failed");
     }
   } else {
     logger.warn({ conversationId }, "outbound Alexis message not sent: no phone number on file");
   }
-  await appendMessage(conversationId, "outbound", text, { providerMessageId });
+  await appendMessage(conversationId, "outbound", text, { providerMessageId, deliveryStatus });
 }
 
 /**

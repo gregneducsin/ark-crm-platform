@@ -5,7 +5,7 @@ import { questionnaireEventsTable } from "./webhooks";
 /**
  * A one-time trigger link we generate and send to a lead (e.g. an
  * abandoned-questionnaire nudge). Clicking it redirects to the universal
- * Bask questionnaire URL (or its $20-off promo variant — see promoApplied)
+ * Bask questionnaire URL (or its $40-off promo variant — see promoApplied)
  * and, on the first click only, arms a follow-up job due 2 hours later.
  * Only the SHA-256 hash of the raw token is ever stored — same convention as
  * session/invitation/password-reset tokens.
@@ -172,6 +172,18 @@ export const conversationMessagesTable = pgTable(
     sentBy: text("sent_by", { enum: ["ai", "staff"] }),
     /** Which staff member actually sent it — set only when sentBy is "staff". Denormalized (not an FK), same convention as customer_notes.authorEmail, so history reads correctly even if the account is later renamed/disabled. */
     sentByStaffEmail: text("sent_by_staff_email"),
+    /**
+     * Null on inbound (delivery status is only meaningful for something we
+     * sent). On outbound: "sent" when the provider call actually returned
+     * successfully (this still covers a 200 with an unparseable
+     * message_id — see sms-provider.ts — since the text genuinely went
+     * out), "failed" when the send itself threw. This is a separate flag
+     * from providerMessageId being present, precisely because that field
+     * can legitimately be null on a message that *did* send — staff need
+     * an explicit, unambiguous "this never reached the customer" signal,
+     * not an inferred one.
+     */
+    deliveryStatus: text("delivery_status", { enum: ["sent", "failed"] }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],

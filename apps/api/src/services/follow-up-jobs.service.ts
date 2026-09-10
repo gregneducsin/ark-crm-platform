@@ -105,7 +105,7 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
     // version of their nudge — see leadSource on intakeLinkTokensTable.
     try {
       const conversation = await getOrCreateConversation(job.personId, token?.leadSource ?? "abandoned_cart");
-      await appendMessage(conversation.id, "outbound", sendResult.body, { providerMessageId: sendResult.providerMessageId });
+      await appendMessage(conversation.id, "outbound", sendResult.body, { providerMessageId: sendResult.providerMessageId, deliveryStatus: "sent" });
     } catch (err) {
       logger.warn({ personId: job.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log follow-up SMS into the conversation");
     }
