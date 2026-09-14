@@ -20,6 +20,11 @@ describe("renderOrderReceivedMessage", () => {
     expect(renderOrderReceivedMessage("Jamie")).toContain("Jamie");
     expect(renderOrderReceivedMessage("  ")).toContain("there");
   });
+
+  it("asks the customer to confirm this is the best number to reach them, to prompt a reply — new orders only, not refills", () => {
+    expect(renderOrderReceivedMessage("Jamie")).toContain("confirm this is the best number to reach you");
+    expect(renderRefillOrderReceivedMessage("Jamie")).not.toContain("confirm this is the best number to reach you");
+  });
 });
 
 describe("renderRefillOrderReceivedMessage", () => {

@@ -12,7 +12,8 @@ export function renderOrderReceivedMessage(firstName: string): string {
   return (
     `Hello ${name}, this is Sophie on the doctor support side. It looks like we received your order and the doctor is reviewing it now. ` +
     "If they have any further questions they will reach out in the patient portal, https://patient.tryark.com/login\n\n" +
-    "We will update you once the prescription is written and sent to the pharmacy."
+    "We will update you once the prescription is written and sent to the pharmacy.\n\n" +
+    "Also, can you reply to confirm this is the best number to reach you at?"
   );
 }
 
