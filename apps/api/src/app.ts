@@ -32,6 +32,7 @@ import { createEmailUnsubscribeRouter } from "./routes/email-unsubscribe.routes.
 import { createGhlLeadWebhookRouter } from "./routes/webhooks/ghl-lead.routes.js";
 import { createBaskOrderWebhookRouter } from "./routes/webhooks/bask-order.routes.js";
 import { createBaskQuestionnaireWebhookRouter } from "./routes/webhooks/bask-questionnaire.routes.js";
+import { createBaskQuestionnaireNewPatientWebhookRouter } from "./routes/webhooks/bask-questionnaire-new-patient.routes.js";
 import { createBaskPaymentFailedWebhookRouter } from "./routes/webhooks/bask-payment-failed.routes.js";
 import { createBaskPaymentSucceededWebhookRouter } from "./routes/webhooks/bask-payment-succeeded.routes.js";
 import { createBaskPaymentRefundedWebhookRouter } from "./routes/webhooks/bask-payment-refunded.routes.js";
@@ -122,6 +123,7 @@ export function createApp(): Express {
   app.use("/api/webhooks/ghl-lead", createGhlLeadWebhookRouter());
   app.use("/api/webhooks/bask-order", createBaskOrderWebhookRouter());
   app.use("/api/webhooks/bask-questionnaire", createBaskQuestionnaireWebhookRouter());
+  app.use("/api/webhooks/bask-questionnaire-new-patient", createBaskQuestionnaireNewPatientWebhookRouter());
   app.use("/api/webhooks/bask-payment-failed", createBaskPaymentFailedWebhookRouter());
   app.use("/api/webhooks/bask-payment-succeeded", createBaskPaymentSucceededWebhookRouter());
   app.use("/api/webhooks/bask-payment-refunded", createBaskPaymentRefundedWebhookRouter());

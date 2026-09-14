@@ -84,6 +84,25 @@ export const baskQuestionnaireWebhookRequestSchema = z.object({
 });
 export type BaskQuestionnaireWebhookRequest = z.infer<typeof baskQuestionnaireWebhookRequestSchema>;
 
+// ── Bask "new patient" webhook ──────────────────────────────────────────────
+// Fires the moment someone starts a brand-new questionnaire — earlier than
+// started/abandoned/submitted, and the only Bask event that reliably carries
+// a questionnaireId for a person who goes straight to checkout without ever
+// abandoning (see handleBaskQuestionnaireNewPatientWebhook). Same shape as
+// the regular questionnaire webhook minus `status`, since this always means
+// "just started."
+export const baskQuestionnaireNewPatientWebhookRequestSchema = z.object({
+  eventId: z.string().min(1),
+  externalPersonId: z.string().min(1),
+  email: z.string().email(),
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  phone: z.string().min(1).optional(),
+  questionnaireId: z.string().min(1),
+  occurredAt: z.string().datetime().optional(),
+});
+export type BaskQuestionnaireNewPatientWebhookRequest = z.infer<typeof baskQuestionnaireNewPatientWebhookRequestSchema>;
+
 // ── Bask payment-failed webhook ────────────────────────────────────────────────
 
 export const baskPaymentFailedWebhookRequestSchema = z.object({

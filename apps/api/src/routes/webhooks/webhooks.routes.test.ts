@@ -888,6 +888,84 @@ describe("Webhooks", () => {
     });
   });
 
+  describe("Bask questionnaire new-patient", () => {
+    it("sets leadType and records a started questionnaire event, same as the regular webhook's status=started", async () => {
+      const payload = {
+        eventId: "luma-new-patient-evt-1",
+        externalPersonId: "bask-person-new-patient-1",
+        email: "new-patient@example.com",
+        firstName: "New",
+        lastName: "Patient",
+        questionnaireId: "QUEST-NEW-PATIENT-1",
+        occurredAt: new Date().toISOString(),
+      };
+      const res = await request(app).post("/api/webhooks/bask-questionnaire-new-patient").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(payload);
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "new-patient@example.com"));
+      expect(customer.leadType).toBe("Bask questionnaire started");
+
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.status).toBe("started");
+      expect(event.questionnaireId).toBe("QUEST-NEW-PATIENT-1");
+    });
+
+    it("a later abandoned/submitted event for the same questionnaireId updates the same row rather than creating a second one", async () => {
+      const newPatientPayload = {
+        eventId: "luma-new-patient-evt-2",
+        externalPersonId: "bask-person-new-patient-2",
+        email: "new-patient-then-abandoned@example.com",
+        firstName: "New",
+        lastName: "Patient",
+        questionnaireId: "QUEST-NEW-PATIENT-2",
+      };
+      const first = await request(app).post("/api/webhooks/bask-questionnaire-new-patient").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(newPatientPayload);
+      expect(first.status).toBe(200);
+
+      const second = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({ ...newPatientPayload, eventId: "bask-q-evt-after-new-patient", status: "abandoned" as const });
+      expect(second.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "new-patient-then-abandoned@example.com"));
+      const rows = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("abandoned");
+    });
+
+    it("rejects a malformed payload with 400 and records it as a failed bask_questionnaire row", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-new-patient")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({ eventId: "bad-new-patient-evt" }); // missing required fields
+
+      expect(res.status).toBe(400);
+
+      // The synthesized externalEventId is random (see respondToInvalidWebhookPayload),
+      // so just confirm a failed "bask_questionnaire"-sourced row exists for this delivery —
+      // this event doesn't get its own webhook_events source, see the handler's docstring.
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const failedRows = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.source, "bask_questionnaire"));
+      expect(failedRows.some((r) => r.status === "failed" && r.externalEventId.startsWith("invalid-"))).toBe(true);
+    });
+
+    it("requires the shared secret, same as the regular questionnaire webhook", async () => {
+      const res = await request(app).post("/api/webhooks/bask-questionnaire-new-patient").send({
+        eventId: "no-secret-new-patient",
+        externalPersonId: "no-secret-person",
+        email: "no-secret@example.com",
+        questionnaireId: "QUEST-NO-SECRET",
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
   describe("Bask payment-failed", () => {
     it("records the event, linking to a matched customer when found", async () => {
       const { db, customersTable, externalIdentitiesTable, failedPaymentEventsTable } = await import("@luma/db");

@@ -13,6 +13,7 @@ import type {
   GhlLeadWebhookRequest,
   BaskOrderWebhookRequest,
   BaskQuestionnaireWebhookRequest,
+  BaskQuestionnaireNewPatientWebhookRequest,
   BaskPaymentFailedWebhookRequest,
   BaskPaymentSucceededWebhookRequest,
   BaskPaymentRefundedWebhookRequest,
@@ -471,6 +472,26 @@ export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireW
     throw err;
   }
   return { duplicate: false };
+}
+
+/**
+ * Fires the moment a brand-new patient starts a questionnaire — the
+ * earliest touch Bask sends, ahead of started/abandoned/submitted. This is
+ * the only reliable source of a questionnaireId (and therefore a real
+ * leadType, instead of the "Other / Unknown" default) for someone who goes
+ * straight to checkout without ever hitting "abandoned" — previously we had
+ * no record at all of their questionnaire until (if ever) a later lifecycle
+ * event happened to arrive.
+ *
+ * Deliberately not its own webhook_events source or its own DB-writing
+ * logic — it's functionally identical to a "started" bask_questionnaire
+ * event (same customer-matching, same questionnaire_events upsert, same
+ * "no side effects beyond recording it" behavior), so this just adapts the
+ * new-patient payload into that shape and delegates, rather than
+ * duplicating the logic here and risking the two drifting apart.
+ */
+export async function handleBaskQuestionnaireNewPatientWebhook(payload: BaskQuestionnaireNewPatientWebhookRequest): Promise<{ duplicate: boolean }> {
+  return handleBaskQuestionnaireWebhook({ ...payload, status: "started" });
 }
 
 // Bask's failed-payment webhook sends `amount` as a bare integer of CENTS
