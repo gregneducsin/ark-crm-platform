@@ -3,17 +3,22 @@ import { Router, type Router as RouterType } from "express";
 import { google } from "googleapis";
 import { requireRole } from "../middleware/requireAuth.js";
 
-const DEFAULT_REDIRECT_URI =
-  "https://heartfelt-connection-production-d572.up.railway.app/auth/google/callback";
-
+/**
+ * No hardcoded fallback redirect URI — unlike an earlier version of this
+ * file, which defaulted to a stale URL left over from a different app
+ * entirely (a real production bug: OAuth completions would silently point
+ * at the wrong domain if this env var was ever unset). GOOGLE_REDIRECT_URI
+ * must be set explicitly (see .env.example); an unset value fails loudly
+ * here rather than silently pointing Google's OAuth callback at the wrong
+ * app's domain.
+ */
 function createOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ?? DEFAULT_REDIRECT_URI;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI;
 
-  if (!clientId || !clientSecret) {
-    throw new Error("Google OAuth environment variables are missing.");
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error("Google OAuth environment variables are missing (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI).");
   }
 
   return new google.auth.OAuth2(
