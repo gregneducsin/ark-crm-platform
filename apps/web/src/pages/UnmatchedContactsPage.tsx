@@ -81,6 +81,19 @@ function fromSms(t: UnmatchedSmsThreadSummary): CombinedThread {
   };
 }
 
+/**
+ * Only meaningful for an outbound SMS — see
+ * unmatched_sms_messages.deliveryStatus's comment (schema/messaging.ts):
+ * null until iBluSend's async message.failed webhook retroactively flags
+ * it, since the provider accepting a send doesn't guarantee the carrier
+ * delivered it. Email has no equivalent field, hence the "deliveryStatus"
+ * in m check rather than relying on `channel`.
+ */
+function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "sent" | "failed" | null | undefined }) {
+  if (deliveryStatus !== "failed") return null;
+  return <Badge color="red">Not delivered</Badge>;
+}
+
 function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threadId: string }) {
   const emailDetail = useUnmatchedEmailThread(channel === "email" ? threadId : null);
   const smsDetail = useUnmatchedSmsThread(channel === "sms" ? threadId : null);
@@ -96,7 +109,10 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
             {"subject" in m && <p className="mb-0.5 font-semibold">{m.subject}</p>}
             <p className="whitespace-pre-wrap">{m.body}</p>
           </div>
-          <p className="mt-0.5 text-[11px] text-gray-400">{formatDateTime(m.createdAt)}</p>
+          <div className={"mt-0.5 flex items-center gap-1.5 " + (m.direction === "inbound" ? "justify-start" : "justify-end")}>
+            {m.direction === "outbound" && "deliveryStatus" in m && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}
+            <p className="text-[11px] text-gray-400">{formatDateTime(m.createdAt)}</p>
+          </div>
         </div>
       ))}
     </div>

@@ -364,6 +364,16 @@ export const unmatchedSmsMessagesTable = pgTable(
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
     body: text("body").notNull(),
     providerMessageId: text("provider_message_id"),
+    /**
+     * Same convention as conversation_messages.deliveryStatus. Null on
+     * insert for an outbound message here (unlike that table, which sets
+     * "sent"/"failed" synchronously at send time) — this only ever gets set
+     * retroactively to "failed" when iBluSend's async message.failed
+     * webhook arrives for this row's providerMessageId (see
+     * handleIbluSendWebhook), since a provider accepting a send
+     * synchronously doesn't guarantee the carrier actually delivered it.
+     */
+    deliveryStatus: text("delivery_status", { enum: ["sent", "failed"] }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("unmatched_sms_messages_thread_id_idx").on(t.threadId, t.createdAt)],

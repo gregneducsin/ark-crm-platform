@@ -1,12 +1,13 @@
 import { eq, sql } from "drizzle-orm";
-import { db, customersTable, supportConversationsTable } from "@luma/db";
-import { ibluSendMessageReceivedDataSchema, type IbluSendWebhookEnvelope } from "@luma/shared";
+import { db, customersTable, supportConversationsTable, conversationMessagesTable, supportConversationMessagesTable, unmatchedSmsMessagesTable } from "@luma/db";
+import { ibluSendMessageReceivedDataSchema, ibluSendMessageFailedDataSchema, type IbluSendWebhookEnvelope } from "@luma/shared";
 import { recordWebhookEventIfNew, markWebhookEventProcessed, markWebhookEventFailed } from "./webhooks.service.js";
 import { processInboundMessage } from "./alexis-dispatch.service.js";
 import { processInboundSupportMessage } from "./sophie-dispatch.service.js";
 import { recordAndClassifyUnmatchedSms } from "./unmatched-inbound-sms.service.js";
 import { phoneMatchKey } from "../lib/phone.js";
 import { logger } from "../lib/logger.js";
+import { notifySmsSlack } from "../lib/slack.js";
 
 // Matches on the last 10 digits rather than an exact string — phone numbers
 // written before phone normalization existed (or entered by hand) may be
@@ -44,6 +45,39 @@ async function hasSupportConversation(personId: string): Promise<boolean> {
 }
 
 /**
+ * Retroactively flags a message "failed" after we'd already recorded it as
+ * sent — see message.failed handling below. A send only ever looks like it
+ * succeeded because iBluSend's synchronous API response doesn't guarantee
+ * carrier delivery; this is the async correction for when it turns out it
+ * didn't go through. Tries each of the three tables a text can land in, in
+ * turn, since the message_id alone doesn't say which one it came from —
+ * stops at the first match, since a given provider message id only ever
+ * belongs to one outbound row.
+ */
+async function markMessageFailedByProviderMessageId(messageId: string): Promise<boolean> {
+  const [conversationRow] = await db
+    .update(conversationMessagesTable)
+    .set({ deliveryStatus: "failed" })
+    .where(eq(conversationMessagesTable.providerMessageId, messageId))
+    .returning({ id: conversationMessagesTable.id });
+  if (conversationRow) return true;
+
+  const [supportRow] = await db
+    .update(supportConversationMessagesTable)
+    .set({ deliveryStatus: "failed" })
+    .where(eq(supportConversationMessagesTable.providerMessageId, messageId))
+    .returning({ id: supportConversationMessagesTable.id });
+  if (supportRow) return true;
+
+  const [unmatchedRow] = await db
+    .update(unmatchedSmsMessagesTable)
+    .set({ deliveryStatus: "failed" })
+    .where(eq(unmatchedSmsMessagesTable.providerMessageId, messageId))
+    .returning({ id: unmatchedSmsMessagesTable.id });
+  return Boolean(unmatchedRow);
+}
+
+/**
  * Decides which bot owns a real inbound text. A support conversation only
  * ever gets created off a real purchase/order event (see
  * getOrCreateSupportConversation's callers in order-fulfillment.service.ts)
@@ -68,12 +102,15 @@ async function dispatchInboundMessage(personId: string, body: string): Promise<v
 }
 
 /**
- * Handles one iBluSend webhook delivery. Only "message.received" with
- * direction "incoming" triggers a bot turn; every other event type
- * (delivery receipts, reactions, contact/device events) is acknowledged and
- * otherwise ignored — iBluSend auto-disables an endpoint after 3
- * consecutive non-2xx responses, so an event type we don't act on yet must
- * still resolve to a clean ack, not an error.
+ * Handles one iBluSend webhook delivery. "message.received" with direction
+ * "incoming" triggers a bot turn; "message.failed" retroactively flags a
+ * message we'd already recorded as sent (see
+ * markMessageFailedByProviderMessageId — a provider's synchronous "OK"
+ * doesn't guarantee the carrier actually delivered it). Every other event
+ * type (message.sent/delivered/read, reactions, contact/device events) is
+ * acknowledged and otherwise ignored — iBluSend auto-disables an endpoint
+ * after 3 consecutive non-2xx responses, so an event type we don't act on
+ * yet must still resolve to a clean ack, not an error.
  *
  * event_id (not data.message_id) is the idempotency key — iBluSend's docs:
  * delivery is at-least-once and event_id is "unique per occurrence and
@@ -107,6 +144,20 @@ export async function handleIbluSendWebhook(envelope: IbluSendWebhookEnvelope): 
             "recordAndClassifyUnmatchedSms failed",
           );
         }
+      }
+    } else if (envelope.event === "message.failed") {
+      const parsed = ibluSendMessageFailedDataSchema.safeParse(envelope.data);
+      if (!parsed.success) {
+        throw new Error(`message.failed payload failed validation: ${parsed.error.message}`);
+      }
+      const found = await markMessageFailedByProviderMessageId(parsed.data.message_id);
+      if (found) {
+        // This is worse than a send that failed loudly at send time (already
+        // Slack-alerted elsewhere) — this one looked fine, staff may already
+        // be assuming the customer got it, and now it turns out they didn't.
+        void notifySmsSlack(`An SMS previously recorded as sent actually failed to deliver (iBluSend message_id ${parsed.data.message_id}).`);
+      } else {
+        logger.warn({ messageId: parsed.data.message_id }, "message.failed webhook: no matching outbound message found for this provider message id");
       }
     }
     await markWebhookEventProcessed(recorded.id);

@@ -1,0 +1,1 @@
+ALTER TABLE "unmatched_sms_messages" ADD COLUMN "delivery_status" text;

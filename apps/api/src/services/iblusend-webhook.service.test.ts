@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { db, customersTable, conversationsTable, supportConversationsTable, webhookEventsTable } from "@luma/db";
+import {
+  db,
+  customersTable,
+  conversationsTable,
+  conversationMessagesTable,
+  supportConversationsTable,
+  supportConversationMessagesTable,
+  unmatchedSmsThreadsTable,
+  unmatchedSmsMessagesTable,
+  webhookEventsTable,
+} from "@luma/db";
 import { eq } from "drizzle-orm";
 
 const processInboundMessageMock = vi.fn().mockResolvedValue({ ok: true });
@@ -10,6 +20,9 @@ vi.mock("./sophie-dispatch.service.js", () => ({ processInboundSupportMessage: p
 
 const recordAndClassifyUnmatchedSmsMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("./unmatched-inbound-sms.service.js", () => ({ recordAndClassifyUnmatchedSms: recordAndClassifyUnmatchedSmsMock }));
+
+const notifySmsSlackMock = vi.fn().mockResolvedValue(undefined);
+vi.mock("../lib/slack.js", () => ({ notifySmsSlack: (...args: unknown[]) => notifySmsSlackMock(...args) }));
 
 const { handleIbluSendWebhook } = await import("./iblusend-webhook.service.js");
 
@@ -221,5 +234,67 @@ describe("handleIbluSendWebhook", () => {
     const [row] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, eventId));
     expect(row?.source).toBe("iblusend_message");
     expect(row?.status).toBe("processed");
+  });
+
+  describe("message.failed", () => {
+    it("retroactively flags an Alexis conversation message as failed and alerts Slack", async () => {
+      notifySmsSlackMock.mockClear();
+
+      const phone = uniquePhone();
+      const personId = await seedCustomer(phone);
+      const [conversation] = await db.insert(conversationsTable).values({ personId }).returning({ id: conversationsTable.id });
+      const messageId = crypto.randomUUID();
+      const [message] = await db
+        .insert(conversationMessagesTable)
+        .values({ conversationId: conversation.id, direction: "outbound", body: "hi", providerMessageId: messageId, deliveryStatus: "sent" })
+        .returning({ id: conversationMessagesTable.id });
+
+      const result = await handleIbluSendWebhook(envelope({ event: "message.failed", data: { message_id: messageId } }));
+
+      expect(result).toEqual({ duplicate: false });
+      const [updated] = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.id, message.id));
+      expect(updated.deliveryStatus).toBe("failed");
+      expect(notifySmsSlackMock).toHaveBeenCalledWith(expect.stringContaining(messageId));
+    });
+
+    it("retroactively flags a Sophie support conversation message as failed", async () => {
+      const phone = uniquePhone();
+      const personId = await seedCustomer(phone);
+      const [supportConversation] = await db.insert(supportConversationsTable).values({ personId }).returning({ id: supportConversationsTable.id });
+      const messageId = crypto.randomUUID();
+      const [message] = await db
+        .insert(supportConversationMessagesTable)
+        .values({ conversationId: supportConversation.id, direction: "outbound", body: "hi", providerMessageId: messageId, deliveryStatus: "sent" })
+        .returning({ id: supportConversationMessagesTable.id });
+
+      await handleIbluSendWebhook(envelope({ event: "message.failed", data: { message_id: messageId } }));
+
+      const [updated] = await db.select().from(supportConversationMessagesTable).where(eq(supportConversationMessagesTable.id, message.id));
+      expect(updated.deliveryStatus).toBe("failed");
+    });
+
+    it("retroactively flags an unmatched-SMS message as failed", async () => {
+      const phone = uniquePhone();
+      const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone }).returning({ id: unmatchedSmsThreadsTable.id });
+      const messageId = crypto.randomUUID();
+      const [message] = await db
+        .insert(unmatchedSmsMessagesTable)
+        .values({ threadId: thread.id, direction: "outbound", body: "what's your email?", providerMessageId: messageId })
+        .returning({ id: unmatchedSmsMessagesTable.id });
+
+      await handleIbluSendWebhook(envelope({ event: "message.failed", data: { message_id: messageId } }));
+
+      const [updated] = await db.select().from(unmatchedSmsMessagesTable).where(eq(unmatchedSmsMessagesTable.id, message.id));
+      expect(updated.deliveryStatus).toBe("failed");
+    });
+
+    it("logs a warning and doesn't throw when no outbound message matches the given message_id", async () => {
+      notifySmsSlackMock.mockClear();
+
+      const result = await handleIbluSendWebhook(envelope({ event: "message.failed", data: { message_id: crypto.randomUUID() } }));
+
+      expect(result).toEqual({ duplicate: false });
+      expect(notifySmsSlackMock).not.toHaveBeenCalled();
+    });
   });
 });

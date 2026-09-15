@@ -252,3 +252,17 @@ export const ibluSendMessageReceivedDataSchema = z.object({
   media_urls: z.array(z.string()).nullable().optional(),
 });
 export type IbluSendMessageReceivedData = z.infer<typeof ibluSendMessageReceivedDataSchema>;
+
+// message.failed's real field shape hasn't been confirmed against a live
+// delivery the way message.received's was above — message_id is required
+// since every other iBluSend event uses that same field name for the
+// message it concerns, but this deliberately doesn't require any other
+// field (error/reason code, phone number, etc.) since we don't know their
+// real names yet; handleIbluSendWebhook only needs message_id to look up
+// which outbound row this refers to. Worth checking against a real
+// message.failed delivery once one arrives, the same way message.received
+// was confirmed.
+export const ibluSendMessageFailedDataSchema = z.object({
+  message_id: z.string().min(1),
+});
+export type IbluSendMessageFailedData = z.infer<typeof ibluSendMessageFailedDataSchema>;
