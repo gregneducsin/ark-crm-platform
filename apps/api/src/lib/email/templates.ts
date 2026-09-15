@@ -48,6 +48,22 @@ export function htmlToPlainText(html: string): string {
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
+    // Block-level boundaries become a real line break BEFORE the remaining
+    // tags are stripped to spaces — without this, every <div>/<p>/<br> in
+    // the source HTML collapsed into one run-on line with no newline
+    // anywhere in the output. That silently broke stripQuotedReply
+    // (email-inbound.service.ts), which finds a quote header like "On ...
+    // wrote:" by requiring a newline immediately before it: a real HTML
+    // reply (Apple Mail, Gmail, Outlook are all HTML by default) has no
+    // newline in this function's old output, so the quote header was never
+    // found and the ENTIRE quoted original message — including its
+    // automated "Unsubscribe from future emails" footer — stayed part of
+    // what looked like the customer's own new message text. That's how a
+    // customer asking a normal question got auto-marked as opted out: the
+    // literal word "unsubscribe" from their own quoted copy of our prior
+    // email never got stripped off.
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|blockquote|li|tr|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -55,7 +71,12 @@ export function htmlToPlainText(html: string): string {
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#0?39;/gi, "'")
-    .replace(/\s+/g, " ")
+    // Collapse horizontal whitespace only — newlines are meaningful now —
+    // then fold any run of spaces around a newline into the newline itself,
+    // and cap 3+ consecutive blank lines down to one.
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 

@@ -15,6 +15,7 @@ vi.mock("imapflow", () => ({
 }));
 
 const { stripQuotedReply, parseExtraMailboxes, isIgnoredSender, sweepInboundEmail } = await import("./email-inbound.service.js");
+const { htmlToPlainText } = await import("../lib/email/templates.js");
 
 describe("stripQuotedReply", () => {
   it("returns the whole body when there's no quoted history", () => {
@@ -49,6 +50,29 @@ describe("stripQuotedReply", () => {
       "okay and then if i wanted to speak to the doctor?\n\n" +
       "On Wed, Aug 19, 2026 at 12:01 AM Sophie at Ark Health <alexism@start.tryark.com> wrote:\n> previous message text";
     expect(stripQuotedReply(body)).toBe("okay and then if i wanted to speak to the doctor?");
+  });
+
+  it("still cuts off the quoted history when the inbound email is HTML (the real Apple Mail/Gmail/Outlook shape) instead of hand-built plain text with newlines already in it", () => {
+    // Real production case: a customer replying "yes" to restart plus a
+    // question, from an HTML mail client, with the quoted original message
+    // — including its own "Unsubscribe from future emails" footer — still
+    // attached below. htmlToPlainText used to collapse every <div>/<p>/<br>
+    // into a bare space, so this function's own newline-anchored quote-
+    // header regex could never find a cut point in real HTML mail, and the
+    // customer's message ended up looking like it contained "unsubscribe" —
+    // wrongly opting them out of future messages entirely.
+    const html =
+      "<div>Yes I do want to restart with Tirzepatide. Can you tell me what credit card you have on file?</div>" +
+      "<div>Thanks Liz</div>" +
+      "<div>Sent from my iPhone</div>" +
+      "<div>On Sep 12, 2026, at 1:07 PM, Sophie at Ark Health &lt;support@tryark.com&gt; wrote:</div>" +
+      '<blockquote type="cite"><div>Elizabeth, are you looking to get started again?</div>' +
+      '<div>8 the green, Dover Delaware <a href="https://example.com/unsub">Unsubscribe</a> from future emails.</div></blockquote>';
+
+    const cleaned = stripQuotedReply(htmlToPlainText(html));
+
+    expect(cleaned).toBe("Yes I do want to restart with Tirzepatide. Can you tell me what credit card you have on file?\nThanks Liz\nSent from my iPhone");
+    expect(cleaned.toLowerCase()).not.toContain("unsubscribe");
   });
 });
 
