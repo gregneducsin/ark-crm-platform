@@ -114,6 +114,14 @@ export async function markWebhookEventFailed(id: string, errorMessage: string): 
  * to a case-insensitive email match, and creates a new customer if neither
  * matches. Links the external identity either way (idempotent) so future
  * webhooks for the same external contact resolve directly.
+ *
+ * On a match, backfills phone/firstName/lastName if the existing record is
+ * missing them and this payload has them — never overwrites a value the
+ * record already has. This matters because the Bask "new-patient" webhook
+ * fires before the person has necessarily given a phone number, so it can
+ * create the customer first without one; without this backfill, the phone
+ * number a later webhook (e.g. abandoned-cart) carries was silently dropped
+ * since this function used to just return the existing id on a match.
  */
 export async function findOrCreateCustomerByExternalIdentity(params: {
   system: string;
@@ -126,13 +134,36 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
   leadType?: string;
 }): Promise<{ id: string }> {
   return db.transaction(async (tx) => {
+    async function backfillContactInfo(customerId: string): Promise<void> {
+      const [existing] = await tx
+        .select({ firstName: customersTable.firstName, lastName: customersTable.lastName, phone: customersTable.phone })
+        .from(customersTable)
+        .where(eq(customersTable.id, customerId));
+      if (!existing) return;
+
+      const patch: Partial<{ phone: string; firstName: string; lastName: string }> = {};
+      if (!existing.phone && params.phone) patch.phone = normalizePhone(params.phone);
+      if (existing.firstName === "Unknown" && params.firstName) patch.firstName = params.firstName;
+      if (existing.lastName === "Unknown" && params.lastName) patch.lastName = params.lastName;
+
+      if (Object.keys(patch).length > 0) {
+        await tx.update(customersTable).set(patch).where(eq(customersTable.id, customerId));
+      }
+    }
+
     const [byIdentity] = await tx
       .select({ personId: externalIdentitiesTable.personId })
       .from(externalIdentitiesTable)
       .where(and(eq(externalIdentitiesTable.system, params.system), eq(externalIdentitiesTable.externalId, params.externalId)));
-    if (byIdentity) return { id: byIdentity.personId };
+    if (byIdentity) {
+      await backfillContactInfo(byIdentity.personId);
+      return { id: byIdentity.personId };
+    }
 
     const [byEmail] = await tx.select({ id: customersTable.id }).from(customersTable).where(caseInsensitiveEmailEq(params.email));
+    if (byEmail) {
+      await backfillContactInfo(byEmail.id);
+    }
 
     const customerId = byEmail
       ? byEmail.id

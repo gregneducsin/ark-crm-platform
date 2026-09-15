@@ -417,12 +417,13 @@ describe("Webhooks", () => {
       const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
       expect(purchases).toHaveLength(2);
       expect(purchases.find((p) => p.orderNumber === "BASK-MISMATCH")?.orderClassification).toBe("recurring");
-      // No SMS here — not because of the recurring/refill distinction (that
-      // now sends its own notice), but because this pre-existing customer
-      // was seeded with no phone on file, and findOrCreateCustomerByExternalIdentity
-      // doesn't back-fill contact fields onto an already-matched customer
-      // from the webhook payload.
-      expect(sendMessageMock).not.toHaveBeenCalled();
+      // This pre-existing customer was seeded with no phone on file, but
+      // findOrCreateCustomerByExternalIdentity backfills it from this
+      // webhook's payload since the record was missing one — so the refill
+      // notice SMS actually goes out, to the number this order carried.
+      const [updatedCustomer] = await db.select().from(customersTable).where(eq(customersTable.id, customer!.id));
+      expect(updatedCustomer.phone).toBe("+15551110096");
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
     });
 
     it("creates a new customer when no match exists", async () => {
@@ -936,6 +937,41 @@ describe("Webhooks", () => {
       const rows = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe("abandoned");
+    });
+
+    it("backfills the phone number from a later abandoned-cart event when the new-patient event didn't have one yet", async () => {
+      // Bask's new-patient event fires the moment someone starts a
+      // questionnaire, before they've necessarily entered a phone number —
+      // so it creates the customer without one. The abandoned-cart event
+      // for the same person, minutes later, carries the real phone number;
+      // findOrCreateCustomerByExternalIdentity must backfill it onto the
+      // existing record rather than silently dropping it because the
+      // customer already exists.
+      const newPatientPayload = {
+        eventId: "luma-new-patient-evt-phone-1",
+        externalPersonId: "bask-person-new-patient-phone-1",
+        email: "new-patient-phone-backfill@example.com",
+        firstName: "New",
+        lastName: "Patient",
+        questionnaireId: "QUEST-NEW-PATIENT-PHONE-1",
+        // no phone yet
+      };
+      const first = await request(app).post("/api/webhooks/bask-questionnaire-new-patient").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(newPatientPayload);
+      expect(first.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [afterNewPatient] = await db.select().from(customersTable).where(eq(customersTable.email, "new-patient-phone-backfill@example.com"));
+      expect(afterNewPatient.phone).toBeNull();
+
+      const abandoned = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({ ...newPatientPayload, eventId: "bask-q-evt-abandoned-with-phone", status: "abandoned" as const, phone: "+15551234567" });
+      expect(abandoned.status).toBe(200);
+
+      const [afterAbandoned] = await db.select().from(customersTable).where(eq(customersTable.email, "new-patient-phone-backfill@example.com"));
+      expect(afterAbandoned.phone).toBe("+15551234567");
     });
 
     it("rejects a malformed payload with 400 and records it as a failed bask_questionnaire row", async () => {
