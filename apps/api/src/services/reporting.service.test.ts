@@ -45,7 +45,7 @@ describe("getFunnelSummary", () => {
     expect(after.revenue).toBe(before.revenue + 120);
   });
 
-  it("counts a completed purchase as \"submitted\" even with no separate questionnaire.submitted event on file — a real production case where Bask's order webhook fired with no matching submitted event, showing 0 submitted alongside real purchases in the same window", async () => {
+  it("counts a completed FIRST order as \"submitted\" even with no separate questionnaire.submitted event on file — a real production case where Bask's order webhook fired with no matching submitted event, showing 0 submitted alongside real purchases in the same window", async () => {
     const before = await getFunnelSummary();
 
     // Only a "started" event, never "submitted" — matches what Bask/Zapier
@@ -60,6 +60,7 @@ describe("getFunnelSummary", () => {
       productName: "Tirzepatide",
       amountPaid: "150.00",
       status: "completed",
+      orderClassification: "first_order",
     });
 
     const after = await getFunnelSummary();
@@ -68,6 +69,25 @@ describe("getFunnelSummary", () => {
     // for this cohort — a purchase without a matching submitted event
     // shouldn't be possible to show in a real funnel.
     expect(after.questionnaireSubmitted).toBe(before.questionnaireSubmitted + 1);
+  });
+
+  it("does NOT count a recurring/refill purchase toward \"submitted\" — only a first order (or an explicit submitted event) represents a new questionnaire submission for this cohort", async () => {
+    const before = await getFunnelSummary();
+
+    const recurringOnly = await seedCustomer();
+    await db.insert(purchasesTable).values({
+      customerId: recurringOnly,
+      purchaseDate: new Date().toISOString().slice(0, 10),
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Tirzepatide",
+      amountPaid: "150.00",
+      status: "completed",
+      orderClassification: "recurring",
+    });
+
+    const after = await getFunnelSummary();
+    expect(after.purchased).toBe(before.purchased + 1);
+    expect(after.questionnaireSubmitted).toBe(before.questionnaireSubmitted);
   });
 
   it("scopes every stage to the given date range, excluding events outside it", async () => {
