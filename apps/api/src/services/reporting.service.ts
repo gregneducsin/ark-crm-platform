@@ -59,7 +59,19 @@ export async function getFunnelSummary(range?: DateRange): Promise<FunnelSummary
     SELECT
       (SELECT count(*) FROM cohort) AS total_leads,
       (SELECT count(DISTINCT person_id) FROM questionnaire_events WHERE person_id IN (SELECT id FROM cohort)) AS questionnaire_started,
-      (SELECT count(DISTINCT person_id) FROM questionnaire_events WHERE person_id IN (SELECT id FROM cohort) AND status = 'submitted') AS questionnaire_submitted,
+      -- A completed purchase proves a submission happened even with no
+      -- separate questionnaire.submitted event on file for it — Bask's
+      -- order webhook doesn't require (or always accompany) a distinct
+      -- "submitted" questionnaire event, so relying on that event alone
+      -- undercounts this stage and can even show fewer "submitted" than
+      -- "purchased" for the same cohort, which shouldn't be possible in a
+      -- real funnel. Union with anyone who has a completed purchase closes
+      -- that gap and keeps this stage a true superset of "purchased".
+      (SELECT count(DISTINCT person_id) FROM (
+        SELECT person_id FROM questionnaire_events WHERE person_id IN (SELECT id FROM cohort) AND status = 'submitted'
+        UNION
+        SELECT customer_id AS person_id FROM purchases WHERE customer_id IN (SELECT id FROM cohort) AND status = 'completed'
+      ) submitted_or_purchased) AS questionnaire_submitted,
       (SELECT count(DISTINCT customer_id) FROM purchases WHERE customer_id IN (SELECT id FROM cohort) AND status = 'completed') AS purchased,
       (SELECT COALESCE(sum(amount_paid), 0) FROM purchases WHERE customer_id IN (SELECT id FROM cohort) AND status = 'completed') AS revenue
   `).then((r) => r.rows);

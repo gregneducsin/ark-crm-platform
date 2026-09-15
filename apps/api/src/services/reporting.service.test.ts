@@ -45,6 +45,31 @@ describe("getFunnelSummary", () => {
     expect(after.revenue).toBe(before.revenue + 120);
   });
 
+  it("counts a completed purchase as \"submitted\" even with no separate questionnaire.submitted event on file — a real production case where Bask's order webhook fired with no matching submitted event, showing 0 submitted alongside real purchases in the same window", async () => {
+    const before = await getFunnelSummary();
+
+    // Only a "started" event, never "submitted" — matches what Bask/Zapier
+    // actually sends for a customer who completes checkout without a
+    // separate questionnaire-submitted webhook ever arriving.
+    const purchasedNoSubmittedEvent = await seedCustomer();
+    await db.insert(questionnaireEventsTable).values({ personId: purchasedNoSubmittedEvent, questionnaireId: `q-${crypto.randomUUID()}`, status: "started", lastEventAt: new Date() });
+    await db.insert(purchasesTable).values({
+      customerId: purchasedNoSubmittedEvent,
+      purchaseDate: new Date().toISOString().slice(0, 10),
+      orderNumber: `ORD-${crypto.randomUUID()}`,
+      productName: "Tirzepatide",
+      amountPaid: "150.00",
+      status: "completed",
+    });
+
+    const after = await getFunnelSummary();
+    expect(after.purchased).toBe(before.purchased + 1);
+    // The real assertion: submitted must be at least as high as purchased
+    // for this cohort — a purchase without a matching submitted event
+    // shouldn't be possible to show in a real funnel.
+    expect(after.questionnaireSubmitted).toBe(before.questionnaireSubmitted + 1);
+  });
+
   it("scopes every stage to the given date range, excluding events outside it", async () => {
     const today = new Date().toISOString().slice(0, 10);
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
