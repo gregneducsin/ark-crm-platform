@@ -7,6 +7,7 @@ import {
   purchasesTable,
   questionnaireEventsTable,
   failedPaymentEventsTable,
+  abandonedCartTriggersTable,
   type WebhookEvent,
 } from "@luma/db";
 import type {
@@ -148,6 +149,29 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
 
       if (Object.keys(patch).length > 0) {
         await tx.update(customersTable).set(patch).where(eq(customersTable.id, customerId));
+      }
+
+      // A phone number just filled in for the first time means an earlier
+      // abandoned-cart opener may have already tried and permanently failed
+      // with NO_PHONE_NUMBER (see sendOpener in abandoned-cart.service.ts) —
+      // that trigger is uniquely tied to its questionnaire event, so it can
+      // never be re-armed by a later webhook the normal way, and nothing
+      // else ever retries a `failed` trigger on its own. Making it due again
+      // right now lets the next sweep actually send it. isStillEligible
+      // (called by the sweep itself) still re-checks everything else that
+      // could have changed since (purchased, opted out, no longer
+      // abandoned) — this only undoes the specific failure this fix causes.
+      if (patch.phone) {
+        await tx
+          .update(abandonedCartTriggersTable)
+          .set({ status: "pending", dueAt: new Date(), failureReason: null })
+          .where(
+            and(
+              eq(abandonedCartTriggersTable.personId, customerId),
+              eq(abandonedCartTriggersTable.status, "failed"),
+              eq(abandonedCartTriggersTable.failureReason, "NO_PHONE_NUMBER"),
+            ),
+          );
       }
     }
 

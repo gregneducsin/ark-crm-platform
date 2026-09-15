@@ -974,6 +974,51 @@ describe("Webhooks", () => {
       expect(afterAbandoned.phone).toBe("+15551234567");
     });
 
+    it("retries an abandoned-cart opener that already permanently failed for lack of a phone number, once a later webhook backfills one", async () => {
+      // Real production case (Luma sibling app, identical pipeline): the
+      // new-patient event created the customer with no phone, its
+      // abandoned-cart opener was scheduled and then failed with
+      // NO_PHONE_NUMBER (the trigger is uniquely tied to that questionnaire
+      // event, so a later webhook can never re-arm it the normal way) — a
+      // subsequent webhook backfilling the phone must also make that failed
+      // trigger due again, or the customer never gets the text at all
+      // despite now having a phone.
+      const newPatientPayload = {
+        eventId: "luma-new-patient-evt-retry-1",
+        externalPersonId: "bask-person-new-patient-retry-1",
+        email: "new-patient-retry-abandoned@example.com",
+        firstName: "New",
+        lastName: "Patient",
+        questionnaireId: "QUEST-NEW-PATIENT-RETRY-1",
+        // no phone yet
+      };
+      const first = await request(app).post("/api/webhooks/bask-questionnaire-new-patient").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(newPatientPayload);
+      expect(first.status).toBe(200);
+
+      const { db, customersTable, abandonedCartTriggersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "new-patient-retry-abandoned@example.com"));
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+
+      // Simulates what a real sweep run already did before this fix
+      // existed: scheduled the opener, then failed it for lack of a phone.
+      const [trigger] = await db
+        .insert(abandonedCartTriggersTable)
+        .values({ personId: customer!.id, questionnaireEventId: event!.id, dueAt: new Date(Date.now() - 60_000), status: "failed", failureReason: "NO_PHONE_NUMBER" })
+        .returning();
+
+      const abandoned = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({ ...newPatientPayload, eventId: "bask-q-evt-retry-abandoned-with-phone", status: "abandoned" as const, phone: "+15559876543" });
+      expect(abandoned.status).toBe(200);
+
+      const [updatedTrigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.id, trigger!.id));
+      expect(updatedTrigger.status).toBe("pending");
+      expect(updatedTrigger.failureReason).toBeNull();
+      expect(updatedTrigger.dueAt.getTime()).toBeGreaterThan(Date.now() - 5000);
+    });
+
     it("rejects a malformed payload with 400 and records it as a failed bask_questionnaire row", async () => {
       const res = await request(app)
         .post("/api/webhooks/bask-questionnaire-new-patient")
