@@ -142,6 +142,24 @@ describe("interactivePreCheck", () => {
     expect(interactivePreCheck("Will you prescribe me a higher dose?")).toEqual({ blocked: true, code: "MEDICAL_CONTENT" });
   });
 
+  it("does not block plain cost questions despite containing 'prescription' or a specific dose", () => {
+    // Real production case: a transfer patient disclosed their existing
+    // prescription/dose while asking a plain pricing question, and got
+    // blocked before Claude could use the pre-approved tirzepatide_pricing
+    // and previous_prescriptions knowledge topics.
+    expect(
+      interactivePreCheck(
+        "I'll be receiving my last prescription in a couple of days. I'm currently on Tirzepatide 11.125 mg. I want to verify what the monthly cost will be at that level. Can you confirm cost and pharmacy?",
+      ),
+    ).toEqual({ blocked: false });
+    expect(interactivePreCheck("How much would it cost to switch from my current prescription?")).toEqual({ blocked: false });
+    expect(interactivePreCheck("What's the cost of the medication?")).toEqual({ blocked: false });
+  });
+
+  it("still blocks individualized suitability questions even when phrased with cost language", () => {
+    expect(interactivePreCheck("What should I take? How much would it cost?")).toEqual({ blocked: true, code: "SUITABILITY_QUESTION" });
+  });
+
   it("does not block 'how long does the prescription/approval take' — the review-process duration, not a treatment-duration question", () => {
     expect(interactivePreCheck("How long does the prescription take.")).toEqual({ blocked: false });
     expect(interactivePreCheck("How long does it take to get approved?")).toEqual({ blocked: false });

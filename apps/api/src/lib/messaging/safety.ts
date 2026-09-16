@@ -318,6 +318,47 @@ const PROCESS_QUESTION_PHRASES_LOWER = [
 ] as const;
 
 /**
+ * Plain cost/pricing questions — checked with the same priority as
+ * SHIPPING_TIMING_PHRASES_LOWER and PROCESS_QUESTION_PHRASES_LOWER above, and
+ * for the same reason: a real production case had a transfer patient write
+ * "I'm currently on Tirzepatide ... 11.125 mg. I want to verify what the
+ * monthly cost will be... Can you confirm cost and pharmacy?" — a plain
+ * pricing question that also happens to mention "prescription"/a specific
+ * dose while disclosing it's a transfer. tirzepatide_pricing and
+ * previous_prescriptions are both pre-approved knowledge topics that answer
+ * exactly this, but MEDICAL_WORDS_LOWER's bare "prescription" match blocked
+ * it before Claude ever got the chance. Deliberately narrow (cost/price
+ * framing only) — the post-check's APPROVED_DOLLAR_AMOUNTS gate still
+ * requires an approved pricing topic before any dollar amount can appear, so
+ * this doesn't loosen what Claude is allowed to claim, it just stops
+ * blocking the question itself. A genuine individualized dosing/suitability
+ * question is still caught first by SUITABILITY_PHRASES_LOWER above.
+ */
+const COST_QUESTION_PHRASES_LOWER = [
+  "monthly cost",
+  "the cost",
+  "confirm cost",
+  "confirm the cost",
+  "how much would it cost",
+  "how much will it cost",
+  "how much does it cost",
+  "what would it cost",
+  "what will it cost",
+  "what does it cost",
+  "cost will be",
+  "cost would be",
+  "what's the cost",
+  "what is the cost",
+  "how much would this cost",
+  "how much is it",
+  "how much would it be",
+  "price would be",
+  "price will be",
+  "what's the price",
+  "what is the price",
+] as const;
+
+/**
  * Phrases that indicate a request for individualized clinical suitability
  * judgment. These must never reach the provider — route to staff review.
  */
@@ -371,7 +412,7 @@ export type InteractivePreCheckResult = { readonly blocked: false } | { readonly
  * Check the last inbound message for content that must never reach the
  * provider. Returns the block code or { blocked: false }.
  *
- * Priority order: opt_out > STOP_WORD > emergency > suitability > side effect report > shipping timing > process questions > medical > legal.
+ * Priority order: opt_out > STOP_WORD > emergency > suitability > side effect report > shipping timing > process questions > cost questions > medical > legal.
  *
  * Opt-out (code "OPT_OUT") takes the highest priority and is terminal —
  * no objection handling, no rebuttal, no provider call.
@@ -431,6 +472,11 @@ export function interactivePreCheck(lastInbound: string, ourLastQuestion: string
   // Same reasoning for "how does the process work" questions — see
   // PROCESS_QUESTION_PHRASES_LOWER.
   if (PROCESS_QUESTION_PHRASES_LOWER.some((w) => lower.includes(w))) {
+    return { blocked: false };
+  }
+  // Same reasoning again for plain cost/pricing questions — see
+  // COST_QUESTION_PHRASES_LOWER.
+  if (COST_QUESTION_PHRASES_LOWER.some((w) => lower.includes(w))) {
     return { blocked: false };
   }
   if (MEDICAL_WORDS_LOWER.some((w) => lower.includes(w))) {
