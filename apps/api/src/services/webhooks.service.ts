@@ -123,6 +123,16 @@ export async function markWebhookEventFailed(id: string, errorMessage: string): 
  * create the customer first without one; without this backfill, the phone
  * number a later webhook (e.g. abandoned-cart) carries was silently dropped
  * since this function used to just return the existing id on a match.
+ *
+ * Same idea for leadType: a customer can get created by whichever webhook
+ * happens to arrive first, and handleBaskOrderWebhook (and a ghl_lead
+ * delivery with no leadType of its own) never pass one, so that customer
+ * is stuck on the "Other / Unknown" default forever — a later
+ * bask_questionnaire webhook for the same person finds the existing match
+ * and, before this, just left it alone. Real case: Jessi Lee's only
+ * webhook was her bask_order purchase; no questionnaire event ever
+ * created her, so she never got a real leadType. This only ever replaces
+ * the generic default, never a leadType some other webhook already set.
  */
 export async function findOrCreateCustomerByExternalIdentity(params: {
   system: string;
@@ -137,15 +147,16 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
   return db.transaction(async (tx) => {
     async function backfillContactInfo(customerId: string): Promise<void> {
       const [existing] = await tx
-        .select({ firstName: customersTable.firstName, lastName: customersTable.lastName, phone: customersTable.phone })
+        .select({ firstName: customersTable.firstName, lastName: customersTable.lastName, phone: customersTable.phone, leadType: customersTable.leadType })
         .from(customersTable)
         .where(eq(customersTable.id, customerId));
       if (!existing) return;
 
-      const patch: Partial<{ phone: string; firstName: string; lastName: string }> = {};
+      const patch: Partial<{ phone: string; firstName: string; lastName: string; leadType: string }> = {};
       if (!existing.phone && params.phone) patch.phone = normalizePhone(params.phone);
       if (existing.firstName === "Unknown" && params.firstName) patch.firstName = params.firstName;
       if (existing.lastName === "Unknown" && params.lastName) patch.lastName = params.lastName;
+      if (existing.leadType === "Other / Unknown" && params.leadType) patch.leadType = params.leadType;
 
       if (Object.keys(patch).length > 0) {
         await tx.update(customersTable).set(patch).where(eq(customersTable.id, customerId));

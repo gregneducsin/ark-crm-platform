@@ -974,6 +974,88 @@ describe("Webhooks", () => {
       expect(afterAbandoned.phone).toBe("+15551234567");
     });
 
+    it("backfills leadType from a later questionnaire event when the order webhook created the customer with no leadType of its own", async () => {
+      // Real production case (Jessi Lee): only her bask_order webhook ever
+      // arrived — no questionnaire event created her first — so
+      // findOrCreateCustomerByExternalIdentity defaulted her to the generic
+      // "Other / Unknown" leadType, which nothing ever corrected afterward.
+      const orderRes = await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          eventId: "bask-order-evt-leadtype-backfill",
+          externalPersonId: "bask-person-leadtype-backfill",
+          email: "leadtype-backfill@example.com",
+          firstName: "Jessica",
+          lastName: "Gonzalez",
+          orderId: "BASK-LEADTYPE-1",
+          productName: "Program",
+          amountPaid: 199,
+          purchasedAt: "2026-02-01T10:00:00.000Z",
+        });
+      expect(orderRes.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [afterOrder] = await db.select().from(customersTable).where(eq(customersTable.email, "leadtype-backfill@example.com"));
+      expect(afterOrder.leadType).toBe("Other / Unknown");
+
+      const questionnaireRes = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          eventId: "bask-q-evt-leadtype-backfill",
+          externalPersonId: "bask-person-leadtype-backfill",
+          email: "leadtype-backfill@example.com",
+          firstName: "Jessica",
+          lastName: "Gonzalez",
+          questionnaireId: "QUEST-LEADTYPE-1",
+          status: "started" as const,
+        });
+      expect(questionnaireRes.status).toBe(200);
+
+      const [afterQuestionnaire] = await db.select().from(customersTable).where(eq(customersTable.email, "leadtype-backfill@example.com"));
+      expect(afterQuestionnaire.leadType).toBe("Bask questionnaire started");
+    });
+
+    it("does not overwrite a real leadType that was already set", async () => {
+      const first = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          eventId: "bask-q-evt-leadtype-no-overwrite-1",
+          externalPersonId: "bask-person-leadtype-no-overwrite",
+          email: "leadtype-no-overwrite@example.com",
+          firstName: "Real",
+          lastName: "Leadtype",
+          questionnaireId: "QUEST-LEADTYPE-2",
+          status: "started" as const,
+        });
+      expect(first.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [afterFirst] = await db.select().from(customersTable).where(eq(customersTable.email, "leadtype-no-overwrite@example.com"));
+      expect(afterFirst.leadType).toBe("Bask questionnaire started");
+
+      const second = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          eventId: "bask-q-evt-leadtype-no-overwrite-2",
+          externalPersonId: "bask-person-leadtype-no-overwrite",
+          email: "leadtype-no-overwrite@example.com",
+          firstName: "Real",
+          lastName: "Leadtype",
+          questionnaireId: "QUEST-LEADTYPE-2",
+          status: "abandoned" as const,
+        });
+      expect(second.status).toBe(200);
+
+      const [afterSecond] = await db.select().from(customersTable).where(eq(customersTable.email, "leadtype-no-overwrite@example.com"));
+      expect(afterSecond.leadType).toBe("Bask questionnaire started");
+    });
+
     it("retries an abandoned-cart opener that already permanently failed for lack of a phone number, once a later webhook backfills one", async () => {
       // Real production case (Luma sibling app, identical pipeline): the
       // new-patient event created the customer with no phone, its
