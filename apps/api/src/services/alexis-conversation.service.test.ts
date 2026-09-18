@@ -186,12 +186,17 @@ describe("runAlexisTurn", () => {
     }
   });
 
-  it("fails closed with the guardrail's rejection code when post-check rejects the model's reply", async () => {
+  it("fails closed with the guardrail's rejection code when post-check rejects the model's reply on every attempt", async () => {
     callClaudeInteractiveMock.mockClear();
-    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ reply: "We accept insurance.", knowledgeTopicsUsed: ["insurance_payment"] }));
+    // "We accept insurance." is always blocked regardless of topic — a
+    // genuine content violation, not a citation slip — so it still fails
+    // the same way on every retry attempt, unlike the citation-slip case
+    // covered below.
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "We accept insurance.", knowledgeTopicsUsed: ["insurance_payment"] }));
     const personId = await seedCustomer();
     const result = await runAlexisTurn(personId, baseBody());
 
+    expect(callClaudeInteractiveMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
   });
@@ -282,13 +287,44 @@ describe("runAlexisTurn", () => {
     if (!result.ok) expect(result.code).toBe("QUESTION_MARK_IN_REPLY");
   });
 
-  it("does not retry a safety-relevant rejection (e.g. an unsupported pricing claim)", async () => {
+  it("does not retry a genuinely non-retryable safety rejection (e.g. an unapproved URL)", async () => {
     callClaudeInteractiveMock.mockClear();
-    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ reply: "We accept insurance.", knowledgeTopicsUsed: ["insurance_payment"] }));
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ reply: "Check out https://not-approved.example.com for more info." }));
     const personId = await seedCustomer();
     const result = await runAlexisTurn(personId, baseBody());
 
     expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("UNAPPROVED_URL");
+  });
+
+  it("retries an unsupported-pricing-claim rejection once, with corrective feedback, and succeeds if the retry cites the topic — same fix as the Luma sibling app (Karen/kstaaf57): the bot tried to quote a price right after the customer picked a product but forgot to cite the pricing topic, and froze with no second attempt until a human intervened", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock
+      .mockResolvedValueOnce(modelResult({ reply: "Starting at $169 for the first month.", knowledgeTopicsUsed: [] }))
+      .mockResolvedValueOnce(modelResult({ reply: "Starting at $169 for the first month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    // The retry call is the (body, knowledgeCatalog, retryNote) triple —
+    // the third argument is the corrective feedback.
+    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
+    expect(retryNote).toMatch(/knowledge topic/i);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.reply).toBe("Starting at $169 for the first month.");
+  });
+
+  it("still fails closed after exhausting retries when the pricing claim is genuinely wrong, not just missing a citation", async () => {
+    callClaudeInteractiveMock.mockClear();
+    // $999 is not one of the approved dollar amounts at all — citing the
+    // topic doesn't fix an actually-wrong number, so this keeps failing
+    // even with the corrective retry note.
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Starting at $999 for the first month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
   });

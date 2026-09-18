@@ -95,15 +95,39 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
 /**
  * Post-check codes safe to retry: these are mechanical format slips (the
  * question landed in the wrong field, or in two places, or Claude repeated
- * its own last draft), not safety-relevant rejections. Retrying re-runs the
- * exact same prompt — no "you got it wrong" context is added — since this is
- * plain output variance, not a content problem to correct. Every other
- * rejection code (clinical language, unsupported pricing, unapproved URLs,
- * unknown knowledge topics, low confidence, ...) is never retried: those are
- * findings about what Claude said, and repeating the call risks the same
- * violation again or a different one, not fixing anything.
+ * its own last draft), not safety-relevant rejections. Retrying these
+ * re-runs the exact same prompt — no "you got it wrong" context is added —
+ * since this is plain output variance, not a content problem to correct.
+ *
+ * UNSUPPORTED_PRICING_CLAIM is the one exception, retried WITH corrective
+ * feedback (see RETRY_NOTES below) rather than blindly: a real case in the
+ * Luma sibling app had Alexis's Lucy try to quote a price right after the
+ * customer picked a product — exactly what she's supposed to do — but
+ * forget to cite the pricing topic, get permanently blocked with no second
+ * attempt, and sit unanswered until a staff member noticed and typed the
+ * same price in by hand. She almost certainly knew the right number; she
+ * just missed a citation formality. Blindly retrying (like the other codes)
+ * would risk repeating that same mistake, which is exactly why this wasn't
+ * retried before — but telling her what specifically went wrong makes a
+ * second attempt worth taking here, unlike a genuine content problem
+ * (clinical language, an unapproved URL, an actually-wrong price) where a
+ * retry has nothing new to go on and still isn't attempted.
  */
-const RETRYABLE_POST_CHECK_CODES = new Set(["MISSING_NEXT_QUESTION", "INVALID_NEXT_QUESTION", "UNEXPECTED_NEXT_QUESTION", "QUESTION_MARK_IN_REPLY", "REPEATED_DRAFT"]);
+const RETRYABLE_POST_CHECK_CODES = new Set([
+  "MISSING_NEXT_QUESTION",
+  "INVALID_NEXT_QUESTION",
+  "UNEXPECTED_NEXT_QUESTION",
+  "QUESTION_MARK_IN_REPLY",
+  "REPEATED_DRAFT",
+  "UNSUPPORTED_PRICING_CLAIM",
+]);
+
+/** Corrective feedback injected into a retry — see RETRYABLE_POST_CHECK_CODES' docstring. Codes not listed here retry with no added context, same as before. */
+const RETRY_NOTES: Partial<Record<string, string>> = {
+  UNSUPPORTED_PRICING_CLAIM:
+    "Your last reply mentioned a price or discount but was rejected because it didn't cite an approved pricing knowledge topic (or used a figure that isn't one of the exact approved amounts). If you're quoting a price this turn, make sure to include the correct topic key (e.g. semaglutide_pricing, tirzepatide_pricing, first_month_offer) in knowledgeTopicsUsed, and use only the exact approved figures from that topic's approved text.",
+};
+
 const MAX_ATTEMPTS = 3;
 
 /**
@@ -155,10 +179,11 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
   let post: ReturnType<typeof interactivePostCheck> | undefined;
+  let retryNote: string | undefined;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let raw: ClaudeInteractiveResult;
     try {
-      raw = await callClaudeInteractive(body, enabledTopics);
+      raw = await callClaudeInteractive(body, enabledTopics, retryNote);
     } catch (err) {
       if (err instanceof ProviderError) {
         logger.error({ category: err.category }, "Alexis provider call failed");
@@ -175,6 +200,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     if (!canRetry) {
       return { ok: false, code: post.code };
     }
+    retryNote = RETRY_NOTES[post.code];
   }
 
   // The loop only falls through to here via `break` on post.ok — every other

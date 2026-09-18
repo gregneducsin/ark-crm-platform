@@ -379,6 +379,7 @@ const BOT_REPLY_TOOL = {
 export async function callClaudeInteractive(
   body: BotPreviewRequestBody,
   knowledgeCatalog: readonly KnowledgeTopic[] = [],
+  retryNote?: string,
 ): Promise<ClaudeInteractiveResult> {
   const client = getClient();
 
@@ -394,7 +395,7 @@ export async function callClaudeInteractive(
     messages: [
       {
         role: "user",
-        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the bot_reply tool.`,
+        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the bot_reply tool.${retryNote ? `\n\nIMPORTANT: ${retryNote}` : ""}`,
       },
     ],
   });
