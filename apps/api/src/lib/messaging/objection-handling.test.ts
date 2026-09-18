@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { OBJECTION_LIBRARY, getObjectionScript, AI_DISCLOSURE_SCRIPT } from "./objection-handling.js";
+import { OBJECTION_LIBRARY, getObjectionScript } from "./objection-handling.js";
 import { getTopicByKey } from "./knowledge-catalog.js";
 import { interactivePostCheck } from "./safety.js";
 import { resolveNextQuestion } from "./provider.js";
@@ -129,33 +129,3 @@ describe("price objection secondAttempt — discovery question alternates", () =
   });
 });
 
-describe("AI_DISCLOSURE_SCRIPT", () => {
-  it("never claims to be human", () => {
-    const text = `${AI_DISCLOSURE_SCRIPT.reply} ${AI_DISCLOSURE_SCRIPT.nextQuestion}`.toLowerCase();
-    expect(text).not.toMatch(/\bi'?m not an ai\b/);
-    expect(text).not.toMatch(/\bi'?m a (real )?person\b/);
-    expect(text).not.toMatch(/\bi'?m human\b/);
-  });
-
-  it("discloses that it is an automated assistant", () => {
-    expect(AI_DISCLOSURE_SCRIPT.reply.toLowerCase()).toContain("automated assistant");
-  });
-
-  it("offers a human handoff", () => {
-    expect(AI_DISCLOSURE_SCRIPT.reply.toLowerCase()).toContain("talk to a person");
-  });
-
-  it("is marked non-paraphrasable — must be used verbatim", () => {
-    expect(AI_DISCLOSURE_SCRIPT.allowedParaphrase).toBe(false);
-  });
-
-  it("has a single trailing question and no em dashes", () => {
-    expect(AI_DISCLOSURE_SCRIPT.nextQuestion?.trim().endsWith("?")).toBe(true);
-    expect(EM_DASH_RE.test(AI_DISCLOSURE_SCRIPT.reply)).toBe(false);
-  });
-
-  it("passes interactivePostCheck as a reply action", () => {
-    const result = interactivePostCheck(baseResult({ reply: AI_DISCLOSURE_SCRIPT.reply, nextQuestion: AI_DISCLOSURE_SCRIPT.nextQuestion ?? null }), null);
-    expect(result.ok).toBe(true);
-  });
-});

@@ -26,7 +26,7 @@ import type { ClaudeInteractiveResult, BotPreviewRequestBody } from "./types.js"
 import type { KnowledgeTopic } from "./knowledge-catalog.js";
 import { APPROVED_REVIEW_URLS } from "./knowledge-catalog.js";
 import { ClaudeInteractiveSchema } from "./safety.js";
-import { OBJECTION_LIBRARY, OBJECTION_KEYS, AI_DISCLOSURE_SCRIPT, type ObjectionScript, type ObjectionKey } from "./objection-handling.js";
+import { OBJECTION_LIBRARY, OBJECTION_KEYS, type ObjectionScript, type ObjectionKey } from "./objection-handling.js";
 
 const CALL_TIMEOUT_MS = 10_000;
 const MODEL = "claude-haiku-4-5-20251001";
@@ -274,11 +274,8 @@ not part of your reply — never mention it to the patient. If there is no inbou
 (a proactive opener), leave it null.
 
 ${objectionSection}
-IDENTITY — when a patient asks "are you an AI?", "are you a bot?", "are you a real person?", or similar:
-Reply exactly (do not paraphrase): "${AI_DISCLOSURE_SCRIPT.reply}"
-nextQuestion exactly: "${AI_DISCLOSURE_SCRIPT.nextQuestion}"
-Never claim to be a human or a real person. Never claim to be a doctor, nurse, or any kind of medical provider.
-If the patient then insists on a human, use action "staff_review".
+IDENTITY — this is covered in the terms and conditions the patient agrees to at signup, not something to get into over text. If a patient asks "are you an AI?", "are you a bot?", "are you a real person?", or similar, do not confirm or deny it either way — never claim to be human, but never volunteer or admit to being automated either. Stay in persona and redirect naturally back to helping them (e.g. ask what they're hoping to get done, or move the conversation toward the questionnaire). Never claim to be a doctor, nurse, or any kind of medical provider.
+If the patient insists on talking to a human, use action "staff_review".
 ${knowledgeSection}
 APPROVED REVIEW SITES — Claude may output these two URLs verbatim, and only these:
 ${[...APPROVED_REVIEW_URLS].map((u) => ` - ${u}`).join("\n")}

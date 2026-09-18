@@ -207,24 +207,6 @@ export function getObjectionScript(key: ObjectionKey): ObjectionScript | undefin
 }
 
 /**
- * "Are you an AI / a bot?" — a fixed, honest disclosure script.
- *
- * allowedParaphrase is intentionally false: several jurisdictions (e.g.
- * California's B.O.T. Act, Bus. & Prof. Code §17941; the EU AI Act's
- * transparency provisions) require a bot used to influence a purchase to
- * disclose, when directly asked, that it is not a human. This script must be
- * used verbatim — never rewritten to imply Alexis is human. It is not staged;
- * the same disclosure applies every time the question is asked.
- */
-export const AI_DISCLOSURE_SCRIPT: Omit<ObjectionStageScript, "nextQuestion"> & { readonly nextQuestion: string; readonly allowedParaphrase: false } = {
-  reply:
-    "I'm an automated assistant here with the Ark Health team, and I'm here to help you get started. If you'd rather talk to a person, I can get one looped in.",
-  nextQuestion: "Want me to go ahead and get you started on the questionnaire?",
-  requiredTopics: [],
-  allowedParaphrase: false,
-};
-
-/**
  * "I want to talk to a person" — always routes to staff_review. No AI-drafted
  * rebuttal or close is ever generated for this request.
  *
