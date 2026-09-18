@@ -4,6 +4,7 @@ import { getSmsProvider } from "../lib/sms-provider.js";
 import { renderFollowUpMessage } from "../lib/messaging/follow-up-templates.js";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { clampToSendWindow } from "../lib/send-window.js";
 import { logger } from "../lib/logger.js";
 
 const SECOND_STEP_DELAY_MS = 60 * 60 * 1000;
@@ -115,7 +116,9 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
         personId: job.personId,
         intakeLinkTokenId: job.intakeLinkTokenId,
         messageStep: "intake_questions_check_in",
-        dueAt: new Date(Date.now() + SECOND_STEP_DELAY_MS),
+        // Clamped to 9am-11:59pm Eastern, same guardrail as the first step
+        // in intake-links.service.ts — see send-window.ts.
+        dueAt: clampToSendWindow(new Date(Date.now() + SECOND_STEP_DELAY_MS)),
       });
     }
   }

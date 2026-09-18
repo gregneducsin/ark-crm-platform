@@ -89,12 +89,14 @@ describe("intake-links.service", () => {
   });
 
   describe("handleIntakeLinkClick", () => {
-    it("first click redirects to the Bask URL and arms a follow-up job due ~2 hours later", async () => {
+    it("first click redirects to the Bask URL and arms a follow-up job due ~2 hours later, clamped to the 9am-11:59pm Eastern send window", async () => {
       const { createIntakeLink, handleIntakeLinkClick } = await import("./intake-links.service.js");
+      const { clampToSendWindow } = await import("../lib/send-window.js");
       const personId = await seedCustomer();
       const { url } = await createIntakeLink(personId);
       const rawToken = url.split("/go/")[1];
 
+      const beforeClick = Date.now();
       const { redirectUrl } = await handleIntakeLinkClick(rawToken);
       expect(redirectUrl).toBe("https://bask.example.com/questionnaire");
 
@@ -105,9 +107,13 @@ describe("intake-links.service", () => {
       expect(job).toBeDefined();
       expect(job.status).toBe("pending");
       expect(job.messageStep).toBe("provider_check_in");
-      const dueInMs = new Date(job.dueAt).getTime() - new Date(token.clickedAt!).getTime();
-      expect(dueInMs).toBeGreaterThan(2 * 60 * 60 * 1000 - 5000);
-      expect(dueInMs).toBeLessThan(2 * 60 * 60 * 1000 + 5000);
+      // A naive "clicked + 2 hours" can land in the overnight quiet-hours
+      // window (see send-window.ts) and get pushed to 9am Eastern instead —
+      // computing the same expected value here, rather than asserting a
+      // fixed ~2-hour delta, keeps this test correct regardless of what time
+      // of day it happens to run.
+      const expectedDueAt = clampToSendWindow(new Date(beforeClick + 2 * 60 * 60 * 1000));
+      expect(Math.abs(new Date(job.dueAt).getTime() - expectedDueAt.getTime())).toBeLessThan(5000);
     });
 
     it("a second click on the same link redirects but does not arm a second follow-up job", async () => {

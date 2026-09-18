@@ -1,6 +1,7 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, intakeLinkTokensTable, followUpJobsTable, type IntakeLinkToken } from "@luma/db";
 import { generateRawToken, hashToken } from "../lib/crypto.js";
+import { clampToSendWindow } from "../lib/send-window.js";
 
 const INTAKE_LINK_TTL_MS = 24 * 60 * 60 * 1000;
 const FOLLOW_UP_DELAY_MS = 2 * 60 * 60 * 1000;
@@ -113,7 +114,9 @@ export async function handleIntakeLinkClick(rawToken: string): Promise<{ redirec
         personId: token.personId,
         intakeLinkTokenId: token.id,
         messageStep: "provider_check_in",
-        dueAt: new Date(Date.now() + FOLLOW_UP_DELAY_MS),
+        // Clamped to 9am-11:59pm Eastern — a click at 11pm would otherwise
+        // land this nudge at 1am. See send-window.ts.
+        dueAt: clampToSendWindow(new Date(Date.now() + FOLLOW_UP_DELAY_MS)),
       });
     }
 
