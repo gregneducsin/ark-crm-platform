@@ -887,13 +887,38 @@ export type InteractivePostCheckResult =
   | { readonly ok: true; readonly result: ClaudeInteractiveResult; readonly validatedSlotUpdates: Record<string, unknown> }
   | { readonly ok: false; readonly code: string };
 
+export interface InteractivePostCheckOptions {
+  /**
+   * Codes this call must not fail with, even if the underlying check would
+   * otherwise trigger. Used by alexis-conversation.service.ts's last-resort
+   * acceptance once a retryable code's attempt budget is exhausted, passing
+   * exactly the one code that kept failing — re-running every OTHER check
+   * first confirms nothing else is actually wrong with the reply before
+   * accepting it.
+   *
+   * Only ever meaningful for codes that are purely mechanical (a format
+   * slip, or a citation missing from an otherwise-fine reply) — never for a
+   * genuine content problem. In particular:
+   *   - PROHIBITED_CLINICAL here only waives the TOPIC_SPECIFIC_LANGUAGE
+   *     rules (dosing/prescribed/treatment/injection/side-effect language
+   *     missing its required topic). PROHIBITED_CLINICAL_ABSOLUTE
+   *     (UNCONDITIONAL_CLINICAL_RE: diagnose/contraindicated/symptom) is
+   *     never in this set and never bypassable — no topic could authorize
+   *     it regardless of what's passed here.
+   *   - The pricing-coded topic-gated rule (Affirm/Klarna/Afterpay) and
+   *     UNSUPPORTED_PRICING_CLAIM generally are never included either — a
+   *     wrong or unbacked price is a real content problem, not a format one.
+   */
+  readonly bypassCodes?: ReadonlySet<string>;
+}
+
 /**
  * Validate the raw provider response.
  *
  * Hard rejections (returns ok:false):
- *   UNAPPROVED_URL, PROHIBITED_CLINICAL, UNSUPPORTED_PRICING_CLAIM,
- *   PROHIBITED_STAFF_CLAIM, DISALLOWED_TEMPLATE, REPEATED_DRAFT,
- *   LOW_CONFIDENCE, INVALID_SLOT_KEY, INVALID_SLOT_VALUE,
+ *   UNAPPROVED_URL, PROHIBITED_CLINICAL, PROHIBITED_CLINICAL_ABSOLUTE,
+ *   UNSUPPORTED_PRICING_CLAIM, PROHIBITED_STAFF_CLAIM, DISALLOWED_TEMPLATE,
+ *   REPEATED_DRAFT, LOW_CONFIDENCE, INVALID_SLOT_KEY, INVALID_SLOT_VALUE,
  *   UNKNOWN_KNOWLEDGE_TOPIC, MISSING_NEXT_QUESTION, INVALID_NEXT_QUESTION
  *
  * @param permittedTopicKeys  Set of knowledge topic keys that were sent to the
@@ -904,6 +929,7 @@ export function interactivePostCheck(
   raw: ClaudeInteractiveResult,
   lastDraft: string | null,
   permittedTopicKeys: ReadonlySet<string> = new Set(),
+  options: InteractivePostCheckOptions = {},
 ): InteractivePostCheckResult {
   const { reply } = raw;
 
@@ -926,23 +952,30 @@ export function interactivePostCheck(
     // clarifying question into reply and leaving nextQuestion null or mismatched —
     // observed live: Claude re-asking "which one — semaglutide or tirzepatide?"
     // inside reply instead of splitting it out.
-    if (reply.includes("?")) {
+    if (reply.includes("?") && !options.bypassCodes?.has("QUESTION_MARK_IN_REPLY")) {
       return { ok: false, code: "QUESTION_MARK_IN_REPLY" };
     }
 
     // ── Clinical-language checks ───────────────────────────────────────────────
     const hasInsuranceTopic = raw.knowledgeTopicsUsed.includes("insurance_payment");
 
-    // Always blocked: individualized clinical actions / conditions
+    // Always blocked: individualized clinical actions / conditions. Never
+    // waived by bypassCodes — no topic could ever authorize diagnosing,
+    // stating a contraindication, or asking about symptoms, so this stays a
+    // hard rejection regardless of the option.
     if (UNCONDITIONAL_CLINICAL_RE.some((re) => re.test(reply))) {
-      return { ok: false, code: "PROHIBITED_CLINICAL" };
+      return { ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" };
     }
 
     // Topic-specific language: each pattern requires its designated Alexis topic(s).
     // A reply is rejected if it uses sensitive language without declaring the
     // specific topic that authorises that language. Declaring an unrelated topic
     // does not unlock permission for a different topic's sensitive vocabulary.
+    // bypassCodes skips only the PROHIBITED_CLINICAL-coded rules here
+    // (dosing/prescribed/treatment/injection/side-effect language) — the
+    // pricing-coded rule (Affirm/Klarna/Afterpay) stays fully enforced.
     for (const rule of TOPIC_SPECIFIC_LANGUAGE) {
+      if (options.bypassCodes?.has(rule.code)) continue;
       if (rule.pattern.test(reply)) {
         const hasRequired = raw.knowledgeTopicsUsed.some((k) => rule.requiredTopics.has(k));
         if (!hasRequired) {
@@ -1035,7 +1068,7 @@ export function interactivePostCheck(
     }
 
     // Repeated draft
-    if (lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft)) {
+    if (lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft) && !options.bypassCodes?.has("REPEATED_DRAFT")) {
       return { ok: false, code: "REPEATED_DRAFT" };
     }
 
@@ -1059,21 +1092,22 @@ export function interactivePostCheck(
   // nextQuestion validation + mandatory STATEMENT → QUESTION order check
   if (REPLY_TYPE_ACTIONS.has(raw.action)) {
     const nq = raw.nextQuestion;
-    if (nq === null || nq === undefined || nq.trim() === "") {
+    const nqMissing = nq === null || nq === undefined || nq.trim() === "";
+    if (nqMissing && !options.bypassCodes?.has("MISSING_NEXT_QUESTION")) {
       return { ok: false, code: "MISSING_NEXT_QUESTION" };
-    }
-    const trimmed = nq.trim();
-    if (!trimmed.endsWith("?")) {
-      return { ok: false, code: "INVALID_NEXT_QUESTION" };
-    }
-    const qCount = (trimmed.match(/\?/g) ?? []).length;
-    if (qCount !== 1) {
-      return { ok: false, code: "INVALID_NEXT_QUESTION" };
     }
     // reply and nextQuestion are separate messages — no order check needed.
     // The question lives exclusively in nextQuestion; reply is informational only.
+    if (!nqMissing) {
+      const trimmed = (nq as string).trim();
+      const qCount = (trimmed.match(/\?/g) ?? []).length;
+      const malformed = !trimmed.endsWith("?") || qCount !== 1;
+      if (malformed && !options.bypassCodes?.has("INVALID_NEXT_QUESTION")) {
+        return { ok: false, code: "INVALID_NEXT_QUESTION" };
+      }
+    }
   } else if (NO_QUESTION_ACTIONS.has(raw.action)) {
-    if (raw.nextQuestion !== null && raw.nextQuestion !== undefined) {
+    if (raw.nextQuestion !== null && raw.nextQuestion !== undefined && !options.bypassCodes?.has("UNEXPECTED_NEXT_QUESTION")) {
       return { ok: false, code: "UNEXPECTED_NEXT_QUESTION" };
     }
   }

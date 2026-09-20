@@ -28,6 +28,16 @@ describe("describeNeedsAttentionReason", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "PAUSE_PRESCRIPTION_REQUEST" })).toMatch(/pause, hold, or skip/i);
   });
 
+  it("maps a staff-flagged PROHIBITED_CLINICAL (accepted on its last attempt) to a distinct explanation from the hard-rejected version", () => {
+    const reason = describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "PROHIBITED_CLINICAL" });
+    expect(reason).toMatch(/clinical word/i);
+    expect(reason).toMatch(/sent anyway/i);
+  });
+
+  it("maps a rejected PROHIBITED_CLINICAL_ABSOLUTE to its own explanation, distinct from the topic-gated version", () => {
+    expect(describeNeedsAttentionReason({ kind: "rejected", code: "PROHIBITED_CLINICAL_ABSOLUTE" })).toMatch(/diagnosing, contraindications, or symptoms/i);
+  });
+
   it("falls back to a generic explanation for an unmapped staff-flagged code", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "SOME_NEW_CODE" })).toBe("Flagged for a person to review (SOME_NEW_CODE).");
   });

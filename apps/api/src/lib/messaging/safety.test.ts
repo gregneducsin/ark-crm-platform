@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { interactivePreCheck, interactivePostCheck } from "./safety.js";
+import { interactivePreCheck, interactivePostCheck, type InteractivePostCheckOptions } from "./safety.js";
 import { APPROVED_REVIEW_URLS } from "./knowledge-catalog.js";
 import type { ClaudeInteractiveResult } from "./types.js";
 
@@ -29,9 +29,10 @@ function reply(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeInteract
 function check(
   raw: ClaudeInteractiveResult,
   lastDraft: string | null = null,
-  permittedTopicKeys?: ReadonlySet<string>,
+  permittedTopicKeys: ReadonlySet<string> = new Set(),
+  options?: InteractivePostCheckOptions,
 ) {
-  return permittedTopicKeys ? interactivePostCheck(raw, lastDraft, permittedTopicKeys) : interactivePostCheck(raw, lastDraft);
+  return interactivePostCheck(raw, lastDraft, permittedTopicKeys, options);
 }
 
 // ── Pre-check ──────────────────────────────────────────────────────────────
@@ -284,22 +285,27 @@ describe("interactivePostCheck: URLs", () => {
 describe("interactivePostCheck: unconditional clinical language", () => {
   it("rejects diagnose regardless of declared topics", () => {
     const result = check(reply({ reply: "I can diagnose your condition.", knowledgeTopicsUsed: ["product_comparison"] }));
-    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
   });
 
   it("rejects contraindicated", () => {
     const result = check(reply({ reply: "That would be contraindicated for you." }));
-    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
   });
 
   it("rejects the noun form 'contraindications', not just the verb 'contraindicated'", () => {
     const result = check(reply({ reply: "There are no contraindications with this." }));
-    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
   });
 
   it("rejects symptom", () => {
     const result = check(reply({ reply: "Tell me about your symptom." }));
-    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
+  });
+
+  it("still rejects diagnose even when PROHIBITED_CLINICAL is in bypassCodes — that waiver never covers the unconditional rules", () => {
+    const result = check(reply({ reply: "I can diagnose your condition." }), null, new Set(), { bypassCodes: new Set(["PROHIBITED_CLINICAL"]) });
+    expect(result).toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
   });
 });
 
@@ -318,6 +324,16 @@ describe("interactivePostCheck: topic-gated language", () => {
 
   it("rejects payment-platform names without the insurance_payment topic", () => {
     const result = check(reply({ reply: "We work with Affirm.", knowledgeTopicsUsed: [] }));
+    expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+  });
+
+  it("allows dosing language without the titration topic when PROHIBITED_CLINICAL is in bypassCodes — the last-resort waiver alexis-conversation.service.ts uses after exhausting retries", () => {
+    const result = check(reply({ reply: "Let's talk about dosing.", knowledgeTopicsUsed: [] }), null, new Set(), { bypassCodes: new Set(["PROHIBITED_CLINICAL"]) });
+    expect(result.ok).toBe(true);
+  });
+
+  it("still rejects a payment-platform name without insurance_payment even when PROHIBITED_CLINICAL is in bypassCodes — that waiver only covers the clinical-coded rules, not the pricing-coded one", () => {
+    const result = check(reply({ reply: "We work with Affirm.", knowledgeTopicsUsed: [] }), null, new Set(), { bypassCodes: new Set(["PROHIBITED_CLINICAL"]) });
     expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
   });
 });

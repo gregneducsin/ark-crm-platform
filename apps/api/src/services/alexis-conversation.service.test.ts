@@ -276,15 +276,106 @@ describe("runAlexisTurn", () => {
     if (result.ok) expect(result.nextQuestion).toBe("Which plan works for you?");
   });
 
-  it("retries up to the attempt cap on a question mark embedded in reply, and fails closed if every attempt fails", async () => {
+  it("sends the reply with no follow-up question once MISSING_NEXT_QUESTION exhausts every retry, rather than silence", async () => {
     callClaudeInteractiveMock.mockClear();
-    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Which one would you like — semaglutide or tirzepatide?" }));
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "We serve your state.", nextQuestion: null }));
     const personId = await seedCustomer();
     const result = await runAlexisTurn(personId, baseBody());
 
-    expect(callClaudeInteractiveMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reply).toBe("We serve your state.");
+      expect(result.nextQuestion).toBeNull();
+      expect(result.requiresStaff).toBe(true);
+      expect(result.preCheckCode).toBe("MISSING_NEXT_QUESTION");
+    }
+  });
+
+  it("sends the repeated draft anyway once REPEATED_DRAFT exhausts every retry, rather than silence", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Same as before." }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody({ lastDraft: "Same as before." }));
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reply).toBe("Same as before.");
+      expect(result.requiresStaff).toBe(true);
+      expect(result.preCheckCode).toBe("REPEATED_DRAFT");
+    }
+  });
+
+  it("retries up to the attempt cap on a question mark embedded in reply, with corrective feedback, and sends it as drafted anyway once exhausted — same fix as the Luma sibling app: this check failed 3 blind retries in a row with no corrective feedback and sat in total silence", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Which one would you like, semaglutide or tirzepatide?" }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
+    expect(retryNote).toMatch(/nextQuestion/i);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reply).toBe("Which one would you like, semaglutide or tirzepatide?");
+      expect(result.requiresStaff).toBe(true);
+      expect(result.preCheckCode).toBe("QUESTION_MARK_IN_REPLY");
+    }
+  });
+
+  it("still fails closed with no bypass when something else is also wrong with the reply, not just the clinical-citation gate", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(
+      modelResult({ reply: "We can get your treatment started, and we guarantee results.", knowledgeTopicsUsed: [] }),
+    );
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(5);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe("QUESTION_MARK_IN_REPLY");
+    if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
+  });
+
+  it("never bypasses PROHIBITED_CLINICAL_ABSOLUTE (diagnose/contraindicated/symptom) — no amount of retrying waives it", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "I can diagnose your condition." }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("PROHIBITED_CLINICAL_ABSOLUTE");
+  });
+
+  it("retries a prohibited-clinical rejection once, with corrective feedback, and succeeds if the retry cites the required topic — same shape as the pricing-citation fix", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock
+      .mockResolvedValueOnce(modelResult({ reply: "We can get your treatment started once you're set up.", knowledgeTopicsUsed: [] }))
+      .mockResolvedValueOnce(modelResult({ reply: "We can get your treatment started once you're set up.", knowledgeTopicsUsed: ["titration"] }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
+    expect(retryNote).toMatch(/clinical/i);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.reply).toBe("We can get your treatment started once you're set up.");
+  });
+
+  it("sends the reply anyway once PROHIBITED_CLINICAL exhausts its own larger attempt budget, still flagging staff to double-check it", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "We can get your treatment started once you're set up.", knowledgeTopicsUsed: [] }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(5);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.reply).toBe("We can get your treatment started once you're set up.");
+      expect(result.requiresStaff).toBe(true);
+      expect(result.preCheckCode).toBe("PROHIBITED_CLINICAL");
+    }
   });
 
   it("does not retry a genuinely non-retryable safety rejection (e.g. an unapproved URL)", async () => {

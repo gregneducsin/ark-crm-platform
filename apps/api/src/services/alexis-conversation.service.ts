@@ -93,25 +93,37 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
 };
 
 /**
- * Post-check codes safe to retry: these are mechanical format slips (the
- * question landed in the wrong field, or in two places, or Claude repeated
- * its own last draft), not safety-relevant rejections. Retrying these
- * re-runs the exact same prompt — no "you got it wrong" context is added —
- * since this is plain output variance, not a content problem to correct.
+ * Post-check codes safe to retry. Two groups:
  *
- * UNSUPPORTED_PRICING_CLAIM is the one exception, retried WITH corrective
- * feedback (see RETRY_NOTES below) rather than blindly: a real case in the
- * Luma sibling app had Alexis's Lucy try to quote a price right after the
- * customer picked a product — exactly what she's supposed to do — but
- * forget to cite the pricing topic, get permanently blocked with no second
- * attempt, and sit unanswered until a staff member noticed and typed the
- * same price in by hand. She almost certainly knew the right number; she
- * just missed a citation formality. Blindly retrying (like the other codes)
- * would risk repeating that same mistake, which is exactly why this wasn't
- * retried before — but telling her what specifically went wrong makes a
- * second attempt worth taking here, unlike a genuine content problem
- * (clinical language, an unapproved URL, an actually-wrong price) where a
- * retry has nothing new to go on and still isn't attempted.
+ * Format-only slips (MISSING/INVALID/UNEXPECTED_NEXT_QUESTION,
+ * QUESTION_MARK_IN_REPLY, REPEATED_DRAFT): the question landed in the wrong
+ * field, or in two places, or Claude repeated its own last draft. Purely
+ * mechanical, never a safety concern — by the time interactivePostCheck
+ * reaches any of these, every content check (URL, clinical language,
+ * pricing, templates) has already passed clean, so nothing else could be
+ * wrong with the reply. Retried WITH corrective feedback (see RETRY_NOTES)
+ * instead of blindly re-running the same prompt — a real production case in
+ * the Luma sibling app had QUESTION_MARK_IN_REPLY fail 3 blind retries in a
+ * row and sit in total silence, because nothing ever told the model what
+ * specifically to fix. If every attempt still fails, the last drafted reply
+ * is sent anyway — see NEVER_SILENT_CODES below.
+ *
+ * UNSUPPORTED_PRICING_CLAIM and PROHIBITED_CLINICAL: genuine citation-gating
+ * problems, not pure format, so they're kept separate from the group above.
+ * UNSUPPORTED_PRICING_CLAIM: a real production case in the Luma sibling app
+ * had the conversation bot try to quote a price right after the customer
+ * picked a product — exactly what it's supposed to do — but forget to cite
+ * the pricing topic, get permanently blocked with no second attempt, and
+ * sit unanswered until a staff member noticed and typed the same price in
+ * by hand. It almost certainly knew the right number; it just missed a
+ * citation formality. Still fails closed if every retry is exhausted,
+ * though — an actually-wrong price is a real content problem, unlike the
+ * format-only group, so it's NOT in NEVER_SILENT_CODES. PROHIBITED_CLINICAL:
+ * the same citation-gating shape (see TOPIC_SPECIFIC_LANGUAGE in safety.ts),
+ * and the same real production case showed the same failure mode: a
+ * routine DTC eligibility conversation, answered every question asked of
+ * it, then total silence because a gated word landed without its topic.
+ * This one IS in NEVER_SILENT_CODES — see that constant's own docstring.
  */
 const RETRYABLE_POST_CHECK_CODES = new Set([
   "MISSING_NEXT_QUESTION",
@@ -120,12 +132,57 @@ const RETRYABLE_POST_CHECK_CODES = new Set([
   "QUESTION_MARK_IN_REPLY",
   "REPEATED_DRAFT",
   "UNSUPPORTED_PRICING_CLAIM",
+  "PROHIBITED_CLINICAL",
 ]);
 
-/** Corrective feedback injected into a retry — see RETRYABLE_POST_CHECK_CODES' docstring. Codes not listed here retry with no added context, same as before. */
+/**
+ * Once one of these codes exhausts its retry budget, the last drafted reply
+ * is sent anyway (via interactivePostCheck's bypassCodes option, which
+ * re-verifies every OTHER check still passes first) rather than falling
+ * back to silence or a worse substitute reply. Every code here is purely
+ * mechanical — a missing/malformed follow-up question, a question mark in
+ * the wrong field, or a repeated draft — never a genuine content problem,
+ * so accepting the model's own text carries no real risk. PROHIBITED_CLINICAL
+ * is the one exception that isn't pure format (see its own entry in
+ * RETRYABLE_POST_CHECK_CODES' docstring) but earns the same treatment: the
+ * model is fully capable of answering a plain question, so the fix is to
+ * give it every real chance to do so, not substitute a worse, off-topic
+ * reply for its own. Its acceptance only ever waives the topic-citation
+ * gate itself — never PROHIBITED_CLINICAL_ABSOLUTE (diagnose/contraindicated/
+ * symptom language), which has no topic that could ever authorize it and
+ * stays hard-blocked no matter how many attempts run out (see the bypass
+ * call below, and safety.ts's InteractivePostCheckOptions docstring).
+ *
+ * UNSUPPORTED_PRICING_CLAIM is deliberately NOT here — a genuinely wrong or
+ * unbacked price is a real content problem, not a format one, so it keeps
+ * failing closed exactly as before once its retries are exhausted.
+ */
+const NEVER_SILENT_CODES = new Set([
+  "MISSING_NEXT_QUESTION",
+  "INVALID_NEXT_QUESTION",
+  "UNEXPECTED_NEXT_QUESTION",
+  "QUESTION_MARK_IN_REPLY",
+  "REPEATED_DRAFT",
+  "PROHIBITED_CLINICAL",
+]);
+
+/** PROHIBITED_CLINICAL's own, larger attempt budget — see RETRYABLE_POST_CHECK_CODES' docstring. Every other retryable code uses the shared MAX_ATTEMPTS. */
+const CLINICAL_MAX_ATTEMPTS = 5;
+
+/** Corrective feedback injected into a retry — see RETRYABLE_POST_CHECK_CODES' docstring. Codes not listed here retry with no added context. */
 const RETRY_NOTES: Partial<Record<string, string>> = {
   UNSUPPORTED_PRICING_CLAIM:
     "Your last reply mentioned a price or discount but was rejected because it didn't cite an approved pricing knowledge topic (or used a figure that isn't one of the exact approved amounts). If you're quoting a price this turn, make sure to include the correct topic key (e.g. semaglutide_pricing, tirzepatide_pricing, first_month_offer) in knowledgeTopicsUsed, and use only the exact approved figures from that topic's approved text.",
+  PROHIBITED_CLINICAL:
+    "Your last reply used a clinical/medical word (e.g. dosing, prescribed, treatment, injection, side effects) without citing the specific knowledge topic that's required alongside it, so it was rejected. If you need that word this turn, cite the matching topic in knowledgeTopicsUsed (e.g. titration for dosing/injection language, previous_prescriptions for prescribed/treatment language about a transfer patient, side_effects or product_comparison for side-effect language) — or rephrase without that word if it isn't actually needed to answer this turn.",
+  QUESTION_MARK_IN_REPLY:
+    "Your last reply's reply field contained a '?' — the question belongs exclusively in nextQuestion, never in reply. Move any question out of reply and into nextQuestion instead.",
+  MISSING_NEXT_QUESTION: "Your last reply's nextQuestion field was empty, but this turn requires one. Include a single follow-up question in nextQuestion — don't fold it into reply instead.",
+  INVALID_NEXT_QUESTION:
+    "Your last reply's nextQuestion field wasn't a single, well-formed question (it either didn't end in '?' or had more than one '?'). Make nextQuestion exactly one complete question ending in exactly one '?'.",
+  UNEXPECTED_NEXT_QUESTION:
+    "Your last reply included a nextQuestion, but this turn's action doesn't call for a follow-up question. Set nextQuestion to null this turn.",
+  REPEATED_DRAFT: "Your last reply repeated the exact same text as your previous draft to this customer. Say something new this turn instead of repeating it verbatim.",
 };
 
 const MAX_ATTEMPTS = 3;
@@ -136,11 +193,16 @@ const MAX_ATTEMPTS = 3;
  * action=send_form — mint the actual per-lead signup link (Claude never sees
  * or outputs a real one).
  *
- * Fails closed: any pre-check block or a non-retryable post-check rejection
- * short-circuits before the caller ever gets an unvalidated reply — no
- * automatic repair, no second guess at what Claude "meant." A format-only
- * rejection (see RETRYABLE_POST_CHECK_CODES) gets exactly one retry of the
- * same call before giving up the same way.
+ * Fails closed for a genuine content problem: any pre-check block, or a
+ * post-check rejection outside RETRYABLE_POST_CHECK_CODES (an unapproved
+ * URL, an actually-wrong price, PROHIBITED_CLINICAL_ABSOLUTE), short-circuits
+ * before the caller ever gets an unvalidated reply — no automatic repair, no
+ * second guess at what Claude "meant." But a code in NEVER_SILENT_CODES
+ * (purely mechanical format slips, plus PROHIBITED_CLINICAL's citation
+ * gate) never ends in total silence: it's retried with corrective feedback,
+ * and if every attempt still fails, the last drafted reply is sent anyway
+ * rather than substituted with a worse reply or dropped (see the bypass
+ * check below).
  */
 export async function runAlexisTurn(personId: string, body: BotPreviewRequestBody): Promise<AlexisTurnResult> {
   const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
@@ -178,9 +240,11 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   const enabledTopics = getPreviewEnabledTopics();
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
+  const overallMaxAttempts = Math.max(MAX_ATTEMPTS, CLINICAL_MAX_ATTEMPTS);
   let post: ReturnType<typeof interactivePostCheck> | undefined;
   let retryNote: string | undefined;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  let lastResortCode: string | null = null;
+  for (let attempt = 1; attempt <= overallMaxAttempts; attempt++) {
     let raw: ClaudeInteractiveResult;
     try {
       raw = await callClaudeInteractive(body, enabledTopics, retryNote);
@@ -195,9 +259,32 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     post = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys);
     if (post.ok) break;
 
-    const canRetry = attempt < MAX_ATTEMPTS && RETRYABLE_POST_CHECK_CODES.has(post.code);
+    const codeMaxAttempts = post.code === "PROHIBITED_CLINICAL" ? CLINICAL_MAX_ATTEMPTS : MAX_ATTEMPTS;
+    const canRetry = attempt < codeMaxAttempts && RETRYABLE_POST_CHECK_CODES.has(post.code);
     logger.warn({ code: post.code, attempt, retrying: canRetry }, "Alexis reply rejected by post-check");
     if (!canRetry) {
+      // Every real attempt still hit the same rejection — before giving up,
+      // check whether THAT ONE check is the only thing wrong with this exact
+      // reply (waiving just this one code — see interactivePostCheck's
+      // bypassCodes option). If nothing else objects, accept it: the
+      // model's own reply is better than a worse substitute or silence, and
+      // requiresStaff below still routes this to a person. Only codes in
+      // NEVER_SILENT_CODES ever get this waiver — everything else (including
+      // PROHIBITED_CLINICAL_ABSOLUTE, which interactivePostCheck won't skip
+      // regardless of what's passed here) still fails closed exactly as
+      // before.
+      if (NEVER_SILENT_CODES.has(post.code)) {
+        const bypass = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys, { bypassCodes: new Set([post.code]) });
+        if (bypass.ok) {
+          lastResortCode = post.code;
+          post = { ok: true, result: { ...bypass.result, requiresStaff: true }, validatedSlotUpdates: bypass.validatedSlotUpdates };
+          break;
+        }
+        // Something else is also wrong with this reply (e.g. an unapproved
+        // URL) — that's a real, different rejection, not something waiving
+        // one specific code can fix, so fail closed with THAT code instead.
+        return { ok: false, code: bypass.code };
+      }
       return { ok: false, code: post.code };
     }
     retryNote = RETRY_NOTES[post.code];
@@ -255,7 +342,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     knowledgeTopicsUsed: result.knowledgeTopicsUsed,
     validatedSlotUpdates: post.validatedSlotUpdates,
     source: "model",
-    preCheckCode: null,
+    preCheckCode: lastResortCode,
     learnedFirstName: result.learnedFirstName,
   };
 }

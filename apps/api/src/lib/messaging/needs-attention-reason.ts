@@ -21,6 +21,8 @@ export type NeedsAttentionSource =
 /** Post-check/provider rejection codes — the draft reply existed but got blocked before it ever reached the customer. */
 const REJECTED_REASONS: Record<string, string> = {
   PROHIBITED_CLINICAL: "The draft reply included clinical/medical language that isn't allowed, so it was blocked instead of sent.",
+  PROHIBITED_CLINICAL_ABSOLUTE:
+    "The draft reply used clinical/medical language (diagnosing, contraindications, or symptoms) that's never allowed regardless of context, so it was blocked instead of sent.",
   UNSUPPORTED_PRICING_CLAIM: "The draft reply stated a price or discount that isn't backed by an approved pricing topic, so it was blocked.",
   UNAPPROVED_URL: "The draft reply included a link that isn't on the approved list, so it was blocked.",
   PROHIBITED_STAFF_CLAIM: "The draft reply promised something about staff availability/monitoring that isn't allowed, so it was blocked.",
@@ -41,7 +43,17 @@ const REJECTED_REASONS: Record<string, string> = {
   EMPTY_RESPONSE: "The AI returned an empty response, so nothing was sent.",
 };
 
-/** Pre-check codes that route straight to staff review, before any reply is even drafted. */
+/**
+ * Codes that route to staff review while still sending the customer
+ * something — mostly pre-check codes (flagged before any reply is even
+ * drafted), plus the NEVER_SILENT_CODES post-check exceptions
+ * (alexis-conversation.service.ts): a reply kept failing the same mechanical
+ * check even after every retry, so it was sent as drafted anyway instead of
+ * a worse substitute or silence. Alexis's own reply text still goes out
+ * as-is in every one of these cases — nothing here substitutes a different
+ * message — this just tells staff which specific check it skipped, so they
+ * know what to glance at.
+ */
 const STAFF_FLAGGED_REASONS: Record<string, string> = {
   STOP_WORD: "The customer used a word that might mean they want to stop texts, but it wasn't clear enough to auto-confirm.",
   EMERGENCY_CONTENT: "The customer's message may describe a medical emergency — flagged immediately rather than answered automatically.",
@@ -51,6 +63,18 @@ const STAFF_FLAGGED_REASONS: Record<string, string> = {
   PRESCRIPTION_QUESTION: "The customer asked something about their specific prescription needing individual judgment — not something to answer generically.",
   PAUSE_PRESCRIPTION_REQUEST: "The customer asked to pause, hold, or skip their prescription/order — pointed to the patient portal, but nothing was actually paused, so a person needs to follow up.",
   LEGAL_CONTENT: "The customer mentioned something legal (e.g. a threat to sue) — needs a person to handle directly.",
+  PROHIBITED_CLINICAL:
+    "Alexis's reply used a clinical word without its normally-required citation, and kept failing that check after several retries — her own reply was sent anyway rather than substituting something worse or going silent, but a person should double-check it.",
+  QUESTION_MARK_IN_REPLY:
+    "Alexis's reply kept putting a question mark in the wrong field even after retries — her own reply was sent anyway rather than going silent, but a person should glance at how it reads.",
+  MISSING_NEXT_QUESTION:
+    "Alexis's reply kept missing its required follow-up question even after retries — sent anyway as a plain reply with no question, rather than going silent.",
+  INVALID_NEXT_QUESTION:
+    "Alexis's follow-up question kept coming out malformed even after retries — sent anyway as drafted, rather than going silent.",
+  UNEXPECTED_NEXT_QUESTION:
+    "Alexis kept including a follow-up question when this turn didn't call for one, even after retries — sent anyway as drafted, rather than going silent.",
+  REPEATED_DRAFT:
+    "Alexis kept repeating her exact previous reply even after retries — sent anyway rather than going silent, but a person should check whether the conversation is actually stuck.",
 };
 
 export function describeNeedsAttentionReason(source: NeedsAttentionSource): string {
