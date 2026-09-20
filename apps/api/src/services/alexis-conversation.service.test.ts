@@ -230,6 +230,20 @@ describe("runAlexisTurn", () => {
     }
   });
 
+  it("keeps linkProvided sticky once true, even when a later turn's own self-report says false", async () => {
+    callClaudeInteractiveMock.mockClear();
+    // The model drafting a plain acknowledgment reply (not another
+    // send_form) self-reports linkProvided:false this turn — nothing minted
+    // a link THIS turn, but the conversation already knows one went out
+    // earlier (body.linkProvided:true below).
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ action: "reply", reply: "You're welcome!", nextQuestion: "Anything else?", linkProvided: false }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "Ty" }], linkProvided: true }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.linkProvided).toBe(true);
+  });
+
   it("fails soft when minting the intake link throws (e.g. INTAKE_LINK_BASE_URL misconfigured) — still replies, without a link, and flags staff attention", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock.mockResolvedValueOnce(

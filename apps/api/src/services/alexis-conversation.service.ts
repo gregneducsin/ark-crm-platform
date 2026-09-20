@@ -398,7 +398,18 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     link,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    linkProvided: link !== null ? true : result.linkProvided,
+    // Once a link has actually gone out, that fact must never depend on
+    // Claude correctly re-asserting linkProvided:true on every single later
+    // turn — it's a fresh, self-reported field every turn (see provider.ts),
+    // not something the model inherits automatically. A real Luma
+    // production case (Starrann Wilson) showed the risk: link sent and
+    // clicked, then her very next turn (a plain "Yes"/"Ty" reply) reported
+    // linkProvided:false, silently flipping the persisted state back and
+    // hiding the "link sent"/"link clicked" badges even though the link and
+    // click were real. Falling back to body.linkProvided (what we already
+    // knew coming into this turn) makes it sticky — once true, a single bad
+    // self-report on a later turn can no longer erase it.
+    linkProvided: link !== null ? true : (result.linkProvided || body.linkProvided),
     promoOffered: result.promoOffered,
     inboundSentiment: result.inboundSentiment,
     requiresStaff: result.requiresStaff || linkMintFailed,
