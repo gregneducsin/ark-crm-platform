@@ -22,6 +22,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import type { ClaudeInteractiveResult, BotPreviewRequestBody } from "./types.js";
 import type { KnowledgeTopic } from "./knowledge-catalog.js";
 import { APPROVED_REVIEW_URLS } from "./knowledge-catalog.js";
@@ -36,6 +37,14 @@ export class ProviderError extends Error {
     public readonly category: string,
     public readonly rawOutput: string = "",
     cause?: unknown,
+    /**
+     * For SCHEMA_VALIDATION_ERROR only: which field(s) failed and why (e.g.
+     * "reply: String must contain at most 400 character(s)"), straight from
+     * the ZodError. Never logged (see this file's isolation contract) — only
+     * ever fed back to Claude as retry-note text in alexis-conversation.service.ts,
+     * the same way a post-check rejection's corrective note works.
+     */
+    public readonly issues?: string,
   ) {
     super(category);
     this.name = "ProviderError";
@@ -434,9 +443,10 @@ export async function callClaudeInteractive(
   let validated: ReturnType<typeof ClaudeInteractiveSchema.parse>;
   try {
     validated = ClaudeInteractiveSchema.parse(parsed);
-  } catch {
+  } catch (err) {
     const rawForRepair = toolBlock && toolBlock.type === "tool_use" ? JSON.stringify(toolBlock.input) : rawText;
-    throw new ProviderError("SCHEMA_VALIDATION_ERROR", rawForRepair);
+    const issues = err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ") : undefined;
+    throw new ProviderError("SCHEMA_VALIDATION_ERROR", rawForRepair, err, issues);
   }
 
   const detectedIntents =

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { db, customersTable } from "@luma/db";
 import type { ClaudeInteractiveResult, BotPreviewRequestBody } from "../lib/messaging/types.js";
+import { ProviderError } from "../lib/messaging/provider.js";
 
 beforeAll(() => {
   process.env.INTAKE_LINK_BASE_URL = "http://localhost:3000";
@@ -418,5 +419,52 @@ describe("runAlexisTurn", () => {
     expect(callClaudeInteractiveMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
+  });
+
+  it("retries a SCHEMA_VALIDATION_ERROR with the specific ZodError issues fed back, and succeeds once the retry fixes it — same fix as the Luma sibling app: a longer 'how it works and the side effects' answer tripped schema validation and got zero retries at all", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock
+      .mockRejectedValueOnce(new ProviderError("SCHEMA_VALIDATION_ERROR", '{"reply":"way too long..."}', undefined, "reply: String must contain at most 400 character(s)"))
+      .mockResolvedValueOnce(modelResult({ reply: "Shorter answer now." }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
+    expect(retryNote).toMatch(/400 character/i);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.reply).toBe("Shorter answer now.");
+  });
+
+  it("still fails closed (no reply exists to fall back to) once SCHEMA_VALIDATION_ERROR exhausts every retry", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockRejectedValue(new ProviderError("SCHEMA_VALIDATION_ERROR", "{}", undefined, "action: Invalid enum value"));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("SCHEMA_VALIDATION_ERROR");
+  });
+
+  it("retries a transient PROVIDER_HTTP_ERROR (no corrective note needed) and succeeds on the retry", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockRejectedValueOnce(new ProviderError("PROVIDER_HTTP_ERROR")).mockResolvedValueOnce(modelResult());
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+  });
+
+  it("never retries PROVIDER_NOT_CONFIGURED — a real misconfiguration would just fail identically every time", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockRejectedValue(new ProviderError("PROVIDER_NOT_CONFIGURED"));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("PROVIDER_NOT_CONFIGURED");
   });
 });

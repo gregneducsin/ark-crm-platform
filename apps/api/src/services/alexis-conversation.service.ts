@@ -185,6 +185,49 @@ const RETRY_NOTES: Partial<Record<string, string>> = {
   REPEATED_DRAFT: "Your last reply repeated the exact same text as your previous draft to this customer. Say something new this turn instead of repeating it verbatim.",
 };
 
+/**
+ * ProviderError categories safe to retry — a parsing/validation failure one
+ * layer BEFORE the post-check above even runs, or a transient API problem.
+ * Same fix as the Luma sibling app: a real production case there had a
+ * longer, more detail-heavy answer trip ClaudeInteractiveSchema's
+ * validation (SCHEMA_VALIDATION_ERROR, most likely the reply field's
+ * length cap), and this category had ZERO retries at all, not even a
+ * blind one — worse than every post-check code, which at least got one
+ * attempt before this session's earlier fixes.
+ *
+ * PROVIDER_NOT_CONFIGURED is deliberately excluded: a missing/invalid API
+ * key is a real misconfiguration, not a one-off model slip or network
+ * hiccup, so every retry would fail identically — there's nothing to gain.
+ * Every category here either is a transient API problem (PROVIDER_TIMEOUT,
+ * PROVIDER_HTTP_ERROR) or means Claude's own output didn't parse or
+ * validate (EMPTY_RESPONSE, NO_JSON_OBJECT, JSON_PARSE_ERROR,
+ * SCHEMA_VALIDATION_ERROR) — all worth a fresh attempt.
+ *
+ * Unlike RETRYABLE_POST_CHECK_CODES, none of these ever gets a
+ * NEVER_SILENT_CODES-style last-resort "send it anyway": a post-check
+ * rejection always has a full, real raw reply sitting there just waiting
+ * on one specific check; these categories mean no valid response ever came
+ * back at all (or, for SCHEMA_VALIDATION_ERROR, one that failed validation
+ * for reasons too open-ended to safely reconstruct blindly) — there's
+ * nothing honest to fall back to, so exhausting these still fails closed.
+ */
+const PROVIDER_RETRYABLE_CATEGORIES = new Set(["PROVIDER_TIMEOUT", "PROVIDER_HTTP_ERROR", "EMPTY_RESPONSE", "NO_JSON_OBJECT", "JSON_PARSE_ERROR", "SCHEMA_VALIDATION_ERROR"]);
+
+/**
+ * Corrective feedback for a retried ProviderError — see
+ * PROVIDER_RETRYABLE_CATEGORIES' docstring. SCHEMA_VALIDATION_ERROR isn't
+ * listed here: its note is built dynamically from the ZodError's own
+ * issues (see ProviderError.issues in provider.ts), naming the exact
+ * field(s) that failed rather than a generic reminder. PROVIDER_TIMEOUT and
+ * PROVIDER_HTTP_ERROR have no note — there's nothing about the output to
+ * correct, just a plain retry of the same request.
+ */
+const PROVIDER_RETRY_NOTES: Partial<Record<string, string>> = {
+  EMPTY_RESPONSE: "Your last response came back empty. Make sure to call the bot_reply tool with your actual reply this turn.",
+  NO_JSON_OBJECT: "Your last response didn't call the bot_reply tool at all. You must always respond by calling the bot_reply tool — never plain text.",
+  JSON_PARSE_ERROR: "Your last response's tool call wasn't valid, well-formed JSON. Make sure every field is properly formatted.",
+};
+
 const MAX_ATTEMPTS = 3;
 
 /**
@@ -249,11 +292,31 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     try {
       raw = await callClaudeInteractive(body, enabledTopics, retryNote);
     } catch (err) {
-      if (err instanceof ProviderError) {
+      if (!(err instanceof ProviderError)) throw err;
+
+      // PROVIDER_NOT_CONFIGURED (and anything else outside
+      // PROVIDER_RETRYABLE_CATEGORIES) is a real misconfiguration or
+      // unretryable state — every retry would fail identically, so there's
+      // nothing to gain from trying again.
+      if (!PROVIDER_RETRYABLE_CATEGORIES.has(err.category)) {
         logger.error({ category: err.category }, "Alexis provider call failed");
         return { ok: false, code: err.category };
       }
-      throw err;
+
+      const canRetry = attempt < MAX_ATTEMPTS;
+      logger.warn({ category: err.category, attempt, retrying: canRetry }, "Alexis provider call failed");
+      if (!canRetry) {
+        // No valid raw output ever came back for these categories — unlike
+        // a post-check rejection, there's genuinely nothing to fall back to
+        // and send anyway, so this is the one place that still fails closed
+        // even under the never-total-silence philosophy above.
+        return { ok: false, code: err.category };
+      }
+      retryNote =
+        err.category === "SCHEMA_VALIDATION_ERROR" && err.issues
+          ? `Your last response's bot_reply tool call was rejected for not matching the required format: ${err.issues}. Fix these specific field(s) this turn.`
+          : PROVIDER_RETRY_NOTES[err.category];
+      continue;
     }
 
     post = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys);
