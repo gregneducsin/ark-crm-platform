@@ -108,6 +108,15 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
           <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {"subject" in m && <p className="mb-0.5 font-semibold">{m.subject}</p>}
             <p className="whitespace-pre-wrap">{m.body}</p>
+            {"mediaUrls" in m && m.mediaUrls && m.mediaUrls.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {m.mediaUrls.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt="MMS attachment" className="max-h-36 max-w-[180px] rounded-md border border-gray-200 object-cover" />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
           <div className={"mt-0.5 flex items-center gap-1.5 " + (m.direction === "inbound" ? "justify-start" : "justify-end")}>
             {m.direction === "outbound" && "deliveryStatus" in m && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}

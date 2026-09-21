@@ -186,6 +186,43 @@ describe("handleIbluSendWebhook", () => {
     expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
   });
 
+  it("still processes a picture-only text with no caption, using a placeholder body and passing the media URL through, instead of silently dropping it", async () => {
+    processInboundMessageMock.mockClear();
+    processInboundSupportMessageMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: null, media_urls: ["https://cdn.iblusend.example/media/abc123.jpg"] } }));
+
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "[Image attached]", undefined, ["https://cdn.iblusend.example/media/abc123.jpg"]);
+  });
+
+  it("passes both the caption and the media URLs through when a message has both", async () => {
+    processInboundMessageMock.mockClear();
+    processInboundSupportMessageMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    await handleIbluSendWebhook(
+      envelope({ data: { phone_number: phone, content: "here's a pic of the rash", media_urls: ["https://cdn.iblusend.example/media/def456.jpg"] } }),
+    );
+
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "here's a pic of the rash", undefined, ["https://cdn.iblusend.example/media/def456.jpg"]);
+  });
+
+  it("still drops a message with neither content nor media_urls (nothing meaningful to process)", async () => {
+    processInboundMessageMock.mockClear();
+    processInboundSupportMessageMock.mockClear();
+    recordAndClassifyUnmatchedSmsMock.mockClear();
+
+    const phone = uniquePhone();
+    await seedCustomer(phone);
+    await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: null, media_urls: null } }));
+
+    expect(processInboundMessageMock).not.toHaveBeenCalled();
+    expect(recordAndClassifyUnmatchedSmsMock).not.toHaveBeenCalled();
+  });
+
   it("ignores outbound-direction messages", async () => {
     processInboundMessageMock.mockClear();
     processInboundSupportMessageMock.mockClear();

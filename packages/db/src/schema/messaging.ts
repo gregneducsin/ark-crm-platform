@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { customersTable } from "./customers";
 import { questionnaireEventsTable } from "./webhooks";
 
@@ -168,6 +168,15 @@ export const conversationMessagesTable = pgTable(
     body: text("body").notNull(),
     sentiment: text("sentiment", { enum: ["positive", "neutral", "negative"] }),
     providerMessageId: text("provider_message_id"),
+    /**
+     * Set on inbound only, when the customer's text included one or more
+     * MMS attachments (iBluSend's message.received `data.media_urls`).
+     * Null/absent for an ordinary text-only message. These are iBluSend's
+     * own hosted URLs, displayed as-is on the dashboard — not something
+     * Alexis's AI reads or reacts to; purely a "here's what they sent" view
+     * for staff. Never populated on outbound (this app never sends MMS).
+     */
+    mediaUrls: jsonb("media_urls").$type<string[]>(),
     /** Who actually wrote an outbound message — Alexis (or an automated trigger) vs a staff member typing into the reply box. Null on inbound (always the customer). */
     sentBy: text("sent_by", { enum: ["ai", "staff"] }),
     /** Which staff member actually sent it — set only when sentBy is "staff". Denormalized (not an FK), same convention as customer_notes.authorEmail, so history reads correctly even if the account is later renamed/disabled. */
@@ -364,6 +373,8 @@ export const unmatchedSmsMessagesTable = pgTable(
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
     body: text("body").notNull(),
     providerMessageId: text("provider_message_id"),
+    /** Same convention as conversation_messages.mediaUrls — set on inbound only, when the sender's text included MMS attachments. */
+    mediaUrls: jsonb("media_urls").$type<string[]>(),
     /**
      * Same convention as conversation_messages.deliveryStatus. Null on
      * insert for an outbound message here (unlike that table, which sets

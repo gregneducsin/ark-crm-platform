@@ -77,14 +77,15 @@ export async function processInboundMessage(
   personId: string,
   inboundBody: string,
   initialLeadSource?: "abandoned_cart" | "meta_form",
+  mediaUrls?: string[],
 ): Promise<AlexisTurnResult> {
-  return withPersonLock(personId, () => processInboundMessageLocked(personId, inboundBody, initialLeadSource));
+  return withPersonLock(personId, () => processInboundMessageLocked(personId, inboundBody, initialLeadSource, mediaUrls));
 }
 
-async function processInboundMessageLocked(personId: string, inboundBody: string, initialLeadSource?: "abandoned_cart" | "meta_form"): Promise<AlexisTurnResult> {
+async function processInboundMessageLocked(personId: string, inboundBody: string, initialLeadSource?: "abandoned_cart" | "meta_form", mediaUrls?: string[]): Promise<AlexisTurnResult> {
   const conversation = initialLeadSource ? await getOrCreateConversation(personId, initialLeadSource) : await getOrCreateConversation(personId);
   const priorMessages = await listMessages(conversation.id);
-  const inboundMessage = await appendMessage(conversation.id, "inbound", inboundBody);
+  const inboundMessage = await appendMessage(conversation.id, "inbound", inboundBody, { mediaUrls });
 
   const customer = await getCustomerContact(personId);
   // "Unknown" is the placeholder a webhook-created customer row gets when no

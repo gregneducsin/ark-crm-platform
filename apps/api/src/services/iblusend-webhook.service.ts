@@ -93,12 +93,19 @@ async function markMessageFailedByProviderMessageId(messageId: string): Promise<
  * customer's real message unanswered for no reason other than nobody having
  * texted them first.
  */
-async function dispatchInboundMessage(personId: string, body: string): Promise<void> {
+async function dispatchInboundMessage(personId: string, body: string, mediaUrls?: string[]): Promise<void> {
+  // Only pass the trailing mediaUrls arg through when it's actually present
+  // — an explicit `undefined` positional argument is still a real arg as
+  // far as a caller-args assertion in a test is concerned, so this keeps
+  // the ordinary, by-far-more-common text-only call exactly as it always
+  // was rather than silently growing every call's arg count.
   if (await hasSupportConversation(personId)) {
-    await processInboundSupportMessage(personId, body);
+    if (mediaUrls) await processInboundSupportMessage(personId, body, mediaUrls);
+    else await processInboundSupportMessage(personId, body);
     return;
   }
-  await processInboundMessage(personId, body);
+  if (mediaUrls) await processInboundMessage(personId, body, undefined, mediaUrls);
+  else await processInboundMessage(personId, body);
 }
 
 /**
@@ -127,17 +134,30 @@ export async function handleIbluSendWebhook(envelope: IbluSendWebhookEnvelope): 
         throw new Error(`message.received payload failed validation: ${parsed.error.message}`);
       }
       const data = parsed.data;
-      if (data.direction === "incoming" && data.content) {
+      const mediaUrls = data.media_urls && data.media_urls.length > 0 ? data.media_urls : undefined;
+      // A picture-only text (no caption) arrives with content null/empty —
+      // previously dropped entirely, since this whole branch only fired on
+      // truthy content. body still can't be null (conversation_messages.body
+      // is NOT NULL, and every downstream reader — Alexis/Sophie's own
+      // prompts included — expects real text), so a picture with no caption
+      // gets a fixed placeholder instead; the actual image is what mediaUrls
+      // is for.
+      if (data.direction === "incoming" && (data.content || mediaUrls)) {
+        const body = data.content || "[Image attached]";
         const personId = await findCustomerIdByPhone(data.phone_number);
         if (personId) {
-          await dispatchInboundMessage(personId, data.content);
+          await dispatchInboundMessage(personId, body, mediaUrls);
           await markWebhookEventProcessed(recorded.id, personId);
           return { duplicate: false };
         }
         // No matching customer — record/classify/ack it instead of dropping
         // it silently. See unmatched-inbound-sms.service.ts.
         try {
-          await recordAndClassifyUnmatchedSms(data.phone_number, data.content);
+          // Same reasoning as dispatchInboundMessage — only pass mediaUrls
+          // when actually present, so the ordinary text-only call keeps its
+          // existing 2-arg shape.
+          if (mediaUrls) await recordAndClassifyUnmatchedSms(data.phone_number, body, mediaUrls);
+          else await recordAndClassifyUnmatchedSms(data.phone_number, body);
         } catch (err) {
           logger.warn(
             { phoneLastFour: data.phone_number.slice(-4), reason: err instanceof Error ? err.message : String(err) },

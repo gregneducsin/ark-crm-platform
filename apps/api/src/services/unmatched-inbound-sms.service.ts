@@ -500,16 +500,22 @@ async function seedPriorHistory(append: (direction: "inbound" | "outbound", body
  * iblusend-webhook.service.ts — duplicated rather than imported since that
  * one isn't exported and this is a small, self-contained check.
  */
-async function dispatchToExistingCustomer(customerId: string, body: string, priorMessages: readonly UnmatchedSmsMessage[]): Promise<void> {
+async function dispatchToExistingCustomer(customerId: string, body: string, priorMessages: readonly UnmatchedSmsMessage[], mediaUrls?: string[]): Promise<void> {
   const [supportConversation] = await db.select({ id: supportConversationsTable.id }).from(supportConversationsTable).where(eq(supportConversationsTable.personId, customerId));
   if (supportConversation) {
     await seedPriorHistory((direction, msgBody) => appendSupportMessage(supportConversation.id, direction, msgBody), priorMessages);
-    await processInboundSupportMessage(customerId, body);
+    // Only pass mediaUrls through when actually present — an explicit
+    // undefined positional arg still counts as a real arg to a caller-args
+    // test assertion, so this keeps the ordinary text-only call's arg
+    // count exactly as it always was.
+    if (mediaUrls) await processInboundSupportMessage(customerId, body, mediaUrls);
+    else await processInboundSupportMessage(customerId, body);
     return;
   }
   const conversation = await getOrCreateConversation(customerId, "meta_form");
   await seedPriorHistory((direction, msgBody) => appendMessage(conversation.id, direction, msgBody), priorMessages);
-  await processInboundMessage(customerId, body, "meta_form");
+  if (mediaUrls) await processInboundMessage(customerId, body, "meta_form", mediaUrls);
+  else await processInboundMessage(customerId, body, "meta_form");
 }
 
 export async function listUnmatchedSmsMessages(threadId: string): Promise<UnmatchedSmsMessage[]> {
@@ -576,7 +582,7 @@ async function sendAutoAcknowledgment(threadId: string, fromPhone: string): Prom
  * resurfaces it by resetting status back to needs_review, unless this new
  * message itself gets auto-replied to.
  */
-export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: string): Promise<UnmatchedSmsThread> {
+export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: string, mediaUrls?: string[]): Promise<UnmatchedSmsThread> {
   const normalizedPhone = normalizePhone(fromPhone);
   const thread = await getOrCreateThread(normalizedPhone);
 
@@ -586,7 +592,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
     void notifySlack(`New unmatched SMS — ${normalizedPhone}`);
   }
 
-  await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "inbound", body });
+  await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "inbound", body, mediaUrls: mediaUrls ?? null });
 
   const messages = await listUnmatchedSmsMessages(thread.id);
   const transcriptText = messages.map((m) => m.body).join(" ");
@@ -722,7 +728,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
     // one after it, via the phone-number update in
     // findAutoConnectCustomerId) into their real conversation.
     try {
-      await dispatchToExistingCustomer(autoConnectCustomerId, body, messages);
+      await dispatchToExistingCustomer(autoConnectCustomerId, body, messages, mediaUrls);
     } catch (err) {
       logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "auto-connect handoff failed");
     }
@@ -737,7 +743,10 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
     try {
       const conversation = await getOrCreateConversation(leadResult.customerId, "meta_form");
       await seedPriorHistory((direction, msgBody) => appendMessage(conversation.id, direction, msgBody), messages);
-      await processInboundMessage(leadResult.customerId, body, "meta_form");
+      // Same reasoning as dispatchToExistingCustomer above — only pass
+      // mediaUrls when actually present.
+      if (mediaUrls) await processInboundMessage(leadResult.customerId, body, "meta_form", mediaUrls);
+      else await processInboundMessage(leadResult.customerId, body, "meta_form");
     } catch (err) {
       logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "handoff to Alexis after lead creation failed");
     }

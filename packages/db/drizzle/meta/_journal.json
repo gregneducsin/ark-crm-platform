@@ -253,6 +253,13 @@
       "when": 1789485247222,
       "tag": "0035_thick_nextwave",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790002353494,
+      "tag": "0036_daffy_domino",
+      "breakpoints": true
     }
   ]
 }

@@ -57,14 +57,14 @@ async function sendAndLog(personId: string, conversationId: string, phone: strin
  * the comment there — so a patient double-texting can't race two turns
  * into clobbering each other's conversation-state write.
  */
-export async function processInboundSupportMessage(personId: string, inboundBody: string): Promise<SophieTurnResult> {
-  return withPersonLock(personId, () => processInboundSupportMessageLocked(personId, inboundBody));
+export async function processInboundSupportMessage(personId: string, inboundBody: string, mediaUrls?: string[]): Promise<SophieTurnResult> {
+  return withPersonLock(personId, () => processInboundSupportMessageLocked(personId, inboundBody, mediaUrls));
 }
 
-async function processInboundSupportMessageLocked(personId: string, inboundBody: string): Promise<SophieTurnResult> {
+async function processInboundSupportMessageLocked(personId: string, inboundBody: string, mediaUrls?: string[]): Promise<SophieTurnResult> {
   const conversation = await getOrCreateSupportConversation(personId);
   const priorMessages = await listSupportMessages(conversation.id);
-  const inboundMessage = await appendSupportMessage(conversation.id, "inbound", inboundBody);
+  const inboundMessage = await appendSupportMessage(conversation.id, "inbound", inboundBody, { mediaUrls });
 
   const body = toSophiePreviewBody(conversation, [...priorMessages, inboundMessage]);
   let result: SophieTurnResult;

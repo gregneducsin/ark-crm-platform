@@ -105,6 +105,16 @@ describe("appendMessage / listMessages", () => {
     const outbound = await appendMessage(conversation.id, "outbound", "Understood", { providerMessageId: "msg_abc" });
     expect(outbound.providerMessageId).toBe("msg_abc");
   });
+
+  it("stores mediaUrls when provided, and leaves it null when omitted", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const withMedia = await appendMessage(conversation.id, "inbound", "[Image attached]", { mediaUrls: ["https://cdn.iblusend.example/media/abc123.jpg"] });
+    expect(withMedia.mediaUrls).toEqual(["https://cdn.iblusend.example/media/abc123.jpg"]);
+
+    const withoutMedia = await appendMessage(conversation.id, "inbound", "just text");
+    expect(withoutMedia.mediaUrls).toBeNull();
+  });
 });
 
 describe("setMessageSentiment", () => {

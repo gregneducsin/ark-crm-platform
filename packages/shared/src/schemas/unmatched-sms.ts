@@ -29,6 +29,8 @@ export const unmatchedSmsMessageSchema = z.object({
   id: z.string(),
   direction: z.enum(["inbound", "outbound"]),
   body: z.string(),
+  /** Only present on an inbound message that included MMS attachments — iBluSend's own hosted image URLs, shown as-is. */
+  mediaUrls: z.array(z.string()).optional(),
   // Null until iBluSend's async message.failed webhook retroactively flags
   // it — see unmatched_sms_messages.deliveryStatus's comment in
   // schema/messaging.ts. Only meaningful on an outbound message.

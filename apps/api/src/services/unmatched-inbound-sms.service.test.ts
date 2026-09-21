@@ -219,6 +219,30 @@ describe("recordAndClassifyUnmatchedSms", () => {
     expect(thread.repliedAt).not.toBeNull();
   });
 
+  it("stores mediaUrls on the inbound row and passes them through to the lead handoff when the triggering text included a picture", async () => {
+    const phone = uniquePhone();
+    createMock.mockResolvedValueOnce(
+      toolResponse(
+        classification({
+          intent: "new_lead_interest",
+          summary: "Sent a photo of their current medication.",
+          suggestedReply: "A team member will follow up.",
+          senderName: "Casey Rivera",
+          senderEmail: "casey.rivera@example.com",
+        }),
+      ),
+    );
+    const mediaUrls = ["https://cdn.iblusend.example/media/xyz789.jpg"];
+    const message = "I'm Casey Rivera, casey.rivera@example.com, here's what I'm currently on";
+    const thread = await recordAndClassifyUnmatchedSms(phone, message, mediaUrls);
+
+    expect(thread.linkedCustomerId).not.toBeNull();
+    const detail = await getUnmatchedSmsThreadDetail(thread.id);
+    const lastMessage = detail!.messages[detail!.messages.length - 1];
+    expect(lastMessage.mediaUrls).toEqual(mediaUrls);
+    expect(processInboundMessageMock).toHaveBeenCalledWith(thread.linkedCustomerId, message, "meta_form", mediaUrls);
+  });
+
   it("still creates the lead once name and email are both already known, even when this turn's own intent classifies as 'other' — a real production case where a bare email address, then a plain 'thanks', both got classified as 'other' and the lead never got created", async () => {
     const phone = uniquePhone();
     sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_ack_janelle" });

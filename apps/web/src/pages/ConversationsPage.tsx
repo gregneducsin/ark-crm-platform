@@ -394,6 +394,15 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                   >
                     {m.body}
                   </span>
+                  {m.mediaUrls && m.mediaUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {m.mediaUrls.map((url) => (
+                        <a key={url} href={url} target="_blank" rel="noreferrer">
+                          <img src={url} alt="MMS attachment" className="max-h-48 max-w-[220px] rounded-lg border border-gray-200 object-cover" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 px-1">
                     {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName={BOT_NAME[m.persona]} />}
                     <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>

@@ -125,6 +125,7 @@ export async function appendSupportMessage(
     sentBy?: "ai" | "staff" | null;
     sentByStaffEmail?: string | null;
     deliveryStatus?: "sent" | "failed" | null;
+    mediaUrls?: string[] | null;
   } = {},
 ): Promise<SupportConversationMessage> {
   const [row] = await db
@@ -138,6 +139,7 @@ export async function appendSupportMessage(
       sentBy: opts.sentBy ?? (direction === "outbound" ? "ai" : null),
       sentByStaffEmail: opts.sentByStaffEmail ?? null,
       deliveryStatus: opts.deliveryStatus ?? null,
+      mediaUrls: opts.mediaUrls ?? null,
     })
     .returning();
   return row;

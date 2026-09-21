@@ -22,6 +22,8 @@ export const unifiedMessageSchema = z.object({
   /** Only present for email-channel messages — absent (not merely null) on every SMS message. */
   subject: z.string().optional(),
   body: z.string(),
+  /** Only present on an inbound SMS message that included one or more MMS attachments — iBluSend's own hosted image URLs, shown as-is. Never present on outbound (this app never sends MMS) or on email. */
+  mediaUrls: z.array(z.string()).optional(),
   sentiment: z.enum(["positive", "neutral", "negative"]).nullable(),
   sentBy: z.enum(["ai", "staff"]).nullable(),
   sentByStaffEmail: z.string().nullable(),

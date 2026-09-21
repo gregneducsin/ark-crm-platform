@@ -89,6 +89,16 @@ describe("setSupportMessageSentiment", () => {
     const messages = await listSupportMessages(conversation.id);
     expect(messages[0].sentiment).toBe("neutral");
   });
+
+  it("stores mediaUrls when provided, and leaves it null when omitted", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const withMedia = await appendSupportMessage(conversation.id, "inbound", "[Image attached]", { mediaUrls: ["https://cdn.iblusend.example/media/abc123.jpg"] });
+    expect(withMedia.mediaUrls).toEqual(["https://cdn.iblusend.example/media/abc123.jpg"]);
+
+    const withoutMedia = await appendSupportMessage(conversation.id, "inbound", "just text");
+    expect(withoutMedia.mediaUrls).toBeNull();
+  });
 });
 
 describe("updateSupportConversationState", () => {
