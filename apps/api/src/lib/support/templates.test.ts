@@ -10,9 +10,10 @@ import {
 } from "./templates.js";
 
 describe("renderOrderReceivedMessage", () => {
-  it("introduces Sophie and mentions the portal link", () => {
+  it("introduces Sophie, mentions the new number, and mentions the portal link", () => {
     const text = renderOrderReceivedMessage("Jamie");
     expect(text).toContain("this is Sophie");
+    expect(text).toContain("our new number");
     expect(text).toContain("https://patient.tryark.com/login");
   });
 
@@ -21,16 +22,16 @@ describe("renderOrderReceivedMessage", () => {
     expect(renderOrderReceivedMessage("  ")).toContain("there");
   });
 
-  it("asks the customer to confirm this is the best number to reach them, to prompt a reply — new orders only, not refills", () => {
+  it("asks the customer to confirm this is the best number to reach them, to prompt a reply", () => {
     expect(renderOrderReceivedMessage("Jamie")).toContain("confirm this is the best number to reach you");
-    expect(renderRefillOrderReceivedMessage("Jamie")).not.toContain("confirm this is the best number to reach you");
   });
 });
 
 describe("renderRefillOrderReceivedMessage", () => {
-  it("introduces Sophie, says refill (not the first-order welcome copy), and mentions the portal link", () => {
+  it("introduces Sophie, mentions the new number, says refill (not the first-order welcome copy), and mentions the portal link", () => {
     const text = renderRefillOrderReceivedMessage("Jamie");
     expect(text).toContain("this is Sophie");
+    expect(text).toContain("our new number");
     expect(text).toContain("refill");
     expect(text).not.toContain("the doctor is reviewing it");
     expect(text).toContain("https://patient.tryark.com/login");
@@ -39,6 +40,10 @@ describe("renderRefillOrderReceivedMessage", () => {
   it("interpolates the first name, falling back to 'there' when blank", () => {
     expect(renderRefillOrderReceivedMessage("Jamie")).toContain("Jamie");
     expect(renderRefillOrderReceivedMessage("  ")).toContain("there");
+  });
+
+  it("also asks the customer to confirm this is the best number to reach them, same as the first-order message — deliberately on every send while the new number is warming up", () => {
+    expect(renderRefillOrderReceivedMessage("Jamie")).toContain("confirm this is the best number to reach you");
   });
 });
 

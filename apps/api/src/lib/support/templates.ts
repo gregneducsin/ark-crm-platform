@@ -10,7 +10,7 @@
 export function renderOrderReceivedMessage(firstName: string): string {
   const name = firstName.trim() || "there";
   return (
-    `Hello ${name}, this is Sophie on the doctor support side. It looks like we received your order and the doctor is reviewing it now. ` +
+    `Hello ${name}, this is Sophie on the doctor support side, texting from our new number. It looks like we received your order and the doctor is reviewing it now. ` +
     "If they have any further questions they will reach out in the patient portal, https://patient.tryark.com/login\n\n" +
     "We will update you once the prescription is written and sent to the pharmacy.\n\n" +
     "Also, can you reply to confirm this is the best number to reach you at?"
@@ -20,9 +20,10 @@ export function renderOrderReceivedMessage(firstName: string): string {
 export function renderRefillOrderReceivedMessage(firstName: string): string {
   const name = firstName.trim() || "there";
   return (
-    `Hi ${name}, this is Sophie on the doctor support side. We've received your refill order and it's being processed now. ` +
+    `Hi ${name}, this is Sophie on the doctor support side, texting from our new number. We've received your refill order and it's being processed now. ` +
     "If you have any questions in the meantime, you can check your patient portal, https://patient.tryark.com/login\n\n" +
-    "We will update you once it ships."
+    "We will update you once it ships.\n\n" +
+    "Also, can you reply to confirm this is the best number to reach you at?"
   );
 }
 
