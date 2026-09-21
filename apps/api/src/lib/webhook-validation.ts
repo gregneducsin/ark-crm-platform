@@ -27,7 +27,14 @@ export async function respondToInvalidWebhookPayload(source: WebhookEvent["sourc
     source,
     externalEventId: `invalid-${randomUUID()}`,
     status: "failed",
-    rawPayload: req.body,
+    // raw_payload is NOT NULL — req.body is `undefined` (not even `{}`)
+    // whenever the request arrived with no body Express recognized as JSON
+    // at all (e.g. a missing/wrong Content-Type). Confirmed against a real
+    // Luma delivery: that undefined value made this insert itself throw,
+    // producing a 500 that masked the 400 this function was already about
+    // to send — the one thing a webhook endpoint should never do is crash
+    // on a malformed request instead of cleanly rejecting it.
+    rawPayload: req.body ?? {},
     errorMessage,
   });
   res.status(400).json({ error: "Invalid payload.", details: error.issues });

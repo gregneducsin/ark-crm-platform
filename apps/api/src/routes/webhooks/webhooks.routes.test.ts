@@ -249,6 +249,26 @@ describe("Webhooks", () => {
       expect(res.status).toBe(200);
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
+
+    it("cleanly 400s (never 500s) when Content-Type doesn't match and req.body comes back undefined — real production case (Luma): inserting that undefined value into the NOT NULL raw_payload column crashed instead of recording the validation failure", async () => {
+      // No matching Content-Type, so the app-level express.json() middleware
+      // never touches req.body at all, leaving it genuinely undefined —
+      // same as the real failure. Every Bask webhook route now has its own
+      // permissive, Content-Type-agnostic parser (see
+      // bask-questionnaire-abandoned.routes.ts for why), so this shared
+      // crash-safety fix in respondToInvalidWebhookPayload is exercised
+      // here instead, against the one webhook route that still depends on
+      // the strict global parser — the fix itself lives in the one shared
+      // helper every webhook route calls, so proving it here covers all of
+      // them.
+      const res = await request(app).post("/api/webhooks/ghl-lead").set("x-webhook-secret", GHL_SECRET).type("text/plain").send(JSON.stringify({ eventId: "wrong-content-type-evt" }));
+      expect(res.status).toBe(400);
+
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const failedRows = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.source, "ghl_lead"));
+      expect(failedRows.some((r) => r.status === "failed" && r.externalEventId.startsWith("invalid-") && r.rawPayload !== null)).toBe(true);
+    });
   });
 
   describe("Bask order", () => {
@@ -594,6 +614,71 @@ describe("Webhooks", () => {
       expect(await isCustomerEmailDnd(customer!.id)).toBe(false);
       expect(sendMessageMock).toHaveBeenCalledWith("+15551110098", expect.stringContaining("this is Sophie"));
     });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-order-evt-no-content-type",
+        externalPersonId: "bask-person-no-content-type",
+        email: "order-no-content-type@example.com",
+        orderId: "BASK-NO-CONTENT-TYPE",
+        productName: "Program",
+        amountPaid: 199,
+        purchasedAt: "2026-02-01T10:00:00.000Z",
+      });
+      const res = await request(app).post("/api/webhooks/bask-order").set("x-webhook-secret", ORDER_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "order-no-content-type@example.com"));
+      expect(customer).toBeTruthy();
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          type: "newOrder",
+          data: {
+            eventId: "bask-order-evt-envelope",
+            externalPersonId: "bask-person-envelope",
+            email: "order-envelope@example.com",
+            orderId: "BASK-ENVELOPE-1",
+            productName: "Program",
+            amountPaid: 199,
+            purchasedAt: "2026-02-01T10:00:00.000Z",
+          },
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "order-envelope@example.com"));
+      expect(customer).toBeTruthy();
+    });
+
+    it("accepts eventId/externalPersonId/orderId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          eventId: 20260921031748,
+          externalPersonId: 481933,
+          email: "order-numeric-ids@example.com",
+          orderId: 55512,
+          productName: "Program",
+          amountPaid: 199,
+          purchasedAt: "2026-02-01T10:00:00.000Z",
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "order-numeric-ids@example.com"));
+      const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
+      expect(purchases[0].orderNumber).toBe("55512");
+    });
   });
 
   describe("Bask prescription written", () => {
@@ -642,6 +727,48 @@ describe("Webhooks", () => {
       expect(first.body.duplicate).toBe(false);
       const second = await request(app).post("/api/webhooks/bask-prescription-written").set("x-webhook-secret", PRESCRIPTION_WRITTEN_SECRET).send(payload);
       expect(second.body.duplicate).toBe(true);
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-prescription-evt-no-content-type",
+        externalPersonId: "bask-patient-no-content-type",
+        email: "prescription-no-content-type@example.com",
+      });
+      const res = await request(app)
+        .post("/api/webhooks/bask-prescription-written")
+        .set("x-webhook-secret", PRESCRIPTION_WRITTEN_SECRET)
+        .type("text/plain")
+        .send(rawJsonBody);
+      expect(res.status).toBe(200);
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-prescription-written")
+        .set("x-webhook-secret", PRESCRIPTION_WRITTEN_SECRET)
+        .send({
+          type: "prescriptionWritten",
+          data: {
+            eventId: "bask-prescription-evt-envelope",
+            externalPersonId: "bask-patient-envelope",
+            email: "prescription-envelope@example.com",
+          },
+        });
+      expect(res.status).toBe(200);
+    });
+
+    it("accepts eventId/externalPersonId/prescriptionId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-prescription-written")
+        .set("x-webhook-secret", PRESCRIPTION_WRITTEN_SECRET)
+        .send({
+          eventId: 20260921040000,
+          externalPersonId: 481934,
+          email: "prescription-numeric-ids@example.com",
+          prescriptionId: 6827585384218625,
+        });
+      expect(res.status).toBe(200);
     });
   });
 
@@ -709,6 +836,35 @@ describe("Webhooks", () => {
       expect(first.body.duplicate).toBe(false);
       const second = await request(app).post("/api/webhooks/bask-order-shipped").set("x-webhook-secret", ORDER_SHIPPED_SECRET).send(payload);
       expect(second.body.duplicate).toBe(true);
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({ externalPersonId: "bask-patient-no-content-type-shipped", trackingNumber: "4445556666" });
+      const res = await request(app).post("/api/webhooks/bask-order-shipped").set("x-webhook-secret", ORDER_SHIPPED_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(500); // no matching customer — proves the body parsed and reached the handler, not a 400 or a silent 200
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-order-shipped")
+        .set("x-webhook-secret", ORDER_SHIPPED_SECRET)
+        .send({ type: "orderShipped", data: { externalPersonId: "bask-patient-envelope-shipped", trackingNumber: "7778889999" } });
+      expect(res.status).toBe(500); // no matching customer — proves the envelope unwrapped and reached the handler
+    });
+
+    it("accepts externalPersonId/orderId sent as bare JSON numbers, not just strings", async () => {
+      const { db, customersTable, externalIdentitiesTable } = await import("@luma/db");
+      const [customer] = await db
+        .insert(customersTable)
+        .values({ firstName: "Numeric", lastName: "Shipped", email: "shipped-numeric-ids@example.com", phone: "+14242650861", leadReceivedDate: "2026-01-01" })
+        .returning();
+      await db.insert(externalIdentitiesTable).values({ personId: customer!.id, system: "bask", externalId: "481935" });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-order-shipped")
+        .set("x-webhook-secret", ORDER_SHIPPED_SECRET)
+        .send({ externalPersonId: 481935, orderId: 55513, trackingNumber: "1231231234" });
+      expect(res.status).toBe(200);
     });
   });
 
@@ -886,6 +1042,55 @@ describe("Webhooks", () => {
         .from(questionnaireEventsTable)
         .where(eq(questionnaireEventsTable.personId, customer!.id));
       expect(event.lastEventAt!.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-q-evt-no-content-type",
+        externalPersonId: "bask-person-no-content-type-q",
+        email: "questionnaire-no-content-type@example.com",
+        questionnaireId: "QUEST-NO-CONTENT-TYPE",
+        status: "started",
+      });
+      const res = await request(app).post("/api/webhooks/bask-questionnaire").set("x-webhook-secret", QUESTIONNAIRE_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(200);
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          type: "questionnaireStarted",
+          data: {
+            eventId: "bask-q-evt-envelope",
+            externalPersonId: "bask-person-envelope-q",
+            email: "questionnaire-envelope@example.com",
+            questionnaireId: "QUEST-ENVELOPE",
+            status: "started",
+          },
+        });
+      expect(res.status).toBe(200);
+    });
+
+    it("accepts eventId/externalPersonId/questionnaireId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          eventId: 20260921050000,
+          externalPersonId: 481936,
+          email: "questionnaire-numeric-ids@example.com",
+          questionnaireId: 9914,
+          status: "started",
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "questionnaire-numeric-ids@example.com"));
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.questionnaireId).toBe("9914");
     });
   });
 
@@ -1129,6 +1334,137 @@ describe("Webhooks", () => {
     });
   });
 
+  describe("Bask questionnaire abandoned (direct, no status field)", () => {
+    it("records an abandoned questionnaire event and schedules the abandoned-cart opener, same as the regular webhook's status=abandoned", async () => {
+      const payload = {
+        eventId: "ark-abandoned-direct-evt-1",
+        externalPersonId: "bask-person-abandoned-direct-1",
+        email: "abandoned-direct@example.com",
+        firstName: "Abandoned",
+        lastName: "Direct",
+        phone: "+15559876543",
+        questionnaireId: "QUEST-ABANDONED-DIRECT-1",
+        occurredAt: new Date().toISOString(),
+      };
+      const res = await request(app).post("/api/webhooks/bask-questionnaire-abandoned").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send(payload);
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable, abandonedCartTriggersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "abandoned-direct@example.com"));
+      expect(customer.leadType).toBe("Bask abandoned cart");
+
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.status).toBe("abandoned");
+      expect(event.abandonedAt).not.toBeNull();
+
+      const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, customer!.id));
+      expect(trigger).toBeDefined();
+    });
+
+    it("unwraps Bask's own { type, data } envelope — its webhook dashboard sends the mapped fields nested under data, not flat", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          type: "abandonedSession",
+          data: {
+            eventId: "ark-abandoned-envelope-evt-1",
+            externalPersonId: "bask-person-abandoned-envelope-1",
+            email: "abandoned-envelope@example.com",
+            questionnaireId: "QUEST-ABANDONED-ENVELOPE-1",
+            phoneNumber: "+15559876544",
+            firstName: "Envelope",
+            lastName: "Test",
+            phone: "+15559876544",
+          },
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "abandoned-envelope@example.com"));
+      expect(customer.leadType).toBe("Bask abandoned cart");
+
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.status).toBe("abandoned");
+    });
+
+    it("accepts sessionId/patientId/questionnaireId sent as bare JSON numbers, not just strings — confirmed against a real Luma delivery from Bask", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          type: "abandonedSession",
+          data: {
+            eventId: 20260921031748,
+            externalPersonId: 481932,
+            email: "abandoned-numeric-ids@example.com",
+            questionnaireId: 9914,
+            firstName: "Numeric",
+            lastName: "Ids",
+          },
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "abandoned-numeric-ids@example.com"));
+      expect(customer.leadType).toBe("Bask abandoned cart");
+
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.status).toBe("abandoned");
+      expect(event.questionnaireId).toBe("9914");
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header — confirmed against real Luma deliveries where req.body came back undefined and every request failed validation before reaching the fields", async () => {
+      const rawJsonBody = JSON.stringify({
+        type: "abandonedSession",
+        data: {
+          eventId: "ark-abandoned-no-content-type-1",
+          externalPersonId: "bask-person-no-content-type-1",
+          email: "abandoned-no-content-type@example.com",
+          questionnaireId: "QUEST-NO-CONTENT-TYPE-1",
+        },
+      });
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .type("text/plain")
+        .send(rawJsonBody);
+      expect(res.status).toBe(200);
+
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "abandoned-no-content-type@example.com"));
+      expect(customer.leadType).toBe("Bask abandoned cart");
+    });
+
+    it("rejects a malformed payload with 400 and records it as a failed bask_questionnaire row", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({ eventId: "bad-abandoned-direct-evt" }); // missing required fields
+
+      expect(res.status).toBe(400);
+
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const failedRows = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.source, "bask_questionnaire"));
+      expect(failedRows.some((r) => r.status === "failed" && r.externalEventId.startsWith("invalid-"))).toBe(true);
+    });
+
+    it("requires the shared secret, same as the regular questionnaire webhook", async () => {
+      const res = await request(app).post("/api/webhooks/bask-questionnaire-abandoned").send({
+        eventId: "no-secret-abandoned-direct",
+        externalPersonId: "no-secret-abandoned-person",
+        email: "no-secret-abandoned@example.com",
+        questionnaireId: "QUEST-NO-SECRET-ABANDONED",
+      });
+      expect(res.status).toBe(401);
+    });
+  });
+
   describe("Bask payment-failed", () => {
     it("records the event, linking to a matched customer when found", async () => {
       const { db, customersTable, externalIdentitiesTable, failedPaymentEventsTable } = await import("@luma/db");
@@ -1347,6 +1683,54 @@ describe("Webhooks", () => {
       expect(purchases).toHaveLength(0);
       expect(sendMessageMock).not.toHaveBeenCalled();
     });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-fp-evt-no-content-type",
+        transactionId: "txn-no-content-type",
+        externalPersonId: "bask-person-no-content-type-fp",
+        amount: "49.99",
+        failureDate: new Date().toISOString(),
+      });
+      const res = await request(app).post("/api/webhooks/bask-payment-failed").set("x-webhook-secret", PAYMENT_FAILED_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(200);
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-failed")
+        .set("x-webhook-secret", PAYMENT_FAILED_SECRET)
+        .send({
+          type: "paymentFailed",
+          data: {
+            eventId: "bask-fp-evt-envelope",
+            transactionId: "txn-envelope-fp",
+            externalPersonId: "bask-person-envelope-fp",
+            amount: "49.99",
+            failureDate: new Date().toISOString(),
+          },
+        });
+      expect(res.status).toBe(200);
+    });
+
+    it("accepts eventId/transactionId/externalPersonId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-failed")
+        .set("x-webhook-secret", PAYMENT_FAILED_SECRET)
+        .send({
+          eventId: 20260921060000,
+          transactionId: 998877,
+          externalPersonId: 481937,
+          amount: "49.99",
+          failureDate: new Date().toISOString(),
+        });
+      expect(res.status).toBe(200);
+
+      const { db, failedPaymentEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db.select().from(failedPaymentEventsTable).where(eq(failedPaymentEventsTable.transactionId, "998877"));
+      expect(row).toBeTruthy();
+    });
   });
 
   describe("Bask payment-succeeded", () => {
@@ -1496,6 +1880,36 @@ describe("Webhooks", () => {
 
       const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer!.id));
       expect(purchases).toHaveLength(0);
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-ps-evt-no-content-type",
+        transactionId: "txn-no-content-type-ps",
+        externalPersonId: "bask-person-no-content-type-ps",
+        amount: "199.00",
+      });
+      const res = await request(app).post("/api/webhooks/bask-payment-succeeded").set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(200);
+    });
+
+    it("unwraps Bask's own { type, data } envelope when configured to POST directly instead of through Zapier", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({
+          type: "paymentSucceeded",
+          data: { eventId: "bask-ps-evt-envelope", transactionId: "txn-envelope-ps", externalPersonId: "bask-person-envelope-ps", amount: "199.00" },
+        });
+      expect(res.status).toBe(200);
+    });
+
+    it("accepts eventId/transactionId/externalPersonId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-succeeded")
+        .set("x-webhook-secret", PAYMENT_SUCCEEDED_SECRET)
+        .send({ eventId: 20260921070000, transactionId: 998878, externalPersonId: 481938, amount: "199.00" });
+      expect(res.status).toBe(200);
     });
   });
 
@@ -1699,6 +2113,66 @@ describe("Webhooks", () => {
       const second = await request(app).post("/api/webhooks/bask-payment-refunded").set("x-webhook-secret", REFUND_SECRET).send(payload);
       expect(second.status).toBe(200);
       expect(second.body.duplicate).toBe(true);
+    });
+
+    it("still parses the body as JSON when Bask sends it with no (or the wrong) Content-Type header", async () => {
+      const rawJsonBody = JSON.stringify({
+        eventId: "bask-refund-evt-no-content-type",
+        transactionId: "txn-no-content-type-refund",
+        externalPersonId: "bask-person-no-content-type-refund",
+        amount: "49.99",
+      });
+      const res = await request(app).post("/api/webhooks/bask-payment-refunded").set("x-webhook-secret", REFUND_SECRET).type("text/plain").send(rawJsonBody);
+      expect(res.status).toBe(200);
+    });
+
+    it("unwraps Bask's own { type, data } envelope AND remaps Bask's raw field names (patientId/date/paymentMethod) to this app's internal shape — Bask's own webhook builder has no way to rename fields for us the way the old Zap did", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({
+          type: "paymentRefunded",
+          data: {
+            patientId: "bask-person-refund-remap",
+            transactionId: "txn-refund-remap",
+            amount: "49.99",
+            status: "refunded",
+            transactionResponse: "Approved",
+            date: "2026-02-01T10:00:00.000Z",
+            paymentMethod: "card",
+            testMode: false,
+            sessionId: "sess-refund-remap",
+            treatmentId: "treat-refund-remap",
+          },
+        });
+      expect(res.status).toBe(200);
+
+      // No eventId in Bask's raw payload — handleBaskPaymentRefundedWebhook
+      // synthesizes one from externalPersonId+transactionId, same pattern
+      // as the order-shipped webhook. Recorded under that synthesized id
+      // proves both the envelope unwrap and the field remap worked —
+      // externalPersonId only exists post-remap (from data.patientId).
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [event] = await db
+        .select()
+        .from(webhookEventsTable)
+        .where(eq(webhookEventsTable.externalEventId, "bask-person-refund-remap:txn-refund-remap"));
+      expect(event).toBeTruthy();
+      expect(event.status).toBe("processed");
+    });
+
+    it("accepts transactionId/externalPersonId sent as bare JSON numbers, not just strings", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-payment-refunded")
+        .set("x-webhook-secret", REFUND_SECRET)
+        .send({ transactionId: 998879, externalPersonId: 481939, amount: "49.99" });
+      expect(res.status).toBe(200);
+
+      const { db, webhookEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [event] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, "481939:998879"));
+      expect(event).toBeTruthy();
     });
   });
 

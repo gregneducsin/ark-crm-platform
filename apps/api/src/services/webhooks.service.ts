@@ -15,6 +15,7 @@ import type {
   BaskOrderWebhookRequest,
   BaskQuestionnaireWebhookRequest,
   BaskQuestionnaireNewPatientWebhookRequest,
+  BaskQuestionnaireAbandonedWebhookRequest,
   BaskPaymentFailedWebhookRequest,
   BaskPaymentSucceededWebhookRequest,
   BaskPaymentRefundedWebhookRequest,
@@ -560,6 +561,22 @@ export async function handleBaskQuestionnaireNewPatientWebhook(payload: BaskQues
   return handleBaskQuestionnaireWebhook({ ...payload, status: "started" });
 }
 
+/**
+ * Fires when a patient abandons a questionnaire, configured directly from
+ * Bask (no Zapier relay in front of it). Bask's own webhook dashboard has
+ * no way to send a literal "abandoned" string for the regular
+ * bask_questionnaire webhook's required `status` field — this event type
+ * means "abandoned" by definition, so there's nothing to ask Bask to tell
+ * us. Delegates to handleBaskQuestionnaireWebhook with status hardcoded,
+ * same pattern as handleBaskQuestionnaireNewPatientWebhook above — same
+ * webhook_events source ("bask_questionnaire", not a distinct one), same
+ * questionnaire-event upsert and abandoned-cart opener/email scheduling as
+ * the regular webhook's status=abandoned path.
+ */
+export async function handleBaskQuestionnaireAbandonedWebhook(payload: BaskQuestionnaireAbandonedWebhookRequest): Promise<{ duplicate: boolean }> {
+  return handleBaskQuestionnaireWebhook({ ...payload, status: "abandoned" });
+}
+
 // Bask's failed-payment webhook sends `amount` as a bare integer of CENTS
 // (confirmed against a real delivery: a $510.00 charge arrived as "51000"),
 // unlike every other amount field in this app, which is dollars-and-cents.
@@ -694,7 +711,12 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
  * some other state a refund shouldn't silently overwrite.
  */
 export async function handleBaskPaymentRefundedWebhook(payload: BaskPaymentRefundedWebhookRequest): Promise<{ duplicate: boolean }> {
-  const recorded = await recordWebhookEventIfNew("bask_payment_refunded", payload.eventId, payload);
+  // Bask's real refund event doesn't include an eventId (see the schema's
+  // docstring) — synthesize a stable one from externalPersonId +
+  // transactionId, same pattern as handleBaskOrderShippedWebhook, so
+  // redelivery of the same refund still dedupes.
+  const eventId = payload.eventId ?? `${payload.externalPersonId}:${payload.transactionId}`;
+  const recorded = await recordWebhookEventIfNew("bask_payment_refunded", eventId, payload);
   if (!recorded) return { duplicate: true };
 
   try {
