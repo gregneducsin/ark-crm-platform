@@ -3,6 +3,7 @@ import { db, customersTable } from "@luma/db";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { scheduleLeadCheckin } from "./lead-checkin.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderMetaLeadOpener } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
@@ -14,8 +15,19 @@ import { isCustomerSmsDnd } from "./dnd.service.js";
  * are caught and logged, never thrown, so a missing SMS provider or send
  * error never turns into a webhook 500 (the webhook's own idempotency on
  * eventId is what prevents a duplicate delivery from double-sending).
+ *
+ * While sales SMS is paused, this opener is skipped entirely (not retried
+ * later — there's no trigger row backing this fire-instantly path, unlike
+ * abandoned-cart/lead-checkin/objection-reengagement/follow-up-jobs), same
+ * as a DND skip below. A lead that comes in during the pause simply doesn't
+ * get an automated opener; new leads after sales resumes are unaffected.
  */
 export async function sendMetaLeadOpener(personId: string): Promise<void> {
+  if (isSalesSmsPaused()) {
+    logger.warn({ personId }, "meta-lead opener not sent: sales SMS is paused");
+    return;
+  }
+
   const [customer] = await db.select({ firstName: customersTable.firstName, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
   if (!customer?.phone) {
     logger.warn({ personId }, "meta-lead opener not sent: no phone number on file");

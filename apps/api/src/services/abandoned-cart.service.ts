@@ -4,6 +4,7 @@ import { getOrCreateConversation, appendMessage, updateConversationState } from 
 import { scheduleLeadCheckin } from "./lead-checkin.service.js";
 import { hasClickedMostRecentIntakeLink } from "./intake-links.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderAbandonedCartOpener, renderAbandonedCartFollowUp } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
@@ -57,8 +58,15 @@ export async function scheduleAbandonedCartOpener(personId: string, questionnair
  * each due row from `pending` to `processing` in a single UPDATE before any
  * SMS work happens, so two sweeps racing on the same due trigger can't both
  * send it.
+ *
+ * While sales SMS is paused, this returns immediately without claiming
+ * anything — every due trigger stays `pending` (a dueAt already in the past
+ * is fine) so the next sweep after sales resumes picks it up normally,
+ * instead of it being marked failed/cancelled and lost.
  */
 export async function sweepAbandonedCartTriggers(): Promise<AbandonedCartSweepResult> {
+  if (isSalesSmsPaused()) return { sentCount: 0, cancelledCount: 0, failedCount: 0 };
+
   const claimed = await db
     .update(abandonedCartTriggersTable)
     .set({ status: "processing" })

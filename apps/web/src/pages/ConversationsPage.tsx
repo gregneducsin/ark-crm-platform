@@ -240,6 +240,7 @@ function StaffReplyBox({ personId, targets, defaultTarget }: { personId: string;
         <p className="mt-1 text-xs text-red-600">
           {sendReply.data.reason === "no_phone" && "No phone number on file — nothing was sent."}
           {sendReply.data.reason === "send_failed" && "Send failed — the message was logged, but nothing actually went out."}
+          {sendReply.data.reason === "sales_paused" && "Sales SMS is paused right now — nothing was sent."}
         </p>
       )}
       {sendReply.isError && (

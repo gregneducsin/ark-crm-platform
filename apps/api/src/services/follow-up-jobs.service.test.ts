@@ -334,4 +334,24 @@ describe("sweepFollowUpJobs", () => {
     await sweepFollowUpJobs();
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("while sales SMS is paused, claims nothing and leaves due jobs pending for the next sweep after resume", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      const { jobId } = await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
+
+      const result = await sweepFollowUpJobs();
+      expect(result).toEqual({ sentCount: 0, cancelledCount: 0, failedCount: 0 });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
+      expect(job.status).toBe("pending");
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

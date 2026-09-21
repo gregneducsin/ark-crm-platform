@@ -352,4 +352,24 @@ describe("sendStaffReply", () => {
     const updated = await getConversationDetail(conversation.id);
     expect(updated?.conversation.needsAttention).toBe(true);
   });
+
+  it("returns sales_paused and sends nothing while sales SMS is paused, without logging anything", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer({ phone: "+15558880012" });
+      const conversation = await getOrCreateConversation(personId);
+
+      const result = await sendStaffReply(conversation.id, "hi", "staff@example.com");
+
+      expect(result).toEqual({ sent: false, reason: "sales_paused" });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      const messages = await listMessages(conversation.id);
+      expect(messages).toHaveLength(0);
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

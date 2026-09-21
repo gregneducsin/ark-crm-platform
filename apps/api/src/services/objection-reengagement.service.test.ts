@@ -212,4 +212,25 @@ describe("sweepObjectionReengagementTriggers", () => {
     expect(r1.sentCount + r2.sentCount).toBe(1);
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("while sales SMS is paused, claims nothing and leaves due triggers pending for the next sweep after resume", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      await scheduleObjectionReengagement(personId);
+      await backdateTrigger(personId);
+
+      const result = await sweepObjectionReengagementTriggers();
+      expect(result).toEqual({ sentCount: 0, cancelledCount: 0, failedCount: 0 });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+      expect(trigger.status).toBe("pending");
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

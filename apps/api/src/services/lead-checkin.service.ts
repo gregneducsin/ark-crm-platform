@@ -2,6 +2,7 @@ import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { db, customersTable, purchasesTable, leadCheckinTriggersTable } from "@luma/db";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderCurrentlyTakingCheckin, renderReengagementCheckin } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
@@ -47,8 +48,15 @@ export interface LeadCheckinSweepResult {
  * identical comment on sweepFollowUpJobs: the claim step atomically flips
  * each due row to `processing` in a single UPDATE before any SMS work
  * happens, so two sweeps racing on the same due trigger can't both send it.
+ *
+ * While sales SMS is paused, this returns immediately without claiming
+ * anything — every due (or retry-eligible) trigger stays untouched so the
+ * next sweep after sales resumes picks it up normally, instead of it burning
+ * through its retry budget and being marked failed for good.
  */
 export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult> {
+  if (isSalesSmsPaused()) return { sentCount: 0, cancelledCount: 0, failedCount: 0 };
+
   const retryEligibleBefore = new Date(Date.now() - RETRY_COOLDOWN_MS);
   const claimed = await db
     .update(leadCheckinTriggersTable)

@@ -3,6 +3,7 @@ import { db, conversationsTable, conversationMessagesTable, customersTable, purc
 import type { BotPreviewRequestBody } from "../lib/messaging/types.js";
 import type { ObjectionKey } from "../lib/messaging/objection-handling.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { logger } from "../lib/logger.js";
 import { notifySlack } from "../lib/slack.js";
 
@@ -86,7 +87,7 @@ export async function clearNeedsAttention(conversationId: string): Promise<void>
   await db.update(conversationsTable).set({ needsAttention: false, needsAttentionReason: null }).where(eq(conversationsTable.id, conversationId));
 }
 
-export type StaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" };
+export type StaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" | "sales_paused" };
 
 /**
  * A human-authored reply, sent through the same SMS provider Alexis uses and
@@ -100,10 +101,16 @@ export type StaffReplyResult = { readonly sent: true } | { readonly sent: false;
  * same philosophy as sendAndLog in alexis-dispatch.service.ts — a transport
  * failure doesn't erase the fact that this is what staff actually tried to
  * say; the caller still gets sent: false so the UI can show the failure.
+ *
+ * While sales SMS is paused, staff can't send through this path either —
+ * same "everything Alexis sends, including replies" pause sendAndLog
+ * enforces for automated turns. Nothing is logged, same as the no_phone case
+ * below, since this is a deliberate refusal to send, not a transport failure.
  */
 export async function sendStaffReply(conversationId: string, body: string, staffEmail: string): Promise<StaffReplyResult> {
   const detail = await getConversationDetail(conversationId);
   if (!detail) return { sent: false, reason: "not_found" };
+  if (isSalesSmsPaused()) return { sent: false, reason: "sales_paused" };
   if (!detail.customer.phone) return { sent: false, reason: "no_phone" };
 
   let providerMessageId: string | null = null;

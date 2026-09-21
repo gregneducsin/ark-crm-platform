@@ -326,7 +326,7 @@ export async function clearAllNeedsAttention(personId: string): Promise<void> {
   ]);
 }
 
-export type UnifiedStaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" };
+export type UnifiedStaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" | "sales_paused" };
 
 /** Routes a staff-authored reply to whichever of the four existing send pipelines matches (persona, channel) — never reimplements the send logic itself. */
 export async function sendUnifiedStaffReply(

@@ -14,6 +14,7 @@ import { getSmsProvider } from "../lib/sms-provider.js";
 import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { scheduleObjectionReengagement } from "./objection-reengagement.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
 
@@ -33,8 +34,18 @@ async function getCustomerContact(personId: string): Promise<{ firstName: string
  * own OPT_OUT confirmation reply still goes out: processInboundMessageLocked
  * sends this turn's texts before it flips the DND flag, so this check only
  * ever blocks a *later* turn's sends, never the opt-out confirmation itself.
+ *
+ * The sales-SMS pause is checked here too — this is the one chokepoint every
+ * Alexis send passes through, so gating it here covers every automated turn
+ * and every reply, with no exception for the opt-out confirmation (unlike
+ * DND above): while paused, nothing Alexis would say goes out at all.
  */
 async function sendAndLog(personId: string, conversationId: string, phone: string | null, text: string): Promise<void> {
+  if (isSalesSmsPaused()) {
+    logger.warn({ personId, conversationId }, "outbound Alexis message not sent: sales SMS is paused");
+    return;
+  }
+
   if (await isCustomerSmsDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Alexis message not sent: customer is do-not-disturb");
     return;

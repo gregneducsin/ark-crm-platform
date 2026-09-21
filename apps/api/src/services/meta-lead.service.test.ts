@@ -99,4 +99,24 @@ describe("sendMetaLeadOpener", () => {
     expect(messages.length).toBe(1);
     expect(messages[0].providerMessageId).toBeNull();
   });
+
+  it("does not call the provider, log anything, or arm the check-in when sales SMS is paused", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      await sendMetaLeadOpener(personId);
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      const conversation = await getOrCreateConversation(personId);
+      const messages = await listMessages(conversation.id);
+      expect(messages.length).toBe(0);
+      const [trigger] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
+      expect(trigger).toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

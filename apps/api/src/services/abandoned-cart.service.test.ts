@@ -301,4 +301,26 @@ describe("sweepAbandonedCartTriggers", () => {
     // Sanity: sweeping doesn't touch other pending, not-yet-due rows from other tests.
     expect(result).toBeDefined();
   });
+
+  it("while sales SMS is paused, claims nothing and leaves due triggers pending for the next sweep after resume", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
+      await scheduleAbandonedCartOpener(personId, questionnaireEventId);
+      await backdateTrigger(personId);
+
+      const result = await sweepAbandonedCartTriggers();
+      expect(result).toEqual({ sentCount: 0, cancelledCount: 0, failedCount: 0 });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
+      expect(trigger.status).toBe("pending");
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

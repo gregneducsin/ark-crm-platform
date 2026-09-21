@@ -14,6 +14,11 @@ export default defineConfig({
       PORT: "3001",
       CORS_ALLOWED_ORIGINS: "http://localhost:5173",
       LOG_LEVEL: "silent",
+      // Sales SMS is paused by default in production (see lib/sales-sms.ts)
+      // while the new number warms up — enabled here so every existing test
+      // exercising a sales send path keeps testing real send behavior. The
+      // pause itself is tested explicitly by toggling this env var per-test.
+      SALES_SMS_ENABLED: "true",
     },
   },
 });

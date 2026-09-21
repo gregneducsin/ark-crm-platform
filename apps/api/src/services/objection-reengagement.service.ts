@@ -2,6 +2,7 @@ import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { db, customersTable, purchasesTable, objectionReengagementTriggersTable } from "@luma/db";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderReengagementCheckin } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
@@ -52,8 +53,13 @@ export interface ObjectionReengagementSweepResult {
  * has since opted out — same reasoning and mechanism as
  * sweepLeadCheckinTriggers, including the atomic pending→processing claim
  * that makes this safe to call from overlapping sweep runs.
+ *
+ * While sales SMS is paused, this returns immediately without claiming
+ * anything — same reasoning as sweepLeadCheckinTriggers's pause guard.
  */
 export async function sweepObjectionReengagementTriggers(): Promise<ObjectionReengagementSweepResult> {
+  if (isSalesSmsPaused()) return { sentCount: 0, cancelledCount: 0, failedCount: 0 };
+
   const retryEligibleBefore = new Date(Date.now() - RETRY_COOLDOWN_MS);
   const claimed = await db
     .update(objectionReengagementTriggersTable)

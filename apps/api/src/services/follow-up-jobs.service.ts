@@ -1,6 +1,7 @@
 import { and, eq, lte, sql } from "drizzle-orm";
 import { db, followUpJobsTable, intakeLinkTokensTable, questionnaireEventsTable, purchasesTable, customersTable } from "@luma/db";
 import { getSmsProvider } from "../lib/sms-provider.js";
+import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderFollowUpMessage } from "../lib/messaging/follow-up-templates.js";
 import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
@@ -36,8 +37,15 @@ export interface FollowUpSweepResult {
  * sweep's UPDATE simply matches zero rows for a job the first already
  * claimed. Jobs are moved to a terminal state for this attempt afterward, so
  * a job is never double-sent.
+ *
+ * While sales SMS is paused, this returns immediately without claiming
+ * anything — every due job stays `pending` so the next sweep after sales
+ * resumes picks it up normally, instead of it being marked failed and lost
+ * (failed follow-up jobs are not retried automatically, per above).
  */
 export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
+  if (isSalesSmsPaused()) return { sentCount: 0, cancelledCount: 0, failedCount: 0 };
+
   const claimed = await db
     .update(followUpJobsTable)
     .set({ status: "processing" })

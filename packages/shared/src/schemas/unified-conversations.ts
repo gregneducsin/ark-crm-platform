@@ -111,6 +111,6 @@ export type SendUnifiedConversationReplyRequest = z.infer<typeof sendUnifiedConv
 
 export const sendUnifiedConversationReplyResponseSchema = z.object({
   sent: z.boolean(),
-  reason: z.enum(["not_found", "no_phone", "send_failed"]).optional(),
+  reason: z.enum(["not_found", "no_phone", "send_failed", "sales_paused"]).optional(),
 });
 export type SendUnifiedConversationReplyResponse = z.infer<typeof sendUnifiedConversationReplyResponseSchema>;

@@ -274,4 +274,25 @@ describe("sweepLeadCheckinTriggers", () => {
     const [trigger] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
   });
+
+  it("while sales SMS is paused, claims nothing and leaves due triggers pending for the next sweep after resume", async () => {
+    sendMessageMock.mockClear();
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      await scheduleLeadCheckin(personId);
+      await backdateTrigger(personId);
+
+      const result = await sweepLeadCheckinTriggers();
+      expect(result).toEqual({ sentCount: 0, cancelledCount: 0, failedCount: 0 });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      const [trigger] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
+      expect(trigger.status).toBe("pending");
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });

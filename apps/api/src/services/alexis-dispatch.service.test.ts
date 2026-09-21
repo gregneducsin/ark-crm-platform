@@ -411,4 +411,26 @@ describe("processInboundMessage", () => {
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("does not send anything, including replies, while sales SMS is paused", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+
+    const originalEnv = process.env.SALES_SMS_ENABLED;
+    process.env.SALES_SMS_ENABLED = "false";
+    try {
+      const personId = await seedCustomer();
+      await processInboundMessage(personId, "how much is semaglutide?");
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      const conversation = await getOrCreateConversation(personId);
+      const messages = await listMessages(conversation.id);
+      // The inbound message is still recorded — only the outbound reply is suppressed.
+      expect(messages.map((m) => m.direction)).toEqual(["inbound"]);
+    } finally {
+      if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = originalEnv;
+    }
+  });
 });
