@@ -7,6 +7,7 @@ import { getOrCreateConversation, appendMessage } from "./conversations.service.
 import { isCustomerSmsDnd } from "./dnd.service.js";
 import { clampToSendWindow } from "../lib/send-window.js";
 import { logger } from "../lib/logger.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 const SECOND_STEP_DELAY_MS = 60 * 60 * 1000;
 
@@ -85,7 +86,12 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
       continue;
     }
 
-    const sendResult = await attemptSend(job.personId, job.messageStep);
+    // Locked against the same per-person key processInboundMessage uses
+    // (alexis-dispatch.service.ts) — the send itself and the conversation log
+    // it produces need to happen atomically with respect to a live inbound
+    // turn, or this proactive follow-up can send and log at the same moment
+    // a live reply is doing the same, each blind to the other.
+    const sendResult = await withPersonLock(job.personId, () => attemptSendAndLog(job.personId, job.messageStep, token?.leadSource ?? "abandoned_cart"));
 
     if (!sendResult.ok) {
       await db.update(followUpJobsTable).set({ status: "failed", failureReason: sendResult.reason }).where(eq(followUpJobsTable.id, job.jobId));
@@ -98,26 +104,6 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
       .set({ status: "sent", sentAt: sql`now()`, providerMessageId: sendResult.providerMessageId })
       .where(eq(followUpJobsTable.id, job.jobId));
     sentCount++;
-
-    // Same logging convention every other proactive SMS send already
-    // follows (the abandoned-cart opener, the 6-day check-in) — without
-    // this, a follow-up nudge is a real text the customer receives that
-    // never shows up in their conversation history, leaving the dashboard's
-    // last-message stuck on whatever Alexis sent before the follow-up chain
-    // took over.
-    //
-    // This can be the very first SMS conversation row for this person (a
-    // follow-up nudge doesn't require any prior inbound text), so the
-    // leadSource passed here matters and can't just fall back to
-    // getOrCreateConversation's default: that default is "abandoned_cart",
-    // which is wrong for a Meta lead whose click came from the emailed
-    // version of their nudge — see leadSource on intakeLinkTokensTable.
-    try {
-      const conversation = await getOrCreateConversation(job.personId, token?.leadSource ?? "abandoned_cart");
-      await appendMessage(conversation.id, "outbound", sendResult.body, { providerMessageId: sendResult.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId: job.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log follow-up SMS into the conversation");
-    }
 
     if (job.messageStep === "provider_check_in") {
       await db.insert(followUpJobsTable).values({
@@ -140,7 +126,27 @@ export async function sweepFollowUpJobs(): Promise<FollowUpSweepResult> {
 
 type SendResult = { ok: true; providerMessageId: string | null; body: string } | { ok: false; reason: string };
 
-async function attemptSend(personId: string, messageStep: "provider_check_in" | "intake_questions_check_in"): Promise<SendResult> {
+/**
+ * Sends the follow-up text and logs it into the person's conversation, both
+ * under the caller's withPersonLock — same logging convention every other
+ * proactive SMS send already follows (the abandoned-cart opener, the 6-day
+ * check-in) — without this, a follow-up nudge is a real text the customer
+ * receives that never shows up in their conversation history, leaving the
+ * dashboard's last-message stuck on whatever Alexis sent before the
+ * follow-up chain took over.
+ *
+ * leadSource matters here and can't just fall back to
+ * getOrCreateConversation's default: that default is "abandoned_cart", which
+ * is wrong for a Meta lead whose click came from the emailed version of
+ * their nudge — see leadSource on intakeLinkTokensTable. This can be the
+ * very first SMS conversation row for this person (a follow-up nudge
+ * doesn't require any prior inbound text).
+ */
+async function attemptSendAndLog(
+  personId: string,
+  messageStep: "provider_check_in" | "intake_questions_check_in",
+  leadSource: "abandoned_cart" | "meta_form",
+): Promise<SendResult> {
   const [customer] = await db
     .select({ firstName: customersTable.firstName, phone: customersTable.phone })
     .from(customersTable)
@@ -152,15 +158,23 @@ async function attemptSend(personId: string, messageStep: "provider_check_in" | 
 
   const body = renderFollowUpMessage(messageStep, customer.firstName);
 
+  let result: { providerMessageId: string | null };
   try {
-    const provider = getSmsProvider();
-    const result = await provider.sendMessage(customer.phone, body);
-    return { ok: true, providerMessageId: result.providerMessageId, body };
+    result = await getSmsProvider().sendMessage(customer.phone, body);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     logger.warn({ personId, messageStep, reason }, "follow-up SMS send failed");
     return { ok: false, reason };
   }
+
+  try {
+    const conversation = await getOrCreateConversation(personId, leadSource);
+    await appendMessage(conversation.id, "outbound", body, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
+  } catch (err) {
+    logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log follow-up SMS into the conversation");
+  }
+
+  return { ok: true, providerMessageId: result.providerMessageId, body };
 }
 
 async function hasCompletedSinceClick(personId: string, clickedAt: Date | null): Promise<boolean> {

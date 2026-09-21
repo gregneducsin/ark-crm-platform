@@ -8,6 +8,7 @@ import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderAbandonedCartOpener, renderAbandonedCartFollowUp } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 const OPENER_DELAY_MS = 10 * 60 * 1000;
 
@@ -111,7 +112,14 @@ export async function sweepAbandonedCartTriggers(): Promise<AbandonedCartSweepRe
       continue;
     }
 
-    const sendResult = await sendOpener(trigger.personId);
+    // Locked against the same per-person key processInboundMessage uses
+    // (alexis-dispatch.service.ts) — without this, a live inbound reply
+    // landing at the same moment as this proactive opener races it: both
+    // read the same stale conversation state, both decide independently
+    // what to send, and both write outbound messages the other never saw.
+    // That's what produced a real customer getting two different signup
+    // links back to back with a question sent out of order between them.
+    const sendResult = await withPersonLock(trigger.personId, () => sendOpener(trigger.personId));
 
     if (!sendResult.ok) {
       await db.update(abandonedCartTriggersTable).set({ status: "failed", failureReason: sendResult.reason }).where(eq(abandonedCartTriggersTable.id, trigger.id));

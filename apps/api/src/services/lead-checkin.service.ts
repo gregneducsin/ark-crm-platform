@@ -6,6 +6,7 @@ import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderCurrentlyTakingCheckin, renderReengagementCheckin } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 const CHECKIN_DELAY_MS = 6 * 24 * 60 * 60 * 1000;
 
@@ -37,6 +38,13 @@ export interface LeadCheckinSweepResult {
   readonly cancelledCount: number;
   readonly failedCount: number;
 }
+
+type LeadCheckinVariant = "currently_taking" | "reengagement";
+
+type LeadCheckinSendResult =
+  | { kind: "no_phone" }
+  | { kind: "failed"; reason: string; variant: LeadCheckinVariant }
+  | { kind: "sent"; providerMessageId: string | null; variant: LeadCheckinVariant };
 
 /**
  * Sends every due check-in, plus any failed one that hasn't exhausted its
@@ -91,17 +99,59 @@ export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult
       continue;
     }
 
-    const [customer] = await db
-      .select({ firstName: customersTable.firstName, phone: customersTable.phone })
-      .from(customersTable)
-      .where(eq(customersTable.id, trigger.personId));
-    const conversation = await getOrCreateConversation(trigger.personId);
     const nextAttemptCount = trigger.attemptCount + 1;
 
     // No email leg here — no real template exists yet for the lead-checkin
     // emails (see templates.ts), so this stays SMS-only until one arrives.
 
-    if (!customer?.phone) {
+    // Locked against the same per-person key processInboundMessage uses
+    // (alexis-dispatch.service.ts) — the conversation read (for
+    // currentlyTaking) and the eventual send+log must happen atomically with
+    // respect to a live inbound turn, or this proactive check-in can act on
+    // stale state while the live turn is mid-write, and both end up
+    // sending. Reads the customer/conversation inside the lock too, not just
+    // the send, since a stale read is exactly what causes the race.
+    const sendResult = await withPersonLock(trigger.personId, async (): Promise<LeadCheckinSendResult> => {
+      const [customer] = await db
+        .select({ firstName: customersTable.firstName, phone: customersTable.phone })
+        .from(customersTable)
+        .where(eq(customersTable.id, trigger.personId));
+      const conversation = await getOrCreateConversation(trigger.personId);
+
+      if (!customer?.phone) {
+        return { kind: "no_phone" };
+      }
+
+      // Recheck the slot now, not at arm time — the lead may have answered
+      // this question in conversation at any point over the last 6 days.
+      const variant = conversation.currentlyTaking === null ? "currently_taking" : "reengagement";
+      const text = variant === "currently_taking" ? renderCurrentlyTakingCheckin(customer.firstName) : renderReengagementCheckin(customer.firstName);
+
+      // The "sent" outcome below must be returned right after a successful
+      // send, before anything else that could throw — otherwise a failure in
+      // a downstream step (logging into the conversation) falls into the
+      // catch, is treated as failed, and a later sweep retries it: a real
+      // duplicate text to the customer, even though the first one already
+      // went out.
+      let result: { providerMessageId: string | null };
+      try {
+        result = await getSmsProvider().sendMessage(customer.phone, text);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn({ personId: trigger.personId, reason }, "lead check-in send failed");
+        await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+        return { kind: "failed", reason, variant };
+      }
+
+      try {
+        await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
+      } catch (err) {
+        logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log lead check-in into the conversation");
+      }
+      return { kind: "sent", providerMessageId: result.providerMessageId, variant };
+    });
+
+    if (sendResult.kind === "no_phone") {
       await db
         .update(leadCheckinTriggersTable)
         .set({ status: "failed", failureReason: "NO_PHONE_NUMBER", attemptCount: nextAttemptCount })
@@ -110,26 +160,10 @@ export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult
       continue;
     }
 
-    // Recheck the slot now, not at arm time — the lead may have answered
-    // this question in conversation at any point over the last 6 days.
-    const variant = conversation.currentlyTaking === null ? "currently_taking" : "reengagement";
-    const text = variant === "currently_taking" ? renderCurrentlyTakingCheckin(customer.firstName) : renderReengagementCheckin(customer.firstName);
-
-    // The "sent" write below must happen right after a successful send,
-    // before anything else that could throw — otherwise a failure in a
-    // downstream step (logging into the conversation) falls into the catch,
-    // marks this "failed", and a later sweep retries it: a real duplicate
-    // text to the customer, even though the first one already went out.
-    let result: { providerMessageId: string | null };
-    try {
-      result = await getSmsProvider().sendMessage(customer.phone, text);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      logger.warn({ personId: trigger.personId, reason }, "lead check-in send failed");
-      await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+    if (sendResult.kind === "failed") {
       await db
         .update(leadCheckinTriggersTable)
-        .set({ status: "failed", failureReason: reason, variant, attemptCount: nextAttemptCount })
+        .set({ status: "failed", failureReason: sendResult.reason, variant: sendResult.variant, attemptCount: nextAttemptCount })
         .where(eq(leadCheckinTriggersTable.id, trigger.id));
       failedCount++;
       continue;
@@ -137,15 +171,9 @@ export async function sweepLeadCheckinTriggers(): Promise<LeadCheckinSweepResult
 
     await db
       .update(leadCheckinTriggersTable)
-      .set({ status: "sent", sentAt: sql`now()`, providerMessageId: result.providerMessageId, variant, attemptCount: nextAttemptCount })
+      .set({ status: "sent", sentAt: sql`now()`, providerMessageId: sendResult.providerMessageId, variant: sendResult.variant, attemptCount: nextAttemptCount })
       .where(eq(leadCheckinTriggersTable.id, trigger.id));
     sentCount++;
-
-    try {
-      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log lead check-in into the conversation");
-    }
   }
 
   if (sentCount > 0 || cancelledCount > 0 || failedCount > 0) {

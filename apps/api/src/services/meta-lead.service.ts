@@ -7,6 +7,7 @@ import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderMetaLeadOpener } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 /**
  * Sends the opener for a Meta lead-gen form-fill lead immediately, on the
@@ -39,19 +40,30 @@ export async function sendMetaLeadOpener(personId: string): Promise<void> {
   }
 
   const text = renderMetaLeadOpener(customer.firstName);
-  const conversation = await getOrCreateConversation(personId, "meta_form");
+  // Narrowed to a plain string here, before the closure below — TS doesn't
+  // carry the `!customer?.phone` narrowing above into a nested closure.
+  const phone = customer.phone;
   // Arms the 6-day check-in the moment we're about to send this lead's very
   // first message — see the identical comment in abandoned-cart.service.ts.
   await scheduleLeadCheckin(personId);
 
-  try {
-    const result = await getSmsProvider().sendMessage(customer.phone, text);
-    await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    logger.warn({ personId, reason }, "meta-lead opener send failed");
-    // Still logged for visibility even though the send failed — this is what
-    // Alexis's opener would have said, once a provider exists.
-    await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-  }
+  // Locked against the same per-person key processInboundMessage uses
+  // (alexis-dispatch.service.ts) — this fires the instant a GHL webhook lands,
+  // which can race a live inbound turn for the same person (e.g. they text
+  // in at almost the same moment the lead webhook arrives). The conversation
+  // read/write needs to happen atomically with respect to that turn, same
+  // reasoning as every other proactive sender.
+  await withPersonLock(personId, async () => {
+    const conversation = await getOrCreateConversation(personId, "meta_form");
+    try {
+      const result = await getSmsProvider().sendMessage(phone, text);
+      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn({ personId, reason }, "meta-lead opener send failed");
+      // Still logged for visibility even though the send failed — this is
+      // what Alexis's opener would have said, once a provider exists.
+      await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+    }
+  });
 }

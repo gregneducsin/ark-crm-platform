@@ -236,6 +236,64 @@ describe("handleIbluSendWebhook", () => {
     expect(processInboundMessageMock).not.toHaveBeenCalled();
   });
 
+  it("ignores an incoming message whose content exactly matches our own recent outbound text — a likely provider/device echo, not a real reply", async () => {
+    processInboundMessageMock.mockClear();
+    notifySmsSlackMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    const [conversation] = await db.insert(conversationsTable).values({ personId }).returning({ id: conversationsTable.id });
+    await db.insert(conversationMessagesTable).values({ conversationId: conversation.id, direction: "outbound", body: "Which plan works best for you?" });
+
+    const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "Which plan works best for you?" } }));
+
+    expect(result).toEqual({ duplicate: false });
+    expect(processInboundMessageMock).not.toHaveBeenCalled();
+    expect(notifySmsSlackMock).toHaveBeenCalled();
+  });
+
+  it("still processes a genuinely different reply even when a recent outbound message exists", async () => {
+    processInboundMessageMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    const [conversation] = await db.insert(conversationsTable).values({ personId }).returning({ id: conversationsTable.id });
+    await db.insert(conversationMessagesTable).values({ conversationId: conversation.id, direction: "outbound", body: "Which plan works best for you?" });
+
+    const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "the 3-month one" } }));
+
+    expect(result).toEqual({ duplicate: false });
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "the 3-month one");
+  });
+
+  it("does not treat a matching INBOUND message as an echo — only a matching OUTBOUND one counts", async () => {
+    processInboundMessageMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    const [conversation] = await db.insert(conversationsTable).values({ personId }).returning({ id: conversationsTable.id });
+    await db.insert(conversationMessagesTable).values({ conversationId: conversation.id, direction: "inbound", body: "sounds good" });
+
+    const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "sounds good" } }));
+
+    expect(result).toEqual({ duplicate: false });
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "sounds good");
+  });
+
+  it("applies the same echo guard on Sophie's side when a support conversation owns the thread", async () => {
+    processInboundSupportMessageMock.mockClear();
+
+    const phone = uniquePhone();
+    const personId = await seedCustomer(phone);
+    const [conversation] = await db.insert(supportConversationsTable).values({ personId }).returning({ id: supportConversationsTable.id });
+    await db.insert(supportConversationMessagesTable).values({ conversationId: conversation.id, direction: "outbound", body: "Any questions on the intake form so far?" });
+
+    const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "Any questions on the intake form so far?" } }));
+
+    expect(result).toEqual({ duplicate: false });
+    expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
+  });
+
   it("acknowledges and no-ops for an event type it doesn't act on", async () => {
     processInboundMessageMock.mockClear();
     processInboundSupportMessageMock.mockClear();

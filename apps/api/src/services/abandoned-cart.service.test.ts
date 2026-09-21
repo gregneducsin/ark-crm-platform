@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, questionnaireEventsTable, purchasesTable, abandonedCartTriggersTable, leadCheckinTriggersTable, intakeLinkTokensTable } from "@luma/db";
 import { setCustomerSmsDnd } from "./dnd.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 const sendMessageMock = vi.fn();
 vi.mock("../lib/sms-provider.js", async () => {
@@ -322,5 +323,68 @@ describe("sweepAbandonedCartTriggers", () => {
       if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
       else process.env.SALES_SMS_ENABLED = originalEnv;
     }
+  });
+
+  it("waits for a concurrent holder of the same person's lock before sending the opener — the fix for two unsynchronized senders racing on one conversation", async () => {
+    // Regression test for a real incident (on Luma, ported here): a
+    // proactive sender (this sweep) and a live Alexis turn
+    // (alexis-dispatch.service.ts's processInboundMessage) both write to the
+    // same person's conversation but previously had no shared lock, so they
+    // could race — each reading stale state and sending independently.
+    // Simulates "a live turn is mid-flight" by holding withPersonLock for
+    // this person before the sweep runs, and asserts the sweep's send
+    // genuinely waits rather than proceeding concurrently.
+    sendMessageMock.mockClear();
+    // Not "...Once" — a pending-and-due trigger left over from another test
+    // in this file can legitimately be claimed and sent in the same sweep
+    // call before ours, and a one-shot resolved value would otherwise be
+    // consumed by that unrelated send instead of ours.
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_after_lock" });
+
+    const personId = await seedCustomer();
+    const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
+    await scheduleAbandonedCartOpener(personId, questionnaireEventId);
+    await backdateTrigger(personId);
+
+    let releaseHeldLock: () => void = () => {};
+    const heldLockReleased = new Promise<void>((resolve) => {
+      releaseHeldLock = resolve;
+    });
+    let lockAcquired: () => void = () => {};
+    const lockWasAcquired = new Promise<void>((resolve) => {
+      lockAcquired = resolve;
+    });
+    const holder = withPersonLock(personId, () => {
+      // fn() only ever runs after pg_advisory_lock has actually been
+      // granted, so this resolving is proof the lock is genuinely held —
+      // deterministic, unlike waiting an arbitrary number of milliseconds.
+      lockAcquired();
+      return heldLockReleased;
+    });
+    await lockWasAcquired;
+
+    const sweepPromise = sweepAbandonedCartTriggers();
+    // Give the sweep's own withPersonLock call a moment to actually attempt
+    // (and block on) the lock before asserting our specific trigger hasn't
+    // resolved yet. Checked on this trigger's own DB row, not the shared
+    // sendMessageMock — the sweep's claim query has no personId filter, so
+    // an unrelated pending-and-due trigger left over from another test in
+    // this file can legitimately be claimed and sent in the same sweep call
+    // without that meaning OUR trigger raced the held lock.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const [midFlight] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
+    expect(midFlight.status).toBe("processing");
+
+    releaseHeldLock();
+    await holder;
+    await sweepPromise;
+
+    // Asserted on this trigger's own row, not the sweep's aggregate counts
+    // or the shared mock's call count — either could legitimately include
+    // an unrelated pending-and-due trigger left over from another test in
+    // this file, claimed in the same sweep call.
+    const [after] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
+    expect(after.status).toBe("sent");
+    expect(after.providerMessageId).toBe("msg_after_lock");
   });
 });

@@ -1,5 +1,5 @@
-import { eq, sql } from "drizzle-orm";
-import { db, customersTable, supportConversationsTable, conversationMessagesTable, supportConversationMessagesTable, unmatchedSmsMessagesTable } from "@luma/db";
+import { desc, eq, sql } from "drizzle-orm";
+import { db, customersTable, conversationsTable, supportConversationsTable, conversationMessagesTable, supportConversationMessagesTable, unmatchedSmsMessagesTable } from "@luma/db";
 import { ibluSendMessageReceivedDataSchema, ibluSendMessageFailedDataSchema, type IbluSendWebhookEnvelope } from "@luma/shared";
 import { recordWebhookEventIfNew, markWebhookEventProcessed, markWebhookEventFailed } from "./webhooks.service.js";
 import { processInboundMessage } from "./alexis-dispatch.service.js";
@@ -42,6 +42,58 @@ async function findCustomerIdByPhone(phone: string): Promise<string | undefined>
 async function hasSupportConversation(personId: string): Promise<boolean> {
   const [row] = await db.select({ id: supportConversationsTable.id }).from(supportConversationsTable).where(eq(supportConversationsTable.personId, personId));
   return Boolean(row);
+}
+
+/** How long after we send something we'll still treat an identical "incoming" event as a possible echo of it, rather than real customer input. */
+const ECHO_WINDOW_MS = 3 * 60 * 1000;
+
+type LastMessage = { direction: "inbound" | "outbound"; body: string; createdAt: Date } | undefined;
+
+function isRecentOutboundMatch(last: LastMessage, normalizedIncoming: string): boolean {
+  if (!last || last.direction !== "outbound") return false;
+  if (last.body.trim() !== normalizedIncoming) return false;
+  return Date.now() - new Date(last.createdAt).getTime() <= ECHO_WINDOW_MS;
+}
+
+/**
+ * Some iBluSend/device setups appear to redeliver our own just-sent outbound
+ * text back through message.received with direction "incoming" — confirmed
+ * against a real incident on Luma where the bot ended up replying to its own
+ * messages in a self-feeding loop, producing a dozen-plus unrelated-looking
+ * texts to one customer in a couple of minutes. Each redelivery carries a
+ * genuinely new event_id, so the ordinary dedup in handleIbluSendWebhook
+ * doesn't catch it — this is a distinct check: does this "inbound" text
+ * exactly match the most recent thing WE sent this person, within a window
+ * where a real customer coincidentally typing back the bot's own wording
+ * verbatim is not a realistic possibility. Scoped to known customers
+ * (Alexis/Sophie's own conversations) — the unmatched-inbound pipeline
+ * doesn't hit this path.
+ */
+async function isLikelyOutboundEcho(personId: string, body: string): Promise<boolean> {
+  const normalized = body.trim();
+  if (!normalized) return false;
+
+  if (await hasSupportConversation(personId)) {
+    const [conversation] = await db.select({ id: supportConversationsTable.id }).from(supportConversationsTable).where(eq(supportConversationsTable.personId, personId));
+    if (!conversation) return false;
+    const [last] = await db
+      .select({ direction: supportConversationMessagesTable.direction, body: supportConversationMessagesTable.body, createdAt: supportConversationMessagesTable.createdAt })
+      .from(supportConversationMessagesTable)
+      .where(eq(supportConversationMessagesTable.conversationId, conversation.id))
+      .orderBy(desc(supportConversationMessagesTable.createdAt))
+      .limit(1);
+    return isRecentOutboundMatch(last, normalized);
+  }
+
+  const [conversation] = await db.select({ id: conversationsTable.id }).from(conversationsTable).where(eq(conversationsTable.personId, personId));
+  if (!conversation) return false;
+  const [last] = await db
+    .select({ direction: conversationMessagesTable.direction, body: conversationMessagesTable.body, createdAt: conversationMessagesTable.createdAt })
+    .from(conversationMessagesTable)
+    .where(eq(conversationMessagesTable.conversationId, conversation.id))
+    .orderBy(desc(conversationMessagesTable.createdAt))
+    .limit(1);
+  return isRecentOutboundMatch(last, normalized);
 }
 
 /**
@@ -146,6 +198,17 @@ export async function handleIbluSendWebhook(envelope: IbluSendWebhookEnvelope): 
         const body = data.content || "[Image attached]";
         const personId = await findCustomerIdByPhone(data.phone_number);
         if (personId) {
+          if (await isLikelyOutboundEcho(personId, body)) {
+            logger.warn(
+              { personId, phoneLastFour: data.phone_number.slice(-4) },
+              "message.received content matches our own recent outbound message — treating as a provider/device echo, not real inbound, and not replying to it",
+            );
+            void notifySmsSlack(
+              "Ignored a likely self-echoed SMS (iBluSend/device redelivered our own outbound text as inbound) — if this keeps happening, check the RCS/device config on that number with iBluSend.",
+            );
+            await markWebhookEventProcessed(recorded.id, personId);
+            return { duplicate: false };
+          }
           await dispatchInboundMessage(personId, body, mediaUrls);
           await markWebhookEventProcessed(recorded.id, personId);
           return { duplicate: false };

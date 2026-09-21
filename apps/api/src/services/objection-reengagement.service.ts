@@ -6,6 +6,7 @@ import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { renderReengagementCheckin } from "../lib/messaging/follow-up-templates.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 
 const REENGAGEMENT_DELAY_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -46,6 +47,8 @@ export interface ObjectionReengagementSweepResult {
   readonly cancelledCount: number;
   readonly failedCount: number;
 }
+
+type ObjectionReengagementSendResult = { kind: "failed"; reason: string } | { kind: "sent"; providerMessageId: string | null };
 
 /**
  * Sends every due re-engagement text, plus any failed one still within its
@@ -114,25 +117,47 @@ export async function sweepObjectionReengagementTriggers(): Promise<ObjectionRee
       failedCount++;
       continue;
     }
+    // Narrowed to a plain string here, before the closure below — TS doesn't
+    // carry the `!customer?.phone` narrowing above into a nested closure.
+    const phone = customer.phone;
 
-    const conversation = await getOrCreateConversation(trigger.personId, trigger.leadSource);
-    const text = renderReengagementCheckin(customer.firstName);
+    // Locked against the same per-person key processInboundMessage uses
+    // (alexis-dispatch.service.ts) — the conversation read/write here must
+    // happen atomically with respect to a live inbound turn, or this
+    // proactive re-engagement can race a live reply: both read the same
+    // stale state and both send, unaware of each other.
+    const sendResult = await withPersonLock(trigger.personId, async (): Promise<ObjectionReengagementSendResult> => {
+      const conversation = await getOrCreateConversation(trigger.personId, trigger.leadSource);
+      const text = renderReengagementCheckin(customer.firstName);
 
-    // The "sent" write below must happen right after a successful send,
-    // before anything else that could throw — otherwise a failure in a
-    // downstream step (logging into the conversation) falls into the catch,
-    // marks this "failed", and a later sweep retries it: a real duplicate
-    // text to the customer, even though the first one already went out.
-    let result: { providerMessageId: string | null };
-    try {
-      result = await getSmsProvider().sendMessage(customer.phone, text);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      logger.warn({ personId: trigger.personId, reason }, "objection re-engagement send failed");
-      await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+      // The "sent" outcome below must be returned right after a successful
+      // send, before anything else that could throw — otherwise a failure in
+      // a downstream step (logging into the conversation) falls into the
+      // catch, is treated as failed, and a later sweep retries it: a real
+      // duplicate text to the customer, even though the first one already
+      // went out.
+      let result: { providerMessageId: string | null };
+      try {
+        result = await getSmsProvider().sendMessage(phone, text);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn({ personId: trigger.personId, reason }, "objection re-engagement send failed");
+        await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+        return { kind: "failed", reason };
+      }
+
+      try {
+        await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
+      } catch (err) {
+        logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log objection re-engagement into the conversation");
+      }
+      return { kind: "sent", providerMessageId: result.providerMessageId };
+    });
+
+    if (sendResult.kind === "failed") {
       await db
         .update(objectionReengagementTriggersTable)
-        .set({ status: "failed", failureReason: reason, attemptCount: nextAttemptCount })
+        .set({ status: "failed", failureReason: sendResult.reason, attemptCount: nextAttemptCount })
         .where(eq(objectionReengagementTriggersTable.id, trigger.id));
       failedCount++;
       continue;
@@ -140,15 +165,9 @@ export async function sweepObjectionReengagementTriggers(): Promise<ObjectionRee
 
     await db
       .update(objectionReengagementTriggersTable)
-      .set({ status: "sent", sentAt: sql`now()`, providerMessageId: result.providerMessageId, attemptCount: nextAttemptCount })
+      .set({ status: "sent", sentAt: sql`now()`, providerMessageId: sendResult.providerMessageId, attemptCount: nextAttemptCount })
       .where(eq(objectionReengagementTriggersTable.id, trigger.id));
     sentCount++;
-
-    try {
-      await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log objection re-engagement into the conversation");
-    }
   }
 
   if (sentCount > 0 || cancelledCount > 0 || failedCount > 0) {
