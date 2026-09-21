@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, conversationsTable, objectionReengagementTriggersTable } from "@luma/db";
+import { db, customersTable, conversationsTable, conversationMessagesTable, objectionReengagementTriggersTable } from "@luma/db";
 import type { AlexisTurnResult } from "./alexis-conversation.service.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd, setCustomerEmailDnd } from "./dnd.service.js";
 
@@ -17,7 +17,7 @@ vi.mock("../lib/sms-provider.js", async () => {
 });
 
 const { processInboundMessage } = await import("./alexis-dispatch.service.js");
-const { getOrCreateConversation, listMessages } = await import("./conversations.service.js");
+const { getOrCreateConversation, listMessages, appendMessage } = await import("./conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null; firstName?: string } = {}): Promise<string> {
   const [row] = await db
@@ -432,5 +432,104 @@ describe("processInboundMessage", () => {
       if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
       else process.env.SALES_SMS_ENABLED = originalEnv;
     }
+  });
+
+  it("stops sending once 10 outbound messages have gone out to this person in the last 20 minutes — the send-burst cap", async () => {
+    // Ported from Luma: a stream of fabricated inbound webhook events (not a
+    // real customer, confirmed against the provider's own records) drove
+    // 15+ real texts to one person in ~25 minutes, each individually a
+    // legitimate guardrail-approved reply. This cap doesn't care why the
+    // sends keep coming — only that they stop past the limit, silently,
+    // with no alert.
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    for (let i = 0; i < 10; i++) {
+      await appendMessage(conversation.id, "outbound", `prior message ${i}`, { deliveryStatus: "sent" });
+    }
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+    await processInboundMessage(personId, "are you still there?");
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends normally when under the send-burst cap", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_under_cap" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    for (let i = 0; i < 8; i++) {
+      await appendMessage(conversation.id, "outbound", `prior message ${i}`, { deliveryStatus: "sent" });
+    }
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: null }));
+    await processInboundMessage(personId, "still there?");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not count outbound messages from outside the burst window", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_old_excluded" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    for (let i = 0; i < 10; i++) {
+      await db
+        .insert(conversationMessagesTable)
+        .values({ conversationId: conversation.id, direction: "outbound", body: `old message ${i}`, deliveryStatus: "sent", createdAt: new Date(Date.now() - 30 * 60 * 1000) });
+    }
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: null }));
+    await processInboundMessage(personId, "hello again");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops auto-sending and flags the conversation once it's asked essentially the same question twice already, without waiting for a full 10-message burst", async () => {
+    // Regression test for the real incident this fix targets (ported from
+    // Luma): a customer kept answering a "which plan length" question in
+    // different words, and the bot never recognized any of them as
+    // resolving it, so it just kept re-asking a reworded version — this
+    // should be caught well before the blunt send-burst cap would trigger.
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    await appendMessage(conversation.id, "outbound", "Would you like the 3-month plan or the 6-month plan?", { deliveryStatus: "sent" });
+    await appendMessage(conversation.id, "inbound", "whatever you think is best honestly", {});
+    await appendMessage(conversation.id, "outbound", "So just the 3-month plan or the 6-month plan?", { deliveryStatus: "sent" });
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
+    await processInboundMessage(personId, "I really don't have a preference");
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const updatedConversation = await getOrCreateConversation(personId);
+    expect(updatedConversation.needsAttention).toBe(true);
+    expect(updatedConversation.needsAttentionReason).toMatch(/same question/i);
+  });
+
+  it("sends normally when a question has only been asked once before, reworded — not yet a repeating streak", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_one_repeat" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    await appendMessage(conversation.id, "outbound", "Would you like the 3-month plan or the 6-month plan?", { deliveryStatus: "sent" });
+
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
+    await processInboundMessage(personId, "hmm not sure yet");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    const updatedConversation = await getOrCreateConversation(personId);
+    expect(updatedConversation.needsAttention).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db, supportConversationsTable, supportConversationMessagesTable, customersTable, type SupportConversation, type SupportConversationMessage } from "@luma/db";
 import type { SophiePreviewRequestBody } from "../lib/support/types.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
@@ -158,6 +158,22 @@ export async function listSupportMessages(conversationId: string, limit = MAX_HI
     .orderBy(desc(supportConversationMessagesTable.createdAt))
     .limit(limit);
   return rows.reverse();
+}
+
+/** Same reasoning as countRecentOutboundMessages in conversations.service.ts — Sophie's send-burst guard in sophie-dispatch.service.ts uses this. */
+export async function countRecentOutboundSupportMessages(conversationId: string, windowMs: number): Promise<number> {
+  const since = new Date(Date.now() - windowMs);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(supportConversationMessagesTable)
+    .where(
+      and(
+        eq(supportConversationMessagesTable.conversationId, conversationId),
+        eq(supportConversationMessagesTable.direction, "outbound"),
+        gte(supportConversationMessagesTable.createdAt, since),
+      ),
+    );
+  return Number(row?.count ?? 0);
 }
 
 /** Builds the shape runSophieTurn expects from persisted conversation state + recent history. */

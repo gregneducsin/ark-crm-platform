@@ -16,7 +16,8 @@ import { AI_DIDNT_UNDERSTAND_REASON } from "@luma/shared";
 export type NeedsAttentionSource =
   | { readonly kind: "exception" }
   | { readonly kind: "rejected"; readonly code: string }
-  | { readonly kind: "staff_flagged"; readonly preCheckCode: string | null };
+  | { readonly kind: "staff_flagged"; readonly preCheckCode: string | null }
+  | { readonly kind: "stuck_repeating" };
 
 /** Post-check/provider rejection codes — the draft reply existed but got blocked before it ever reached the customer. */
 const REJECTED_REASONS: Record<string, string> = {
@@ -87,5 +88,7 @@ export function describeNeedsAttentionReason(source: NeedsAttentionSource): stri
       return source.preCheckCode
         ? (STAFF_FLAGGED_REASONS[source.preCheckCode] ?? `Flagged for a person to review (${source.preCheckCode}).`)
         : AI_DIDNT_UNDERSTAND_REASON;
+    case "stuck_repeating":
+      return "The bot kept asking essentially the same question without the conversation moving forward, so it stopped auto-replying instead of asking again.";
   }
 }

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db, conversationsTable, conversationMessagesTable, customersTable, purchasesTable, type Conversation, type ConversationMessage } from "@luma/db";
 import type { BotPreviewRequestBody } from "../lib/messaging/types.js";
 import type { ObjectionKey } from "../lib/messaging/objection-handling.js";
@@ -173,6 +173,31 @@ export async function listMessages(conversationId: string, limit = MAX_HISTORY_M
     .orderBy(desc(conversationMessagesTable.createdAt))
     .limit(limit);
   return rows.reverse();
+}
+
+/**
+ * Counts this conversation's outbound sends in the last `windowMs` — the
+ * send-burst guard in alexis-dispatch.service.ts's sendAndLog uses this to
+ * cap how many texts Alexis can fire off in a row. Exists because of a real
+ * incident on Luma (same architecture, ported here): a stream of fabricated
+ * "message.received" webhook events (not a real customer, confirmed against
+ * the provider's own records) drove 15+ real texts to one person in about
+ * 25 minutes, each individually legitimate — this catches the aggregate
+ * pattern no single-turn check can see.
+ */
+export async function countRecentOutboundMessages(conversationId: string, windowMs: number): Promise<number> {
+  const since = new Date(Date.now() - windowMs);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(conversationMessagesTable)
+    .where(
+      and(
+        eq(conversationMessagesTable.conversationId, conversationId),
+        eq(conversationMessagesTable.direction, "outbound"),
+        gte(conversationMessagesTable.createdAt, since),
+      ),
+    );
+  return Number(row?.count ?? 0);
 }
 
 /** Builds the shape runAlexisTurn expects from persisted conversation state + recent history. */

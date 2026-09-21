@@ -8,6 +8,7 @@ import {
   setSupportMessageSentiment,
   updateSupportConversationState,
   toSophiePreviewBody,
+  countRecentOutboundSupportMessages,
   type SupportConversationStatePatch,
 } from "./support-conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
@@ -15,6 +16,14 @@ import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
+import { countTrailingRepeatQuestions } from "../lib/messaging/repeat-question.js";
+
+/** Same reasoning and numbers as alexis-dispatch.service.ts's SEND_BURST_LIMIT/WINDOW — see that file's comment. */
+const SEND_BURST_LIMIT = 10;
+const SEND_BURST_WINDOW_MS = 20 * 60 * 1000;
+
+/** Same reasoning as alexis-dispatch.service.ts's REPEAT_QUESTION_THRESHOLD — see that file's comment. */
+const REPEAT_QUESTION_THRESHOLD = 3;
 
 async function getCustomerContact(personId: string): Promise<{ firstName: string; phone: string | null } | undefined> {
   const [row] = await db.select({ firstName: customersTable.firstName, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
@@ -23,12 +32,18 @@ async function getCustomerContact(personId: string): Promise<{ firstName: string
 
 /**
  * Same fail-soft send+log pattern as Alexis's dispatch (alexis-dispatch.service.ts's
- * sendAndLog), including the same DND-checked-here-not-earlier reasoning — see
- * that function's docstring.
+ * sendAndLog), including the same DND-checked-here-not-earlier reasoning and
+ * the same send-burst cap — see that function's docstring.
  */
 async function sendAndLog(personId: string, conversationId: string, phone: string | null, text: string): Promise<void> {
   if (await isCustomerSmsDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Sophie message not sent: customer is do-not-disturb");
+    return;
+  }
+
+  const recentSends = await countRecentOutboundSupportMessages(conversationId, SEND_BURST_WINDOW_MS);
+  if (recentSends >= SEND_BURST_LIMIT) {
+    logger.warn({ personId, conversationId, recentSends }, "outbound Sophie message not sent: send-burst limit reached");
     return;
   }
 
@@ -88,9 +103,20 @@ async function processInboundSupportMessageLocked(personId: string, inboundBody:
   await setSupportMessageSentiment(inboundMessage.id, result.inboundSentiment);
 
   const customer = await getCustomerContact(personId);
-  const textsToSend = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t));
-  for (const text of textsToSend) {
-    await sendAndLog(personId, conversation.id, customer?.phone ?? null, text);
+
+  // Stuck-repeating check — see the identical comment and reasoning in
+  // alexis-dispatch.service.ts's processInboundMessageLocked.
+  const recentQuestions = priorMessages.filter((m) => m.direction === "outbound" && m.body.trim().endsWith("?")).map((m) => m.body);
+  const repeatStreak = countTrailingRepeatQuestions(recentQuestions, result.nextQuestion);
+  const isStuckRepeating = repeatStreak >= REPEAT_QUESTION_THRESHOLD - 1;
+
+  if (isStuckRepeating) {
+    logger.warn({ personId, conversationId: conversation.id, repeatStreak }, "Sophie stopped auto-replying: asked essentially the same question repeatedly with no progress");
+  } else {
+    const textsToSend = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t));
+    for (const text of textsToSend) {
+      await sendAndLog(personId, conversation.id, customer?.phone ?? null, text);
+    }
   }
 
   // Set DND only after this turn's texts have gone out — see the identical
@@ -102,9 +128,11 @@ async function processInboundSupportMessageLocked(personId: string, inboundBody:
   const statePatch: SupportConversationStatePatch = {
     lastQuestion: result.nextQuestion,
     lastDraft: result.reply,
-    ...(result.requiresStaff
-      ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
-      : {}),
+    ...(isStuckRepeating
+      ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "stuck_repeating" }) }
+      : result.requiresStaff
+        ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
+        : {}),
     ...(conversation.reviewRequested && result.inboundSentiment !== null ? { reviewSentiment: result.inboundSentiment } : {}),
   };
   await updateSupportConversationState(conversation.id, statePatch);

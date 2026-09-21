@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, supportConversationsTable } from "@luma/db";
+import { db, customersTable, supportConversationsTable, supportConversationMessagesTable } from "@luma/db";
 import type { SophieTurnResult } from "./sophie-conversation.service.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
 
@@ -17,7 +17,7 @@ vi.mock("../lib/sms-provider.js", async () => {
 });
 
 const { processInboundSupportMessage } = await import("./sophie-dispatch.service.js");
-const { getOrCreateSupportConversation, listSupportMessages } = await import("./support-conversations.service.js");
+const { getOrCreateSupportConversation, listSupportMessages, appendSupportMessage } = await import("./support-conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null } = {}): Promise<string> {
   const [row] = await db
@@ -273,5 +273,76 @@ describe("processInboundSupportMessage", () => {
     await processInboundSupportMessage(personId, "any update on my order?");
 
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("stops sending once 10 outbound messages have gone out to this person in the last 20 minutes — the send-burst cap", async () => {
+    runSophieTurnMock.mockClear();
+    sendMessageMock.mockClear();
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    for (let i = 0; i < 10; i++) {
+      await appendSupportMessage(conversation.id, "outbound", `prior message ${i}`, { deliveryStatus: "sent" });
+    }
+
+    runSophieTurnMock.mockResolvedValueOnce(okResult());
+    await processInboundSupportMessage(personId, "are you still there?");
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not count outbound messages from outside the burst window", async () => {
+    runSophieTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_old_excluded" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    for (let i = 0; i < 10; i++) {
+      await db
+        .insert(supportConversationMessagesTable)
+        .values({ conversationId: conversation.id, direction: "outbound", body: `old message ${i}`, deliveryStatus: "sent", createdAt: new Date(Date.now() - 30 * 60 * 1000) });
+    }
+
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: null }));
+    await processInboundSupportMessage(personId, "hello again");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops auto-sending and flags the conversation once it's asked essentially the same question twice already, without waiting for a full 10-message burst", async () => {
+    runSophieTurnMock.mockClear();
+    sendMessageMock.mockClear();
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    await appendSupportMessage(conversation.id, "outbound", "Would you like a refund or store credit for the return?", { deliveryStatus: "sent" });
+    await appendSupportMessage(conversation.id, "inbound", "I'm not sure honestly", {});
+    await appendSupportMessage(conversation.id, "outbound", "So just to confirm, refund or store credit for the return?", { deliveryStatus: "sent" });
+
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I go with a refund or store credit for the return?" }));
+    await processInboundSupportMessage(personId, "whatever is easier for you honestly");
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const updatedConversation = await getOrCreateSupportConversation(personId);
+    expect(updatedConversation.needsAttention).toBe(true);
+    expect(updatedConversation.needsAttentionReason).toMatch(/same question/i);
+  });
+
+  it("sends normally when a question has only been asked once before, reworded — not yet a repeating streak", async () => {
+    runSophieTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_one_repeat" });
+
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    await appendSupportMessage(conversation.id, "outbound", "Would you like a refund or store credit for the return?", { deliveryStatus: "sent" });
+
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I go with a refund or store credit for the return?" }));
+    await processInboundSupportMessage(personId, "hmm let me think");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    const updatedConversation = await getOrCreateSupportConversation(personId);
+    expect(updatedConversation.needsAttention).toBe(false);
   });
 });

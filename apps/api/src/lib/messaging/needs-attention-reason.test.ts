@@ -45,4 +45,8 @@ describe("describeNeedsAttentionReason", () => {
   it("explains a null pre-check code (Claude itself routed to staff)", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: null })).toMatch(/didn't clearly fit any of the approved scripts/i);
   });
+
+  it("explains a stuck-repeating conversation", () => {
+    expect(describeNeedsAttentionReason({ kind: "stuck_repeating" })).toMatch(/same question/i);
+  });
 });

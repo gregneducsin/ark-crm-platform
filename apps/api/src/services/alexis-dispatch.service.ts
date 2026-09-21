@@ -8,6 +8,7 @@ import {
   setMessageSentiment,
   updateConversationState,
   toBotPreviewBody,
+  countRecentOutboundMessages,
   type ConversationStatePatch,
 } from "./conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
@@ -17,6 +18,29 @@ import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
 import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { scheduleObjectionReengagement } from "./objection-reengagement.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
+import { countTrailingRepeatQuestions } from "../lib/messaging/repeat-question.js";
+
+/**
+ * Hard ceiling on how many texts Alexis can send one person in a row, no
+ * matter how many turns are driving it — a real incident on Luma (same
+ * architecture, ported here) showed 15+ real sends to one customer in ~25
+ * minutes, each one individually legitimate. This isn't a guardrail or a
+ * content check; it doesn't matter why the sends keep coming, only that
+ * they stop past this point. 10 in 20 minutes is well under 15 while still
+ * leaving room for a genuinely fast real back-and-forth.
+ */
+const SEND_BURST_LIMIT = 10;
+const SEND_BURST_WINDOW_MS = 20 * 60 * 1000;
+
+/**
+ * After this many consecutive turns asking essentially the same unresolved
+ * question (see repeat-question.ts), stop auto-sending and flag the
+ * conversation for a person instead of asking a reworded version again.
+ * Ported from Luma, where this was the actual targeted fix for the real
+ * incident above — the send-burst cap is a blunt backstop, this is the
+ * "we are going in circles" check.
+ */
+const REPEAT_QUESTION_THRESHOLD = 3;
 
 async function getCustomerContact(personId: string): Promise<{ firstName: string; phone: string | null } | undefined> {
   const [row] = await db.select({ firstName: customersTable.firstName, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
@@ -48,6 +72,12 @@ async function sendAndLog(personId: string, conversationId: string, phone: strin
 
   if (await isCustomerSmsDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Alexis message not sent: customer is do-not-disturb");
+    return;
+  }
+
+  const recentSends = await countRecentOutboundMessages(conversationId, SEND_BURST_WINDOW_MS);
+  if (recentSends >= SEND_BURST_LIMIT) {
+    logger.warn({ personId, conversationId, recentSends }, "outbound Alexis message not sent: send-burst limit reached");
     return;
   }
 
@@ -138,9 +168,27 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
     await db.update(customersTable).set({ firstName: result.learnedFirstName }).where(eq(customersTable.id, personId));
   }
 
-  const textsToSend = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t));
-  for (const text of textsToSend) {
-    await sendAndLog(personId, conversation.id, customer?.phone ?? null, text);
+  // Stuck-repeating check: is this turn's nextQuestion essentially the same
+  // one Alexis has already asked (reworded) several times in a row without
+  // the conversation moving forward? Real incident (Luma, same architecture,
+  // ported here): a customer kept answering a "which plan length" question
+  // in different words, none of which the bot recognized as resolving it,
+  // so it just re-asked a reworded version turn after turn — eventually
+  // ~20 real texts to one customer. Every individual turn was a legitimate,
+  // guardrail-approved reply to a real inbound message, so no single-turn or
+  // volume-based check could catch this — only recognizing the repetition
+  // itself can.
+  const recentQuestions = priorMessages.filter((m) => m.direction === "outbound" && m.body.trim().endsWith("?")).map((m) => m.body);
+  const repeatStreak = countTrailingRepeatQuestions(recentQuestions, result.nextQuestion);
+  const isStuckRepeating = repeatStreak >= REPEAT_QUESTION_THRESHOLD - 1;
+
+  if (isStuckRepeating) {
+    logger.warn({ personId, conversationId: conversation.id, repeatStreak }, "Alexis stopped auto-replying: asked essentially the same question repeatedly with no progress");
+  } else {
+    const textsToSend = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t));
+    for (const text of textsToSend) {
+      await sendAndLog(personId, conversation.id, customer?.phone ?? null, text);
+    }
   }
 
   // Set DND only after this turn's texts have gone out, so the OPT_OUT
@@ -162,9 +210,11 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
     objectionKey: result.objectionKey,
     linkProvided: result.linkProvided,
     promoOffered: result.promoOffered,
-    ...(result.requiresStaff
-      ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
-      : {}),
+    ...(isStuckRepeating
+      ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "stuck_repeating" }) }
+      : result.requiresStaff
+        ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
+        : {}),
   });
 
   // A stand-down ("I'll leave it here for whenever you're ready" / "we're
