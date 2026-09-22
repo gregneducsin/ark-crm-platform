@@ -1,6 +1,6 @@
 import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { db, customersTable, reviewRequestTriggersTable } from "@luma/db";
-import { getOrCreateSupportConversation, appendSupportMessage, updateSupportConversationState } from "./support-conversations.service.js";
+import { getOrCreateSupportConversation, appendSupportMessage, updateSupportConversationState, hasAnyOutboundSupportMessage } from "./support-conversations.service.js";
 import { getOrCreateSupportEmailConversation, appendSupportEmailMessage } from "./support-email-conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
 import {
@@ -65,7 +65,8 @@ export async function sendOrderReceivedOpener(personId: string): Promise<void> {
   const conversation = await getOrCreateSupportConversation(personId);
   const dnd = await isCustomerSmsDnd(personId);
   if (customer.phone && !dnd) {
-    const text = renderOrderReceivedMessage(customer.firstName);
+    const isFirstTextFromThisNumber = !(await hasAnyOutboundSupportMessage(conversation.id));
+    const text = renderOrderReceivedMessage(customer.firstName, isFirstTextFromThisNumber);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
       await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
@@ -107,7 +108,8 @@ export async function sendRefillOrderReceivedNotice(personId: string): Promise<v
   const conversation = await getOrCreateSupportConversation(personId);
   const dnd = await isCustomerSmsDnd(personId);
   if (customer.phone && !dnd) {
-    const text = renderRefillOrderReceivedMessage(customer.firstName);
+    const isFirstTextFromThisNumber = !(await hasAnyOutboundSupportMessage(conversation.id));
+    const text = renderRefillOrderReceivedMessage(customer.firstName, isFirstTextFromThisNumber);
     try {
       const result = await getSmsProvider().sendMessage(customer.phone, text);
       await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });

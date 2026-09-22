@@ -11,25 +11,29 @@ import {
 
 describe("renderOrderReceivedMessage", () => {
   it("introduces Sophie, mentions the new number, and mentions the portal link", () => {
-    const text = renderOrderReceivedMessage("Jamie");
+    const text = renderOrderReceivedMessage("Jamie", true);
     expect(text).toContain("this is Sophie");
     expect(text).toContain("our new number");
     expect(text).toContain("https://patient.tryark.com/login");
   });
 
   it("interpolates the first name, falling back to 'there' when blank", () => {
-    expect(renderOrderReceivedMessage("Jamie")).toContain("Jamie");
-    expect(renderOrderReceivedMessage("  ")).toContain("there");
+    expect(renderOrderReceivedMessage("Jamie", true)).toContain("Jamie");
+    expect(renderOrderReceivedMessage("  ", true)).toContain("there");
   });
 
-  it("asks the customer to confirm this is the best number to reach them, to prompt a reply", () => {
-    expect(renderOrderReceivedMessage("Jamie")).toContain("confirm this is the best number to reach you");
+  it("asks the customer to confirm this is the best number to reach them when this is their first text from this number", () => {
+    expect(renderOrderReceivedMessage("Jamie", true)).toContain("confirm this is the best number to reach you");
+  });
+
+  it("does NOT ask when this isn't their first text from this number", () => {
+    expect(renderOrderReceivedMessage("Jamie", false)).not.toContain("confirm this is the best number to reach you");
   });
 });
 
 describe("renderRefillOrderReceivedMessage", () => {
   it("introduces Sophie, mentions the new number, says refill (not the first-order welcome copy), and mentions the portal link", () => {
-    const text = renderRefillOrderReceivedMessage("Jamie");
+    const text = renderRefillOrderReceivedMessage("Jamie", true);
     expect(text).toContain("this is Sophie");
     expect(text).toContain("our new number");
     expect(text).toContain("refill");
@@ -38,12 +42,20 @@ describe("renderRefillOrderReceivedMessage", () => {
   });
 
   it("interpolates the first name, falling back to 'there' when blank", () => {
-    expect(renderRefillOrderReceivedMessage("Jamie")).toContain("Jamie");
-    expect(renderRefillOrderReceivedMessage("  ")).toContain("there");
+    expect(renderRefillOrderReceivedMessage("Jamie", true)).toContain("Jamie");
+    expect(renderRefillOrderReceivedMessage("  ", true)).toContain("there");
   });
 
-  it("also asks the customer to confirm this is the best number to reach them, same as the first-order message — deliberately on every send while the new number is warming up", () => {
-    expect(renderRefillOrderReceivedMessage("Jamie")).toContain("confirm this is the best number to reach you");
+  it("asks the customer to confirm this is the best number when this is their first text from this number, even though it's a refill", () => {
+    // Real case this covers: a returning customer whose first-ever order
+    // predates this number gets their first actual text from Sophie's
+    // number on a refill notice, not a first-order one — they still need
+    // to be asked, since order type isn't what determines this.
+    expect(renderRefillOrderReceivedMessage("Jamie", true)).toContain("confirm this is the best number to reach you");
+  });
+
+  it("does NOT ask when this isn't their first text from this number", () => {
+    expect(renderRefillOrderReceivedMessage("Jamie", false)).not.toContain("confirm this is the best number to reach you");
   });
 });
 

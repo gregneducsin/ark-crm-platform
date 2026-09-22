@@ -7,23 +7,32 @@
  * follow-up-templates.ts.
  */
 
-export function renderOrderReceivedMessage(firstName: string): string {
+/**
+ * isFirstTextFromThisNumber controls the trailing "confirm this is the best
+ * number" ask — true only when this is literally the first outbound message
+ * this customer has ever gotten from Sophie's number (see
+ * hasAnyOutboundSupportMessage in support-conversations.service.ts), not
+ * whether this happens to be their first order. A returning customer whose
+ * first-ever order predates this number still needs to be asked the first
+ * time they actually hear from it, even on a refill notice.
+ */
+export function renderOrderReceivedMessage(firstName: string, isFirstTextFromThisNumber: boolean): string {
   const name = firstName.trim() || "there";
   return (
     `Hello ${name}, this is Sophie on the doctor support side, texting from our new number. It looks like we received your order and the doctor is reviewing it now. ` +
     "If they have any further questions they will reach out in the patient portal, https://patient.tryark.com/login\n\n" +
-    "We will update you once the prescription is written and sent to the pharmacy.\n\n" +
-    "Also, can you reply to confirm this is the best number to reach you at?"
+    "We will update you once the prescription is written and sent to the pharmacy." +
+    (isFirstTextFromThisNumber ? "\n\nAlso, can you reply to confirm this is the best number to reach you at?" : "")
   );
 }
 
-export function renderRefillOrderReceivedMessage(firstName: string): string {
+export function renderRefillOrderReceivedMessage(firstName: string, isFirstTextFromThisNumber: boolean): string {
   const name = firstName.trim() || "there";
   return (
     `Hi ${name}, this is Sophie on the doctor support side, texting from our new number. We've received your refill order and it's being processed now. ` +
     "If you have any questions in the meantime, you can check your patient portal, https://patient.tryark.com/login\n\n" +
-    "We will update you once it ships.\n\n" +
-    "Also, can you reply to confirm this is the best number to reach you at?"
+    "We will update you once it ships." +
+    (isFirstTextFromThisNumber ? "\n\nAlso, can you reply to confirm this is the best number to reach you at?" : "")
   );
 }
 

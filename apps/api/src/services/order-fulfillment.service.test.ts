@@ -157,6 +157,40 @@ describe("sendRefillOrderReceivedNotice", () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
   });
+
+  it("asks the customer to confirm the number when this refill notice is their actual first text from this number — real case: their first-ever order predates this number", async () => {
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_refill_first_text" });
+
+    const personId = await seedCustomer();
+    await sendRefillOrderReceivedNotice(personId);
+
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559991111", expect.stringContaining("confirm this is the best number to reach you"));
+  });
+
+  it("does NOT ask again on a second refill notice once they've already gotten a first text from this number", async () => {
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_refill_repeat" });
+
+    const personId = await seedCustomer();
+    await sendRefillOrderReceivedNotice(personId);
+    sendMessageMock.mockClear();
+    await sendRefillOrderReceivedNotice(personId);
+
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559991111", expect.not.stringContaining("confirm this is the best number to reach you"));
+  });
+
+  it("does NOT ask on a refill notice when the customer already got the ask on their first-order opener", async () => {
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_cross_function" });
+
+    const personId = await seedCustomer();
+    await sendOrderReceivedOpener(personId);
+    sendMessageMock.mockClear();
+    await sendRefillOrderReceivedNotice(personId);
+
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559991111", expect.not.stringContaining("confirm this is the best number to reach you"));
+  });
 });
 
 describe("handlePrescriptionWritten", () => {

@@ -160,6 +160,25 @@ export async function listSupportMessages(conversationId: string, limit = MAX_HI
   return rows.reverse();
 }
 
+/**
+ * True once at least one outbound message has ever been sent on this
+ * conversation — used to gate the "confirm this is the best number to reach
+ * you" ask on order-fulfillment notices (order-fulfillment.service.ts) to
+ * only the customer's actual first text from Sophie's number, not every
+ * first-order notice regardless of prior texting history. A customer whose
+ * first-ever order predates this number, texted now for a refill, still
+ * needs to be asked — this checks real message history, not which webhook
+ * fired, so that case is covered the same as a genuine first-ever order.
+ */
+export async function hasAnyOutboundSupportMessage(conversationId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: supportConversationMessagesTable.id })
+    .from(supportConversationMessagesTable)
+    .where(and(eq(supportConversationMessagesTable.conversationId, conversationId), eq(supportConversationMessagesTable.direction, "outbound")))
+    .limit(1);
+  return Boolean(row);
+}
+
 /** Same reasoning as countRecentOutboundMessages in conversations.service.ts — Sophie's send-burst guard in sophie-dispatch.service.ts uses this. */
 export async function countRecentOutboundSupportMessages(conversationId: string, windowMs: number): Promise<number> {
   const since = new Date(Date.now() - windowMs);
