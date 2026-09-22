@@ -10,10 +10,9 @@
  *  • Never log the API key, system prompt content, or reply text.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Model: claude-fable-5-1 (fixed) — same reasoning and same switch as
- * Alexis's provider.ts: this runs per patient message in a real-time
- * SMS-style loop, so the higher per-message cost and latency versus Haiku
- * compound here too.
+ * Model: claude-haiku-4-5-20251001 (fixed) — same reasoning and same
+ * temporary revert as Alexis's provider.ts: Fable 5.1 failed instantly on
+ * every single call (this account's API key doesn't have access to it yet).
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -23,7 +22,7 @@ import { APPROVED_REVIEW_URLS, APPROVED_PORTAL_URL, APPROVED_REVIEW_WRITE_URL } 
 import { SophieInteractiveSchema } from "./safety.js";
 
 const CALL_TIMEOUT_MS = 20_000;
-const MODEL = "claude-fable-5-1";
+const MODEL = "claude-haiku-4-5-20251001";
 
 export class SophieProviderError extends Error {
   constructor(

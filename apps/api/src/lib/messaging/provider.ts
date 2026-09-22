@@ -14,12 +14,15 @@
  *    and appends it — see knowledge-catalog.ts's APPROVED_REVIEW_URLS docstring.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Model: claude-fable-5-1 (fixed). Switched from claude-haiku-4-5-20251001 —
- * Fable is tuned for exactly this kind of persona-driven conversation, at
- * the cost of materially higher per-message price and (likely) latency than
- * Haiku. This runs per customer message in a real-time SMS-style loop, so
- * watch both cost and the CALL_TIMEOUT_MS budget below if reply quality
- * doesn't end up justifying the difference.
+ * Model: claude-haiku-4-5-20251001 (fixed). Temporarily reverted from
+ * claude-fable-5-1 — every single call to Fable failed instantly with
+ * PROVIDER_HTTP_ERROR (confirmed on Luma via Railway deploy logs: 3/3 retry
+ * attempts failed ~300ms apart, no successful call at all, across every
+ * customer), almost certainly because this account's API key doesn't have
+ * Fable 5.1 access yet. Ark got the identical switch the same day, so it's
+ * reverted here too on the same reasoning. Re-attempt only after confirming
+ * access on the Anthropic Console — do not just flip MODEL back without
+ * checking.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -31,7 +34,7 @@ import { ClaudeInteractiveSchema } from "./safety.js";
 import { OBJECTION_LIBRARY, OBJECTION_KEYS, type ObjectionScript, type ObjectionKey } from "./objection-handling.js";
 
 const CALL_TIMEOUT_MS = 20_000;
-const MODEL = "claude-fable-5-1";
+const MODEL = "claude-haiku-4-5-20251001";
 
 export class ProviderError extends Error {
   constructor(
