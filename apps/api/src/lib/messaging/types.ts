@@ -112,6 +112,9 @@ export interface BotPreviewRequestBody {
     readonly hasTimeForIntake: string | null;
     readonly wantsPlanInclusions: string | null;
     readonly readyForForm: string | null;
+    readonly planLength: string | null;
+    readonly dosagePreference: string | null;
+    readonly startTimingPreference: string | null;
     /** Free-text state the patient's in — meta_form only, informational, never gates anything. */
     readonly state: string | null;
   };

@@ -175,6 +175,11 @@ CONVERSATION GOALS (work through in this order, one question at a time — do no
    use the objection-handling library below.
 6. hasTimeForIntake: do they have about 10 minutes to complete the form now.
 7. readyForForm: once they've agreed, use action=send_form.
+Additionally, whenever mentioned (not part of the numbered sequence above — track these
+opportunistically, don't ask for them out of turn): planLength (which plan length they've settled
+on), dosagePreference (a specific starting dose they've requested), startTimingPreference (their
+general readiness to begin). Once one of these is known, don't ask about it again — check CURRENT
+CONVERSATION STATE first.
 Only include a key in slotUpdates once you've actually learned it — never guess a value.` as const;
 
 const ABANDONED_CART_GOALS = `\
@@ -183,7 +188,14 @@ Work naturally toward learning these facts (goals, not a forced sequence). Only 
 slotUpdates once you've actually learned it — omit keys you don't yet know, never guess a value.
 - selectedProduct: "semaglutide" or "tirzepatide" (string values only, never a boolean)
 - currentlyTaking, wantsProcessExplanation, hasTimeForIntake, wantsPlanInclusions, readyForForm:
-  "yes" or "no" (string values only, never a boolean like true/false)` as const;
+  "yes" or "no" (string values only, never a boolean like true/false)
+- planLength: "month_to_month", "3_month", or "6_month" — once the patient has actually settled on
+  one. Check CURRENT CONVERSATION STATE before asking which plan length they want — if it's already
+  known (in any form they stated it), don't ask again, just use it.
+- dosagePreference: a specific starting dose they've requested, e.g. "7.5 mg" — only when actually
+  stated, never guessed or suggested by you first.
+- startTimingPreference: "ready_now", "within_a_week", or "needs_more_time" — their general
+  readiness to begin, once expressed in any form.` as const;
 
 function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readonly KnowledgeTopic[]): string {
   const s = body.currentSlots;
@@ -197,6 +209,9 @@ function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readon
     `  hasTimeForIntake: ${s.hasTimeForIntake ?? "unknown"}`,
     `  wantsPlanInclusions: ${s.wantsPlanInclusions ?? "unknown"}`,
     `  readyForForm: ${s.readyForForm ?? "unknown"}`,
+    `  planLength: ${s.planLength ?? "unknown"}`,
+    `  dosagePreference: ${s.dosagePreference ?? "unknown"}`,
+    `  startTimingPreference: ${s.startTimingPreference ?? "unknown"}`,
   ].join("\n");
 
   const lastQ = body.lastQuestion ? `Last question asked to patient: "${body.lastQuestion}"` : "No question has been asked yet.";
@@ -250,7 +265,12 @@ TWO-MESSAGE FORMAT (applies to every action=reply, pause, or ask_product/explain
 - nextQuestion = the single follow-up question sent as a separate message immediately after reply.
   This is REQUIRED whenever action=reply — there is no such thing as a reply with no question.
 - nextQuestion MUST end with "?" and contain exactly one "?".
-- Never repeat a question the patient already answered.
+- Never repeat a question the patient already answered. Check CURRENT CONVERSATION STATE first —
+  if a slot like planLength, dosagePreference, or startTimingPreference already has a value, don't
+  ask that question again in any reworded form. If the patient defers instead of giving a specific
+  answer (e.g. "whatever you think is best" to a plan-length question), don't guess a slot value —
+  make a specific recommendation yourself (e.g. "Most patients start with the 3-month plan — want
+  me to set that up?") and only set the slot once they actually confirm one.
 - This still applies when you need to ask a CLARIFYING question before you can proceed (e.g. the
   patient says "let's do it" but selectedProduct is still unknown). Do not fold the clarifying
   question into reply and leave nextQuestion empty — split it the same as any other turn.
@@ -344,6 +364,20 @@ const BOT_REPLY_TOOL = {
           hasTimeForIntake: { type: ["string", "null"], enum: ["yes", "no", null] },
           wantsPlanInclusions: { type: ["string", "null"], enum: ["yes", "no", null] },
           readyForForm: { type: ["string", "null"], enum: ["yes", "no", null] },
+          planLength: {
+            type: ["string", "null"],
+            enum: ["month_to_month", "3_month", "6_month", null],
+            description: "Only once the patient has actually settled on a plan length — the same three tiers every pricing topic quotes.",
+          },
+          dosagePreference: {
+            type: ["string", "null"],
+            description: "A specific starting dose the patient has requested, e.g. '7.5 mg' — only the number and 'mg', nothing else. Null unless one was actually stated.",
+          },
+          startTimingPreference: {
+            type: ["string", "null"],
+            enum: ["ready_now", "within_a_week", "needs_more_time", null],
+            description: "General start-readiness, once expressed — not a specific calendar date, just their overall stance.",
+          },
           state: { type: ["string", "null"], description: "Free text, e.g. 'Texas'. meta_form leads only." },
         },
         additionalProperties: false,

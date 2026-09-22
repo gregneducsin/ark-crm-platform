@@ -210,6 +210,23 @@ describe("processInboundMessage", () => {
     expect(conversation.lastQuestion).toBe("Which plan are you considering?");
   });
 
+  it("merges the new planLength/dosagePreference/startTimingPreference slots into conversation state the same way", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_slots" });
+    runAlexisTurnMock.mockResolvedValueOnce(
+      okResult({ validatedSlotUpdates: { planLength: "3_month", dosagePreference: "7.5 mg", startTimingPreference: "ready_now" } }),
+    );
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "let's do the 3 month plan, 7.5mg, I want to start now");
+
+    const conversation = await getOrCreateConversation(personId);
+    expect(conversation.planLength).toBe("3_month");
+    expect(conversation.dosagePreference).toBe("7.5 mg");
+    expect(conversation.startTimingPreference).toBe("ready_now");
+  });
+
   it("still logs the outbound message when the SMS send itself fails, but without a providerMessageId", async () => {
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();

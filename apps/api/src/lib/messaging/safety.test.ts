@@ -653,4 +653,56 @@ describe("interactivePostCheck: slot validation", () => {
       expect(result.validatedSlotUpdates).toEqual({ currentlyTaking: "yes", selectedProduct: "tirzepatide" });
     }
   });
+
+  it("accepts a valid planLength slot value", () => {
+    const result = check(reply({ slotUpdates: { planLength: "3_month" } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ planLength: "3_month" });
+    }
+  });
+
+  it("rejects an invalid planLength slot value", () => {
+    const result = check(reply({ slotUpdates: { planLength: "12_month" } }));
+    expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
+  });
+
+  it("accepts a valid startTimingPreference slot value", () => {
+    const result = check(reply({ slotUpdates: { startTimingPreference: "ready_now" } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ startTimingPreference: "ready_now" });
+    }
+  });
+
+  it("rejects an invalid startTimingPreference slot value", () => {
+    const result = check(reply({ slotUpdates: { startTimingPreference: "next_year" } }));
+    expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
+  });
+
+  it("accepts a well-formed dosagePreference slot value", () => {
+    const result = check(reply({ slotUpdates: { dosagePreference: "7.5 mg" } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ dosagePreference: "7.5 mg" });
+    }
+  });
+
+  it("accepts a null dosagePreference slot value", () => {
+    const result = check(reply({ slotUpdates: { dosagePreference: null } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.validatedSlotUpdates).toEqual({ dosagePreference: null });
+    }
+  });
+
+  it("rejects a dosagePreference slot value that isn't a bare number+mg", () => {
+    const result = check(reply({ slotUpdates: { dosagePreference: "a higher dose" } }));
+    expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
+  });
+
+  it("rejects a dosagePreference value with extra text beyond the dose itself", () => {
+    const result = check(reply({ slotUpdates: { dosagePreference: "start me at 7.5 mg please" } }));
+    expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
+  });
 });

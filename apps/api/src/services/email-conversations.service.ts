@@ -21,6 +21,9 @@ export interface EmailConversationStatePatch {
   readonly hasTimeForIntake?: "yes" | "no" | null;
   readonly wantsPlanInclusions?: "yes" | "no" | null;
   readonly readyForForm?: "yes" | "no" | null;
+  readonly planLength?: "month_to_month" | "3_month" | "6_month" | null;
+  readonly dosagePreference?: string | null;
+  readonly startTimingPreference?: "ready_now" | "within_a_week" | "needs_more_time" | null;
   readonly state?: string | null;
   readonly lastQuestion?: string | null;
   readonly pendingTopic?: string | null;
@@ -161,6 +164,9 @@ export function toEmailPreviewBody(conversation: EmailConversation, history: rea
       hasTimeForIntake: conversation.hasTimeForIntake,
       wantsPlanInclusions: conversation.wantsPlanInclusions,
       readyForForm: conversation.readyForForm,
+      planLength: conversation.planLength,
+      dosagePreference: conversation.dosagePreference,
+      startTimingPreference: conversation.startTimingPreference,
       state: conversation.state,
     },
     lastQuestion: conversation.lastQuestion,

@@ -186,6 +186,22 @@ describe("toBotPreviewBody", () => {
     expect(body.leadSource).toBe("meta_form");
     expect(body.currentSlots.state).toBe("Texas");
   });
+
+  it("carries planLength, dosagePreference, and startTimingPreference through", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    await updateConversationState(conversation.id, {
+      planLength: "3_month",
+      dosagePreference: "7.5 mg",
+      startTimingPreference: "ready_now",
+    });
+    const updated = await getOrCreateConversation(personId);
+
+    const body = toBotPreviewBody(updated, [], null);
+    expect(body.currentSlots.planLength).toBe("3_month");
+    expect(body.currentSlots.dosagePreference).toBe("7.5 mg");
+    expect(body.currentSlots.startTimingPreference).toBe("ready_now");
+  });
 });
 
 describe("listConversationSummaries / getConversationDetail", () => {

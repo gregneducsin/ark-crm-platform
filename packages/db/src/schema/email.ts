@@ -25,6 +25,12 @@ export const emailConversationsTable = pgTable(
     hasTimeForIntake: text("has_time_for_intake", { enum: ["yes", "no"] }),
     wantsPlanInclusions: text("wants_plan_inclusions", { enum: ["yes", "no"] }),
     readyForForm: text("ready_for_form", { enum: ["yes", "no"] }),
+    /** Twin of conversationsTable's planLength (messaging.ts) — see that column's docstring. */
+    planLength: text("plan_length", { enum: ["month_to_month", "3_month", "6_month"] }),
+    /** Twin of conversationsTable's dosagePreference (messaging.ts) — see that column's docstring. */
+    dosagePreference: text("dosage_preference"),
+    /** Twin of conversationsTable's startTimingPreference (messaging.ts) — see that column's docstring. */
+    startTimingPreference: text("start_timing_preference", { enum: ["ready_now", "within_a_week", "needs_more_time"] }),
     lastQuestion: text("last_question"),
     pendingTopic: text("pending_topic"),
     lastDraft: text("last_draft"),

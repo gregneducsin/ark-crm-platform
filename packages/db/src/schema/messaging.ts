@@ -112,6 +112,37 @@ export const conversationsTable = pgTable(
     hasTimeForIntake: text("has_time_for_intake", { enum: ["yes", "no"] }),
     wantsPlanInclusions: text("wants_plan_inclusions", { enum: ["yes", "no"] }),
     readyForForm: text("ready_for_form", { enum: ["yes", "no"] }),
+    /**
+     * Which plan length the patient has settled on, once they've stated one —
+     * matches the three tiers every pricing knowledge topic quotes (Bask
+     * offers month-to-month, 3-month, and 6-month variants — no 1-month
+     * plan, unlike Luma). Ported from Luma: a real incident there had a
+     * patient answer a "which plan length" question several different ways,
+     * none of which the bot ever recognized as resolving it, so it kept
+     * re-asking a reworded version of the same question. Surfacing this in
+     * CURRENT CONVERSATION STATE (see buildSystemPrompt) gives it something
+     * concrete to check instead of re-reading raw history and guessing.
+     */
+    planLength: text("plan_length", { enum: ["month_to_month", "3_month", "6_month"] }),
+    /**
+     * A specific starting dose the patient has requested, once one is
+     * mentioned (e.g. "7.5 mg") — free text rather than an enum because the
+     * valid dose progression differs by product (see knowledge-catalog.ts's
+     * titration topic) and duplicating that list here would drift the moment
+     * either progression changes. Validated at the app layer by shape (a
+     * number plus "mg"), not membership — see safety.ts's DOSAGE_SLOT_KEY.
+     * Purely a memory aid for the bot's own reply; the guardrails governing
+     * what Alexis is actually allowed to SAY about dosing are unchanged and
+     * unaffected by this slot's value.
+     */
+    dosagePreference: text("dosage_preference"),
+    /**
+     * General start-readiness the patient has expressed, once stated — just
+     * an overall stance, not a specific calendar date. Tracked so the bot
+     * doesn't re-ask "are you ready to start?" after they've already
+     * answered it in some form.
+     */
+    startTimingPreference: text("start_timing_preference", { enum: ["ready_now", "within_a_week", "needs_more_time"] }),
     lastQuestion: text("last_question"),
     pendingTopic: text("pending_topic"),
     lastDraft: text("last_draft"),

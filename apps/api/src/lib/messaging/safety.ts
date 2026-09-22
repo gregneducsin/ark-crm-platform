@@ -774,6 +774,8 @@ const SLOT_VALIDATORS: Record<string, readonly (string | null)[]> = {
   hasTimeForIntake: [null, "yes", "no"],
   wantsPlanInclusions: [null, "yes", "no"],
   readyForForm: [null, "yes", "no"],
+  planLength: [null, "month_to_month", "3_month", "6_month"],
+  startTimingPreference: [null, "ready_now", "within_a_week", "needs_more_time"],
 };
 
 /**
@@ -786,6 +788,21 @@ const FREE_TEXT_MAX_LENGTH = 60;
 
 function isValidFreeTextSlotValue(value: unknown): boolean {
   return value === null || (typeof value === "string" && value.trim().length > 0 && value.length <= FREE_TEXT_MAX_LENGTH);
+}
+
+/**
+ * dosagePreference isn't a fixed enum (see messaging.ts schema's docstring on
+ * this column) — the valid progression differs by product and duplicating it
+ * here would drift the moment either one changes. Validated by shape instead:
+ * a plain number (optionally decimal) followed by "mg", nothing else. This is
+ * deliberately stricter than FREE_TEXT_SLOT_KEYS' generic length check — it's
+ * a memory aid for a specific dose, not a place for arbitrary text to land.
+ */
+const DOSAGE_SLOT_KEY = "dosagePreference";
+const DOSAGE_VALUE_RE = /^\d+(\.\d+)?\s?mg$/i;
+
+function isValidDosagePreferenceValue(value: unknown): boolean {
+  return value === null || (typeof value === "string" && DOSAGE_VALUE_RE.test(value.trim()));
 }
 
 /**
@@ -1124,6 +1141,13 @@ export function interactivePostCheck(
   for (const [key, value] of Object.entries(rawSlotUpdates)) {
     if (FREE_TEXT_SLOT_KEYS.has(key)) {
       if (!isValidFreeTextSlotValue(value)) {
+        return { ok: false, code: `INVALID_SLOT_VALUE` };
+      }
+      validatedSlotUpdates[key] = value;
+      continue;
+    }
+    if (key === DOSAGE_SLOT_KEY) {
+      if (!isValidDosagePreferenceValue(value)) {
         return { ok: false, code: `INVALID_SLOT_VALUE` };
       }
       validatedSlotUpdates[key] = value;
