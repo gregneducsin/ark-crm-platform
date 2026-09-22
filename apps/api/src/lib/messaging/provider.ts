@@ -14,11 +14,12 @@
  *    and appends it — see knowledge-catalog.ts's APPROVED_REVIEW_URLS docstring.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Model: claude-haiku-4-5-20251001 (fixed). Chosen deliberately over a larger
- * model for this specific loop — real-time SMS-style back-and-forth needs a
- * few-second turnaround and this runs per customer message, so cost and
- * latency compound in a way they don't for the low-volume dashboard AI
- * assistant (which uses Opus 5). Revisit if reply quality turns out to need it.
+ * Model: claude-fable-5-1 (fixed). Switched from claude-haiku-4-5-20251001 —
+ * Fable is tuned for exactly this kind of persona-driven conversation, at
+ * the cost of materially higher per-message price and (likely) latency than
+ * Haiku. This runs per customer message in a real-time SMS-style loop, so
+ * watch both cost and the CALL_TIMEOUT_MS budget below if reply quality
+ * doesn't end up justifying the difference.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -30,7 +31,7 @@ import { ClaudeInteractiveSchema } from "./safety.js";
 import { OBJECTION_LIBRARY, OBJECTION_KEYS, type ObjectionScript, type ObjectionKey } from "./objection-handling.js";
 
 const CALL_TIMEOUT_MS = 10_000;
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-fable-5-1";
 
 export class ProviderError extends Error {
   constructor(
