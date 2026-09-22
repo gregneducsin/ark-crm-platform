@@ -22,7 +22,7 @@ import type { KnowledgeTopic } from "../messaging/knowledge-catalog.js";
 import { APPROVED_REVIEW_URLS, APPROVED_PORTAL_URL, APPROVED_REVIEW_WRITE_URL } from "../messaging/knowledge-catalog.js";
 import { SophieInteractiveSchema } from "./safety.js";
 
-const CALL_TIMEOUT_MS = 10_000;
+const CALL_TIMEOUT_MS = 20_000;
 const MODEL = "claude-fable-5-1";
 
 export class SophieProviderError extends Error {
@@ -209,8 +209,9 @@ const SOPHIE_REPLY_TOOL = {
 };
 
 /**
- * Call Claude with a 10-second timeout. Throws on timeout, network error, or
- * malformed response. Never retries (the caller, runSophieTurn, owns retries).
+ * Call Claude with a 20-second timeout — same reasoning and same change as
+ * Alexis's provider.ts. Throws on timeout, network error, or malformed
+ * response. Never retries itself (the caller, runSophieTurn, owns retries).
  */
 export async function callSophieInteractive(
   body: SophiePreviewRequestBody,

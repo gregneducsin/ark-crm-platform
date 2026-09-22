@@ -30,7 +30,7 @@ import { APPROVED_REVIEW_URLS } from "./knowledge-catalog.js";
 import { ClaudeInteractiveSchema } from "./safety.js";
 import { OBJECTION_LIBRARY, OBJECTION_KEYS, type ObjectionScript, type ObjectionKey } from "./objection-handling.js";
 
-const CALL_TIMEOUT_MS = 10_000;
+const CALL_TIMEOUT_MS = 20_000;
 const MODEL = "claude-fable-5-1";
 
 export class ProviderError extends Error {
@@ -384,8 +384,12 @@ const BOT_REPLY_TOOL = {
 };
 
 /**
- * Call Claude with a 10-second timeout. Throws on timeout, network error, or
- * malformed response. Never retries.
+ * Call Claude with a 20-second timeout — raised from 10s when the loop moved
+ * to Fable, favoring letting a real answer finish over cutting it off early;
+ * the caller's own retry loop can still attempt this up to MAX_ATTEMPTS
+ * times, so a fully-exhausted worst case is a multiple of this, not just
+ * this value alone. Throws on timeout, network error, or malformed response.
+ * Never retries itself.
  */
 export async function callClaudeInteractive(
   body: BotPreviewRequestBody,
