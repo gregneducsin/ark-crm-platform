@@ -1,5 +1,7 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { getSmsProvider, SmsProviderNotConfiguredError } from "./sms-provider.js";
+import { recordPhoneSmsOptOut, SmsOptOutError } from "./sms-opt-out.js";
+import { SmsQuietHoursError } from "./send-window.js";
 
 const notifySlackMock = vi.fn();
 vi.mock("./slack.js", () => ({ notifySmsSlack: (...args: unknown[]) => notifySlackMock(...args) }));
@@ -14,6 +16,7 @@ describe("getSmsProvider", () => {
     if (originalApiKey === undefined) delete process.env.IBLUSEND_API_KEY;
     else process.env.IBLUSEND_API_KEY = originalApiKey;
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("throws SmsProviderNotConfiguredError when SMS_PROVIDER is unset", () => {
@@ -56,6 +59,32 @@ describe("getSmsProvider", () => {
   });
 
   describe("IbluSendProvider.sendMessage", () => {
+    it("blocks scheduled transport at night while allowing a live reply", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-15T06:00:00Z"));
+      process.env.SMS_PROVIDER = "iblusend";
+      process.env.IBLUSEND_API_KEY = "test-only";
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message_id: "synthetic-live-reply" }) });
+      vi.stubGlobal("fetch", fetchMock);
+      notifySlackMock.mockClear();
+      const provider = getSmsProvider();
+      await expect(provider.sendMessage("+15554443333", "Scheduled reminder", { scheduled: true })).rejects.toBeInstanceOf(SmsQuietHoursError);
+      expect(fetchMock).not.toHaveBeenCalled(); expect(notifySlackMock).not.toHaveBeenCalled();
+      await provider.sendMessage("+15554443333", "Live reply");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    it("blocks a previously obtained provider after STOP, including equivalent phone formatting", async () => {
+      process.env.SMS_PROVIDER = "iblusend";
+      process.env.IBLUSEND_API_KEY = "test-only";
+      const provider = getSmsProvider();
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      notifySlackMock.mockClear();
+      await recordPhoneSmsOptOut("+15558881234");
+      await expect(provider.sendMessage("(555) 888-1234", "Queued draft")).rejects.toBeInstanceOf(SmsOptOutError);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(notifySlackMock).not.toHaveBeenCalled();
+    });
     it("sends a message and returns the provider message id", async () => {
       process.env.SMS_PROVIDER = "iblusend";
       process.env.IBLUSEND_API_KEY = "iblu_test_abc123";
@@ -101,6 +130,38 @@ describe("getSmsProvider", () => {
 
       const result = await getSmsProvider().sendMessage("+15551234567", "Hello there");
       expect(result).toEqual({ providerMessageId: null });
+      expect(notifySlackMock).toHaveBeenCalledTimes(1);
+      expect(notifySlackMock.mock.calls[0][0]).toMatch(/unexpected iBluSend response shape/);
+    });
+
+
+    it.each([null, [], "accepted", { message_id: 123 }, { message_id: " " }])(
+      "does not retry an accepted send with an invalid response: %j",
+      async (response) => {
+        process.env.SMS_PROVIDER = "iblusend";
+        process.env.IBLUSEND_API_KEY = "iblu_test_abc123";
+        notifySlackMock.mockClear();
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => response });
+        vi.stubGlobal("fetch", fetchMock);
+        await expect(getSmsProvider().sendMessage("+15551234567", "Hello there"))
+          .resolves.toEqual({ providerMessageId: null });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(notifySlackMock).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("does not reject an accepted send when its JSON body cannot be read", async () => {
+      process.env.SMS_PROVIDER = "iblusend";
+      process.env.IBLUSEND_API_KEY = "iblu_test_abc123";
+      notifySlackMock.mockClear();
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => { throw new SyntaxError("Invalid JSON"); },
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(getSmsProvider().sendMessage("+15551234567", "Hello there"))
+        .resolves.toEqual({ providerMessageId: null });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(notifySlackMock).toHaveBeenCalledTimes(1);
       expect(notifySlackMock.mock.calls[0][0]).toMatch(/unexpected iBluSend response shape/);
     });

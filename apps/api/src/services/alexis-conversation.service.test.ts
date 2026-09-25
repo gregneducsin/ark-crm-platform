@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { intakeLinkTokensTable } from "@luma/db";
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { db, customersTable } from "@luma/db";
 import type { ClaudeInteractiveResult, BotPreviewRequestBody } from "../lib/messaging/types.js";
@@ -78,6 +80,28 @@ function modelResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeIn
 }
 
 describe("runAlexisTurn", () => {
+it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thing, what state are you in"])("deduplicates the follow-up before safety validation: %s", async (reply) => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply, nextQuestion: "What state are you in?" }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, reply: "Got it, thanks.", nextQuestion: "What state are you in?", requiresStaff: false, preCheckCode: null });
+  });
+
+  it("still rejects unsafe content in a duplicated follow-up", async () => {
+    callClaudeInteractiveMock.mockClear();
+    const nextQuestion = "Can you open https://unapproved.example.com now?";
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Thanks. " + nextQuestion, nextQuestion }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(result).toMatchObject({ ok: false, code: "UNAPPROVED_URL" });
+  });
+
+  it("still rejects unsafe main text after removing a safe duplicate", async () => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Visit https://unapproved.example.com. What state are you in?", nextQuestion: "What state are you in?" }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(result).toMatchObject({ ok: false, code: "UNAPPROVED_URL" });
+  });
   it("short-circuits on a pre-check block without ever calling the provider", async () => {
     callClaudeInteractiveMock.mockClear();
     const personId = await seedCustomer();
@@ -235,10 +259,7 @@ describe("runAlexisTurn", () => {
 
   it("keeps linkProvided sticky once true, even when a later turn's own self-report says false", async () => {
     callClaudeInteractiveMock.mockClear();
-    // The model drafting a plain acknowledgment reply (not another
-    // send_form) self-reports linkProvided:false this turn — nothing minted
-    // a link THIS turn, but the conversation already knows one went out
-    // earlier (body.linkProvided:true below).
+    // Preserve the previously recorded link state when a later model response reports false.
     callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ action: "reply", reply: "You're welcome!", nextQuestion: "Anything else?", linkProvided: false }));
     const personId = await seedCustomer();
     const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "Ty" }], linkProvided: true }));
@@ -325,7 +346,7 @@ describe("runAlexisTurn", () => {
     }
   });
 
-  it("retries up to the attempt cap on a question mark embedded in reply, with corrective feedback, and sends it as drafted anyway once exhausted — same fix as the Luma sibling app: this check failed 3 blind retries in a row with no corrective feedback and sat in total silence", async () => {
+  it("retries up to the attempt cap on a question mark embedded in reply, with corrective feedback, and sends it as drafted anyway once exhausted", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "Which one would you like, semaglutide or tirzepatide?" }));
     const personId = await seedCustomer();
@@ -366,7 +387,7 @@ describe("runAlexisTurn", () => {
     if (!result.ok) expect(result.code).toBe("PROHIBITED_CLINICAL_ABSOLUTE");
   });
 
-  it("retries a prohibited-clinical rejection once, with corrective feedback, and succeeds if the retry cites the required topic — same shape as the pricing-citation fix", async () => {
+  it("retries a prohibited-clinical rejection once, with corrective feedback, and succeeds if the retry cites the required topic", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock
       .mockResolvedValueOnce(modelResult({ reply: "We can get your treatment started once you're set up.", knowledgeTopicsUsed: [] }))
@@ -381,7 +402,7 @@ describe("runAlexisTurn", () => {
     if (result.ok) expect(result.reply).toBe("We can get your treatment started once you're set up.");
   });
 
-  it("sends the reply anyway once PROHIBITED_CLINICAL exhausts its own larger attempt budget, still flagging staff to double-check it", async () => {
+  it("sends Alexis's own reply anyway (never a substitute or silence) once every retry is exhausted, still flagging staff to double-check it", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply: "We can get your treatment started once you're set up.", knowledgeTopicsUsed: [] }));
     const personId = await seedCustomer();
@@ -438,7 +459,7 @@ describe("runAlexisTurn", () => {
     if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
   });
 
-  it("retries a SCHEMA_VALIDATION_ERROR with the specific ZodError issues fed back, and succeeds once the retry fixes it — same fix as the Luma sibling app: a longer 'how it works and the side effects' answer tripped schema validation and got zero retries at all", async () => {
+  it("retries a SCHEMA_VALIDATION_ERROR with the specific ZodError issues fed back, and succeeds once the retry fixes it", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock
       .mockRejectedValueOnce(new ProviderError("SCHEMA_VALIDATION_ERROR", '{"reply":"way too long..."}', undefined, "reply: String must contain at most 400 character(s)"))
@@ -483,5 +504,31 @@ describe("runAlexisTurn", () => {
     expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("PROVIDER_NOT_CONFIGURED");
+  });
+});
+
+describe("explicit plan confirmation", () => {
+  it("retries an inferred selection and accepts a clarification without saving a plan", async () => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ slotUpdates: { planLength: "3_month" } }))
+      .mockResolvedValueOnce(modelResult({ nextQuestion: "Would you like the 3-month plan?" }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({
+      messages: [{ direction: "inbound", body: "Whatever you think" }],
+    }));
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    expect(callClaudeInteractiveMock.mock.calls[1][2]).toContain("not explicitly confirmed");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.validatedSlotUpdates).not.toHaveProperty("planLength");
+  });
+
+  it("fails closed before minting a signup link if every attempt invents a plan selection", async () => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ action: "send_form", nextQuestion: null, slotUpdates: { planLength: "3_month" } }));
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "I'm unsure" }] }));
+    expect(result).toEqual({ ok: false, code: "UNCONFIRMED_PLAN_SELECTION" });
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+    const tokens = await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId));
+    expect(tokens).toHaveLength(0);
   });
 });

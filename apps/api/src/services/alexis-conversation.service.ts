@@ -1,3 +1,5 @@
+import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
+import { hasPlanConfirmation } from "../lib/messaging/plan-confirmation.js";
 import { interactivePreCheck, interactivePostCheck } from "../lib/messaging/safety.js";
 import { callClaudeInteractive, ProviderError } from "../lib/messaging/provider.js";
 import { getPreviewEnabledTopics } from "../lib/messaging/knowledge-catalog.js";
@@ -93,37 +95,7 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
 };
 
 /**
- * Post-check codes safe to retry. Two groups:
- *
- * Format-only slips (MISSING/INVALID/UNEXPECTED_NEXT_QUESTION,
- * QUESTION_MARK_IN_REPLY, REPEATED_DRAFT): the question landed in the wrong
- * field, or in two places, or Claude repeated its own last draft. Purely
- * mechanical, never a safety concern — by the time interactivePostCheck
- * reaches any of these, every content check (URL, clinical language,
- * pricing, templates) has already passed clean, so nothing else could be
- * wrong with the reply. Retried WITH corrective feedback (see RETRY_NOTES)
- * instead of blindly re-running the same prompt — a real production case in
- * the Luma sibling app had QUESTION_MARK_IN_REPLY fail 3 blind retries in a
- * row and sit in total silence, because nothing ever told the model what
- * specifically to fix. If every attempt still fails, the last drafted reply
- * is sent anyway — see NEVER_SILENT_CODES below.
- *
- * UNSUPPORTED_PRICING_CLAIM and PROHIBITED_CLINICAL: genuine citation-gating
- * problems, not pure format, so they're kept separate from the group above.
- * UNSUPPORTED_PRICING_CLAIM: a real production case in the Luma sibling app
- * had the conversation bot try to quote a price right after the customer
- * picked a product — exactly what it's supposed to do — but forget to cite
- * the pricing topic, get permanently blocked with no second attempt, and
- * sit unanswered until a staff member noticed and typed the same price in
- * by hand. It almost certainly knew the right number; it just missed a
- * citation formality. Still fails closed if every retry is exhausted,
- * though — an actually-wrong price is a real content problem, unlike the
- * format-only group, so it's NOT in NEVER_SILENT_CODES. PROHIBITED_CLINICAL:
- * the same citation-gating shape (see TOPIC_SPECIFIC_LANGUAGE in safety.ts),
- * and the same real production case showed the same failure mode: a
- * routine DTC eligibility conversation, answered every question asked of
- * it, then total silence because a gated word landed without its topic.
- * This one IS in NEVER_SILENT_CODES — see that constant's own docstring.
+ * Retry post-check failures with corrective feedback. Format failures and PROHIBITED_CLINICAL use NEVER_SILENT_CODES after retries; unsupported pricing continues to fail closed.
  */
 const RETRYABLE_POST_CHECK_CODES = new Set([
   "MISSING_NEXT_QUESTION",
@@ -136,26 +108,7 @@ const RETRYABLE_POST_CHECK_CODES = new Set([
 ]);
 
 /**
- * Once one of these codes exhausts its retry budget, the last drafted reply
- * is sent anyway (via interactivePostCheck's bypassCodes option, which
- * re-verifies every OTHER check still passes first) rather than falling
- * back to silence or a worse substitute reply. Every code here is purely
- * mechanical — a missing/malformed follow-up question, a question mark in
- * the wrong field, or a repeated draft — never a genuine content problem,
- * so accepting the model's own text carries no real risk. PROHIBITED_CLINICAL
- * is the one exception that isn't pure format (see its own entry in
- * RETRYABLE_POST_CHECK_CODES' docstring) but earns the same treatment: the
- * model is fully capable of answering a plain question, so the fix is to
- * give it every real chance to do so, not substitute a worse, off-topic
- * reply for its own. Its acceptance only ever waives the topic-citation
- * gate itself — never PROHIBITED_CLINICAL_ABSOLUTE (diagnose/contraindicated/
- * symptom language), which has no topic that could ever authorize it and
- * stays hard-blocked no matter how many attempts run out (see the bypass
- * call below, and safety.ts's InteractivePostCheckOptions docstring).
- *
- * UNSUPPORTED_PRICING_CLAIM is deliberately NOT here — a genuinely wrong or
- * unbacked price is a real content problem, not a format one, so it keeps
- * failing closed exactly as before once its retries are exhausted.
+ * After retries, these codes may use the last draft only if all other checks pass. PROHIBITED_CLINICAL bypasses topic citation only; absolute clinical prohibitions remain enforced. Unsupported pricing is excluded.
  */
 const NEVER_SILENT_CODES = new Set([
   "MISSING_NEXT_QUESTION",
@@ -319,6 +272,13 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
       continue;
     }
 
+    if (!hasPlanConfirmation(body, raw.slotUpdates.planLength)) {
+      if (attempt >= MAX_ATTEMPTS) return { ok: false, code: "UNCONFIRMED_PLAN_SELECTION" };
+      retryNote = "The customer has not explicitly confirmed that plan length. Do not set planLength or claim they chose it. Answer their current concern, then ask them to confirm one specific duration. A recommendation or vague answer is not consent.";
+      continue;
+    }
+
+    raw = deduplicateFollowUp(raw);
     post = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys);
     if (post.ok) break;
 
@@ -398,17 +358,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     link,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    // Once a link has actually gone out, that fact must never depend on
-    // Claude correctly re-asserting linkProvided:true on every single later
-    // turn — it's a fresh, self-reported field every turn (see provider.ts),
-    // not something the model inherits automatically. A real Luma
-    // production case (Starrann Wilson) showed the risk: link sent and
-    // clicked, then her very next turn (a plain "Yes"/"Ty" reply) reported
-    // linkProvided:false, silently flipping the persisted state back and
-    // hiding the "link sent"/"link clicked" badges even though the link and
-    // click were real. Falling back to body.linkProvided (what we already
-    // knew coming into this turn) makes it sticky — once true, a single bad
-    // self-report on a later turn can no longer erase it.
+    // Preserve the previously recorded link state when a later model response reports false.
     linkProvided: link !== null ? true : (result.linkProvided || body.linkProvided),
     promoOffered: result.promoOffered,
     inboundSentiment: result.inboundSentiment,

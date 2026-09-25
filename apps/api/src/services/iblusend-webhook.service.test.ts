@@ -11,6 +11,7 @@ import {
   webhookEventsTable,
 } from "@luma/db";
 import { eq } from "drizzle-orm";
+import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
 
 const processInboundMessageMock = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("./alexis-dispatch.service.js", () => ({ processInboundMessage: processInboundMessageMock }));
@@ -71,6 +72,14 @@ function envelope(overrides: { event?: string; eventId?: string; data?: Record<s
 }
 
 describe("handleIbluSendWebhook", () => {
+  it("persists unknown-sender STOP even when onboarding fails and deduplicates the webhook retry", async () => {
+    const phone = uniquePhone();
+    const input = envelope({ data: { phone_number: phone, content: "STOP" } });
+    recordAndClassifyUnmatchedSmsMock.mockRejectedValueOnce(new Error("Synthetic onboarding failure"));
+    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: false });
+    expect(await isPhoneSmsOptedOut(phone)).toBe(true);
+    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: true });
+  });
   it("routes to Sophie when a support conversation already exists for the customer", async () => {
     processInboundMessageMock.mockClear();
     processInboundSupportMessageMock.mockClear();
@@ -82,7 +91,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "when should I take this" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundSupportMessageMock).toHaveBeenCalledWith(personId, "when should I take this");
+    expect(processInboundSupportMessageMock).toHaveBeenCalledWith(personId, "when should I take this", undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
     expect(processInboundMessageMock).not.toHaveBeenCalled();
   });
 
@@ -97,7 +106,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "how much is it" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "how much is it");
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "how much is it", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
     expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
   });
 
@@ -127,7 +136,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: `+1${bareDigits}`, content: "hi" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hi");
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hi", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("routes to the purchased customer's Sophie conversation, not a stale unsold lead sharing the same phone", async () => {
@@ -145,7 +154,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "thank you" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundSupportMessageMock).toHaveBeenCalledWith(purchasedCustomerId, "thank you");
+    expect(processInboundSupportMessageMock).toHaveBeenCalledWith(purchasedCustomerId, "thank you", undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
     expect(processInboundMessageMock).not.toHaveBeenCalled();
   });
 
@@ -160,7 +169,7 @@ describe("handleIbluSendWebhook", () => {
     expect(result).toEqual({ duplicate: false });
     expect(processInboundMessageMock).not.toHaveBeenCalled();
     expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
-    expect(recordAndClassifyUnmatchedSmsMock).toHaveBeenCalledWith(phone, "hi there");
+    expect(recordAndClassifyUnmatchedSmsMock).toHaveBeenCalledWith(phone, "hi there", undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("still marks the webhook event processed even when the unmatched-SMS pipeline itself throws", async () => {
@@ -182,7 +191,7 @@ describe("handleIbluSendWebhook", () => {
     const personId = await seedCustomer(phone);
     await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "hey is this ark health" } }));
 
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hey is this ark health");
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hey is this ark health", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
     expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
   });
 
@@ -194,7 +203,7 @@ describe("handleIbluSendWebhook", () => {
     const personId = await seedCustomer(phone);
     await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: null, media_urls: ["https://cdn.iblusend.example/media/abc123.jpg"] } }));
 
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "[Image attached]", undefined, ["https://cdn.iblusend.example/media/abc123.jpg"]);
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "[Image attached]", undefined, ["https://cdn.iblusend.example/media/abc123.jpg"], expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("passes both the caption and the media URLs through when a message has both", async () => {
@@ -207,7 +216,7 @@ describe("handleIbluSendWebhook", () => {
       envelope({ data: { phone_number: phone, content: "here's a pic of the rash", media_urls: ["https://cdn.iblusend.example/media/def456.jpg"] } }),
     );
 
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "here's a pic of the rash", undefined, ["https://cdn.iblusend.example/media/def456.jpg"]);
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "here's a pic of the rash", undefined, ["https://cdn.iblusend.example/media/def456.jpg"], expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("still drops a message with neither content nor media_urls (nothing meaningful to process)", async () => {
@@ -263,7 +272,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "the 3-month one" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "the 3-month one");
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "the 3-month one", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("does not treat a matching INBOUND message as an echo — only a matching OUTBOUND one counts", async () => {
@@ -277,7 +286,7 @@ describe("handleIbluSendWebhook", () => {
     const result = await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "sounds good" } }));
 
     expect(result).toEqual({ duplicate: false });
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "sounds good");
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "sounds good", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
   it("applies the same echo guard on Sophie's side when a support conversation owns the thread", async () => {

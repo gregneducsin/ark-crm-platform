@@ -948,9 +948,11 @@ export function interactivePostCheck(
   permittedTopicKeys: ReadonlySet<string> = new Set(),
   options: InteractivePostCheckOptions = {},
 ): InteractivePostCheckResult {
-  const { reply } = raw;
-
-  if (reply !== null) {
+  // Check each outbound message independently: safe reply text must not
+  // hide unsafe content (or negate a claim) in the separate follow-up.
+  for (const field of ["reply", "nextQuestion"] as const) {
+    const reply = raw[field];
+    if (reply === null || reply === undefined) continue;
     // URL — only the fixed review-site URLs are allowed. No intake/signup URL
     // is ever allowlisted here: those are minted per-lead server-side (see
     // knowledge-catalog.ts's APPROVED_REVIEW_URLS docstring) and Claude must
@@ -969,7 +971,7 @@ export function interactivePostCheck(
     // clarifying question into reply and leaving nextQuestion null or mismatched —
     // observed live: Claude re-asking "which one — semaglutide or tirzepatide?"
     // inside reply instead of splitting it out.
-    if (reply.includes("?") && !options.bypassCodes?.has("QUESTION_MARK_IN_REPLY")) {
+    if (field === "reply" && reply.includes("?") && !options.bypassCodes?.has("QUESTION_MARK_IN_REPLY")) {
       return { ok: false, code: "QUESTION_MARK_IN_REPLY" };
     }
 
@@ -992,7 +994,9 @@ export function interactivePostCheck(
     // (dosing/prescribed/treatment/injection/side-effect language) — the
     // pricing-coded rule (Affirm/Klarna/Afterpay) stays fully enforced.
     for (const rule of TOPIC_SPECIFIC_LANGUAGE) {
-      if (options.bypassCodes?.has(rule.code)) continue;
+      // Existing last-resort citation bypasses apply only to the reply.
+      // A follow-up must pass its content checks even during a format retry.
+      if (field === "reply" && options.bypassCodes?.has(rule.code)) continue;
       if (rule.pattern.test(reply)) {
         const hasRequired = raw.knowledgeTopicsUsed.some((k) => rule.requiredTopics.has(k));
         if (!hasRequired) {
@@ -1085,7 +1089,7 @@ export function interactivePostCheck(
     }
 
     // Repeated draft
-    if (lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft) && !options.bypassCodes?.has("REPEATED_DRAFT")) {
+    if (field === "reply" && lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft) && !options.bypassCodes?.has("REPEATED_DRAFT")) {
       return { ok: false, code: "REPEATED_DRAFT" };
     }
 

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { recordSmsDeliveryReceipt, getSmsReplyWork } from "./sms-delivery.service.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, supportConversationsTable, supportConversationMessagesTable } from "@luma/db";
 import type { SophieTurnResult } from "./sophie-conversation.service.js";
@@ -16,7 +17,7 @@ vi.mock("../lib/sms-provider.js", async () => {
   return { ...actual, getSmsProvider: () => ({ sendMessage: sendMessageMock }) };
 });
 
-const { processInboundSupportMessage } = await import("./sophie-dispatch.service.js");
+const { processInboundSupportMessage, resumeSophieSms } = await import("./sophie-dispatch.service.js");
 const { getOrCreateSupportConversation, listSupportMessages, appendSupportMessage } = await import("./support-conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null } = {}): Promise<string> {
@@ -48,27 +49,44 @@ function okResult(overrides: Partial<Extract<SophieTurnResult, { ok: true }>> = 
   };
 }
 
+beforeEach(() => { runSophieTurnMock.mockReset(); sendMessageMock.mockReset(); });
+
 describe("processInboundSupportMessage", () => {
+  it("does not carry an old repeat streak past a completed answer", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const question = "Would you like a refund or store credit for the return?";
+    await appendSupportMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    await appendSupportMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    await appendSupportMessage(conversation.id, "inbound", "Please explain store credit.", {});
+    await appendSupportMessage(conversation.id, "outbound", "Store credit can be used on a future order.", { deliveryStatus: "sent" });
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: question }));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "support-progress" });
+
+    await processInboundSupportMessage(personId, "Thanks, that helps.");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect((await getOrCreateSupportConversation(personId)).needsAttention).toBe(false);
+  });
+
   it("persists the inbound message, tags its sentiment, and sends+logs both reply and nextQuestion", async () => {
     runSophieTurnMock.mockClear();
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_1" }).mockResolvedValueOnce({ providerMessageId: "msg_2" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_1" });
     runSophieTurnMock.mockResolvedValueOnce(okResult({ inboundSentiment: "positive" }));
 
     const personId = await seedCustomer();
     const result = await processInboundSupportMessage(personId, "Has my order shipped?");
 
     expect(result.ok).toBe(true);
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
-    expect(sendMessageMock).toHaveBeenNthCalledWith(1, "+15551230001", "Your order shipped this morning.");
-    expect(sendMessageMock).toHaveBeenNthCalledWith(2, "+15551230001", "Anything else I can help with?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith("+15551230001", "Your order shipped this morning.\n\nAnything else I can help with?");
 
     const conversation = await getOrCreateSupportConversation(personId);
     const messages = await listSupportMessages(conversation.id);
     expect(messages.map((m) => ({ direction: m.direction, body: m.body }))).toEqual([
       { direction: "inbound", body: "Has my order shipped?" },
-      { direction: "outbound", body: "Your order shipped this morning." },
-      { direction: "outbound", body: "Anything else I can help with?" },
+      { direction: "outbound", body: "Your order shipped this morning.\n\nAnything else I can help with?" },
     ]);
     expect(messages[0].sentiment).toBe("positive");
   });
@@ -181,46 +199,97 @@ describe("processInboundSupportMessage", () => {
     expect(updated.reviewSentiment).toBe("positive");
   });
 
-  it("serializes two double-texted inbound messages instead of racing them", async () => {
-    runSophieTurnMock.mockClear();
-    sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_race" });
-
-    const seenHistoryLengths: number[] = [];
-    runSophieTurnMock.mockImplementation(async (body: { messages: readonly unknown[] }) => {
-      seenHistoryLengths.push(body.messages.length);
-      const isFirstCall = seenHistoryLengths.length === 1;
-      if (isFirstCall) {
-        // Force real overlap: the second processInboundSupportMessage call
-        // starts while this first one is still mid-turn.
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      }
-      return okResult({ reply: isFirstCall ? "First reply." : "Second reply.", nextQuestion: null });
-    });
-
+  it("persists queued texts immediately, skips intermediate turns and discards an outdated draft", async () => {
+    runSophieTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "fresh" });
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    runSophieTurnMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return okResult({ reply: "Outdated draft.", nextQuestion: "Old question?" });
+    }).mockResolvedValue(okResult({ reply: "Answer to the latest concern.", nextQuestion: null }));
     const personId = await seedCustomer();
-    const [r1, r2] = await Promise.all([
-      processInboundSupportMessage(personId, "first text"),
-      processInboundSupportMessage(personId, "second text"),
-    ]);
-
-    expect(r1.ok).toBe(true);
-    expect(r2.ok).toBe(true);
-
-    // Without serialization, the second call's Claude turn would start
-    // immediately and only see its own inbound message (history length 1).
-    // With the lock, it only starts once the first call has fully persisted
-    // its inbound message and outbound reply, so it sees both plus its own.
-    expect(seenHistoryLengths).toEqual([1, 3]);
-
     const conversation = await getOrCreateSupportConversation(personId);
-    const messages = await listSupportMessages(conversation.id);
-    expect(messages.map((m) => ({ direction: m.direction, body: m.body }))).toEqual([
-      { direction: "inbound", body: "first text" },
-      { direction: "outbound", body: "First reply." },
-      { direction: "inbound", body: "second text" },
-      { direction: "outbound", body: "Second reply." },
-    ]);
+    const first = processInboundSupportMessage(personId, "First request");
+    await entered;
+    const second = processInboundSupportMessage(personId, "More context");
+    await vi.waitFor(async () => expect((await listSupportMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(2));
+    const third = processInboundSupportMessage(personId, "Latest concern");
+    await vi.waitFor(async () => expect((await listSupportMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(3));
+    release();
+    const results = await Promise.all([first, second, third]);
+    expect(results[0]).toEqual({ ok: false, code: "SUPERSEDED" });
+    expect(results.slice(1).filter((result) => result.ok)).toHaveLength(1);
+    expect(results.slice(1).filter((result) => !result.ok)).toHaveLength(1);
+    expect(runSophieTurnMock).toHaveBeenCalledTimes(2);
+    const latestBody = runSophieTurnMock.mock.calls[1][0];
+    expect(latestBody.messages.filter((m: { direction: string }) => m.direction === "inbound").map((m: { body: string }) => m.body))
+      .toEqual(["First request", "More context", "Latest concern"]);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][1]).toBe("Answer to the latest concern.");
+    expect((await getOrCreateSupportConversation(personId)).lastQuestion).toBeNull();
+
+  });
+
+  it("retains a new inbound until the combined SMS has provider confirmation", async () => {
+    runSophieTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const acceptedId = crypto.randomUUID();
+    sendMessageMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return { providerMessageId: acceptedId };
+    }).mockResolvedValue({ providerMessageId: "latest" });
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply: "First answer.", nextQuestion: "Obsolete question?" }))
+      .mockResolvedValue(okResult({ reply: "Updated answer.", nextQuestion: null }));
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const first = processInboundSupportMessage(personId, "First request");
+    await entered;
+    const second = processInboundSupportMessage(personId, "New request");
+    await vi.waitFor(async () => expect((await listSupportMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(2));
+    release();
+    await Promise.all([first, second]);
+    expect(sendMessageMock.mock.calls.map((call) => call[1])).toEqual(["First answer.\n\nObsolete question?"]);
+    expect(await getSmsReplyWork(personId, "support")).toBeDefined();
+    await recordSmsDeliveryReceipt(acceptedId, "sent", new Date());
+    await resumeSophieSms(personId);
+    expect(sendMessageMock.mock.calls.map((call) => call[1])).toEqual(["First answer.\n\nObsolete question?", "Updated answer."]);
+    expect(await getSmsReplyWork(personId, "support")).toBeUndefined();
+  });
+
+  it("honors a queued STOP even when a newer text supersedes its turn", async () => {
+    runSophieTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    runSophieTurnMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return okResult();
+    }).mockResolvedValue(okResult());
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const first = processInboundSupportMessage(personId, "Hello");
+    await entered;
+    const stop = processInboundSupportMessage(personId, "STOP");
+    await vi.waitFor(async () => expect(await isCustomerSmsDnd(personId)).toBe(true));
+    const latest = processInboundSupportMessage(personId, "Thank you");
+    await vi.waitFor(async () => expect((await listSupportMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(3));
+    release();
+    await Promise.all([first, stop, latest]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
   });
 
   it("does not create a duplicate conversation across multiple inbound turns", async () => {
@@ -289,6 +358,9 @@ describe("processInboundSupportMessage", () => {
     await processInboundSupportMessage(personId, "are you still there?");
 
     expect(sendMessageMock).not.toHaveBeenCalled();
+    const updated = await getOrCreateSupportConversation(personId);
+    expect(updated.needsAttention).toBe(true);
+    expect(updated.needsAttentionReason).toMatch(/message limit/i);
   });
 
   it("does not count outbound messages from outside the burst window", async () => {
@@ -320,7 +392,7 @@ describe("processInboundSupportMessage", () => {
     await appendSupportMessage(conversation.id, "inbound", "I'm not sure honestly", {});
     await appendSupportMessage(conversation.id, "outbound", "So just to confirm, refund or store credit for the return?", { deliveryStatus: "sent" });
 
-    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I go with a refund or store credit for the return?" }));
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply: "Got it, thanks.", nextQuestion: "Should I go with a refund or store credit for the return?" }));
     await processInboundSupportMessage(personId, "whatever is easier for you honestly");
 
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -338,11 +410,106 @@ describe("processInboundSupportMessage", () => {
     const conversation = await getOrCreateSupportConversation(personId);
     await appendSupportMessage(conversation.id, "outbound", "Would you like a refund or store credit for the return?", { deliveryStatus: "sent" });
 
-    runSophieTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I go with a refund or store credit for the return?" }));
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply: "Got it, thanks.", nextQuestion: "Should I go with a refund or store credit for the return?" }));
     await processInboundSupportMessage(personId, "hmm let me think");
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
     const updatedConversation = await getOrCreateSupportConversation(personId);
     expect(updatedConversation.needsAttention).toBe(false);
+  });
+});
+
+describe("answer-only repeat escalation", () => {
+  async function repeated() {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const question = "Has your contact info or delivery address changed?";
+    await appendSupportMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    await appendSupportMessage(conversation.id, "inbound", "No changes.", {});
+    await appendSupportMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    return { personId, conversation, question };
+  }
+
+  it("sends one useful answer without the repeated question and holds subsequent inbound", async () => {
+    const { personId, conversation, question } = await repeated();
+    const reply = "Your order is still under review with the doctor.";
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply, nextQuestion: question }));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "support-answer-only" });
+    const result = await processInboundSupportMessage(personId, "What is my order status?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][1]).toBe(reply);
+    expect(result).toMatchObject({ ok: true, nextQuestion: null, requiresStaff: true });
+    expect(await getOrCreateSupportConversation(personId)).toMatchObject({ needsAttention: true, lastQuestion: null, lastDraft: reply });
+    expect((await getSmsReplyWork(personId, "support"))?.heldForStaff).toBe(true);
+    await recordSmsDeliveryReceipt("support-answer-only", "sent", new Date());
+    await processInboundSupportMessage(personId, "And now?");
+    expect(runSophieTurnMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect((await listSupportMessages(conversation.id)).at(-1)?.direction).toBe("inbound");
+  });
+
+  it("does not release a model staff escalation through answer-only handling", async () => {
+    const { personId, question } = await repeated();
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ requiresStaff: true, nextQuestion: question }));
+    await processInboundSupportMessage(personId, "Please help with my order.");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect((await getOrCreateSupportConversation(personId)).needsAttention).toBe(true);
+    expect((await getSmsReplyWork(personId, "support"))?.heldForStaff).toBe(true);
+  });
+
+  it("preserves a delivery-failure reason and never resends the answer", async () => {
+    const { personId, question } = await repeated();
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply: "Your order is still under review with the doctor.", nextQuestion: question }));
+    sendMessageMock.mockRejectedValueOnce(new Error("synthetic transport failure"));
+    await processInboundSupportMessage(personId, "What is my order status?");
+    expect((await getOrCreateSupportConversation(personId)).needsAttentionReason).toMatch(/delivery.*unconfirmed or failed/i);
+    expect((await getSmsReplyWork(personId, "support"))?.heldForStaff).toBe(true);
+    await processInboundSupportMessage(personId, "Any update?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the staff hold when a newer inbound arrives during transport", async () => {
+    const { personId, conversation, question } = await repeated();
+    runSophieTurnMock.mockResolvedValueOnce(okResult({ reply: "Your order is still under review with the doctor.", nextQuestion: question }));
+    sendMessageMock.mockImplementationOnce(async () => {
+      expect((await getSmsReplyWork(personId, "support"))?.heldForStaff).toBe(true);
+      const { recordSmsInbound } = await import("./sms-delivery.service.js");
+      await recordSmsInbound(personId, "support", conversation.id, "Another question.");
+      return { providerMessageId: "support-answer-race" };
+    });
+    await processInboundSupportMessage(personId, "What is my order status?");
+    expect((await getSmsReplyWork(personId, "support"))?.heldForStaff).toBe(true);
+    expect((await getOrCreateSupportConversation(personId)).needsAttention).toBe(true);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("confirmed SMS timing", () => {
+  it("keeps an early acknowledgment before the question that was sent later", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    const queuedAt = new Date(Date.now() - 60_000);
+    const inboundAt = new Date(queuedAt.getTime() + 10_000);
+    const sentAt = new Date(queuedAt.getTime() + 20_000);
+    const id = crypto.randomUUID();
+    await appendSupportMessage(conversation.id, "outbound", "Synthetic explanation.\n\nWhich option interests you?", { deliveryStatus: "queued", providerMessageId: id, createdAt: queuedAt });
+    runSophieTurnMock.mockResolvedValue(okResult({ action: "no_reply", reply: null, nextQuestion: null }));
+    await processInboundSupportMessage(personId, "OK sounds good", undefined, { createdAt: inboundAt });
+    expect(runSophieTurnMock).not.toHaveBeenCalled();
+    await recordSmsDeliveryReceipt(id, "sent", sentAt);
+    await resumeSophieSms(personId);
+    const preview = runSophieTurnMock.mock.calls[0][0];
+    expect(preview.messages.map((m: { body: string }) => m.body)).toEqual(["OK sounds good", "Synthetic explanation.\n\nWhich option interests you?"]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("applies STOP immediately while an outgoing text is queued", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateSupportConversation(personId);
+    await appendSupportMessage(conversation.id, "outbound", "Synthetic pending response", { deliveryStatus: "queued" });
+    await processInboundSupportMessage(personId, "STOP");
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect((await listSupportMessages(conversation.id)).some((m) => m.body === "STOP")).toBe(true);
   });
 });

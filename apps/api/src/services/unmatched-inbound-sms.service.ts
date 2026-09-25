@@ -1,12 +1,14 @@
+import { reconcileSmsDelivery, type SmsInboundMetadata } from "./sms-delivery.service.js";
 import Anthropic from "@anthropic-ai/sdk";
-import { eq, sql } from "drizzle-orm";
-import { db, customersTable, supportConversationsTable, unmatchedSmsThreadsTable, unmatchedSmsMessagesTable, type UnmatchedSmsThread, type UnmatchedSmsMessage } from "@luma/db";
+import { and, eq, isNull, isNotNull, lte, sql } from "drizzle-orm";
+import { db, customersTable, conversationsTable, conversationMessagesTable, smsReplyWorkTable, unmatchedSmsThreadsTable, unmatchedSmsMessagesTable, type UnmatchedSmsThread, type UnmatchedSmsMessage } from "@luma/db";
 import { getSmsProvider } from "../lib/sms-provider.js";
 import { normalizePhone } from "../lib/phone.js";
-import { processInboundMessage } from "./alexis-dispatch.service.js";
-import { processInboundSupportMessage } from "./sophie-dispatch.service.js";
-import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
-import { getOrCreateSupportConversation, appendSupportMessage } from "./support-conversations.service.js";
+import { assertPhoneSmsAllowed, isPhoneSmsOptedOut, recordPhoneSmsOptOut, SmsOptOutError } from "../lib/sms-opt-out.js";
+import { interactivePreCheck } from "../lib/messaging/safety.js";
+import { assertScheduledSmsTime, isScheduledSmsTime, SmsQuietHoursError } from "../lib/send-window.js";
+import { resumeAlexisSms } from "./alexis-dispatch.service.js";
+import { withPersonLock } from "../lib/db-lock.js";
 import { logger } from "../lib/logger.js";
 import { notifySlack } from "../lib/slack.js";
 
@@ -25,11 +27,9 @@ import { notifySlack } from "../lib/slack.js";
  * question) plus two hard overrides this file applies regardless of what
  * Claude reports: a plausible match to an existing customer, or a sender
  * claiming to already have an account. Only those cases sit in the
- * dashboard queue for a person to review before anything sends — except
- * one: when the texted name AND the collected email both point at the
- * exact same existing customer (see findAutoConnectCustomerId), that's
- * unambiguous enough to skip review entirely and route straight into
- * their real conversation, no lead created.
+ * dashboard queue for a person to verify ownership before anything sends.
+ * Name/email matches and sender confirmations never authorize automatic
+ * account linking or changes to an existing customer's phone number.
  *
  * The one real difference from the email version: a text never comes with
  * an email address attached, and customers.email is NOT NULL, so a lead
@@ -41,7 +41,7 @@ import { notifySlack } from "../lib/slack.js";
  *
  * The moment a lead is created (name + email both known, Claude confident
  * this is a genuine prospective customer, not spam), the triggering message
- * is handed off to Alexis's real, guardrailed pipeline (processInboundMessage)
+ * and its complete history are queued for Alexis's guardrailed pipeline
  * as a Meta-lead-style conversation — same trust level every other
  * unattended lead-capture path in this app already operates at.
  */
@@ -217,7 +217,7 @@ const CLASSIFY_TOOL: Anthropic.Tool = {
       confirmsExistingCustomer: {
         type: "boolean",
         description:
-          "Only meaningful when told below that a prior message already asked this sender to confirm they're an existing customer under a different name. True only if their latest reply clearly confirms that (e.g. 'yes', 'that's me', gives the other name). False otherwise — including whenever that situation hasn't come up, an unclear reply, or a clear denial.",
+           "Legacy field: always false. Identity claims require staff verification and never authorize account linking.",
       },
       productCategoryMentioned: {
         type: "string",
@@ -251,14 +251,10 @@ function buildTranscript(messages: readonly UnmatchedSmsMessage[]): string {
   return text;
 }
 
-function systemPrompt(candidates: readonly MatchCandidate[], knownName: string | null, knownEmail: string | null, pendingConfirmation: boolean): string {
+function systemPrompt(candidates: readonly MatchCandidate[], knownName: string | null, knownEmail: string | null): string {
   const candidateList = candidates.length
     ? candidates.map((c, i) => `${i}: ${c.firstName} ${c.lastName} (${c.email})`).join("\n")
     : "(no plausible candidates found)";
-
-  const pendingConfirmationNote = pendingConfirmation
-    ? `\nIMPORTANT: on a prior turn, we already asked this sender to confirm whether they go by a different name, because the email they gave matches an existing account under a different name. Read their latest reply in the thread below: if it clearly confirms that's them (e.g. "yes", "that's me", they give the other name), set confirmsExistingCustomer to true and draft a brief reply acknowledging you've found their account — do not restate or guess the name on file. If the reply is unclear or denies it, set confirmsExistingCustomer to false and continue normally (treat them as a new contact, asking for whatever's still needed).\n`
-    : "";
 
   return `You triage inbound SMS at Ark Health, a healthcare company, for a phone number that doesn't match any customer record in the CRM. You're seeing the full text thread so far with this sender, not just one message.
 
@@ -277,7 +273,7 @@ conversation forward through the normal flow (name/email/handoff) instead
 of answering with a guess. Set productCategoryMentioned honestly on every
 turn, even when you're confident suggestedReply is fine — it's checked
 independently of the reply text itself.
-${pendingConfirmationNote}
+Existing-account identity matches always require staff verification. Never treat a sender's confirmation as proof of account ownership.
 
 Classify the message and draft a reply. Unless you set needsHumanReview:true, this reply is sent automatically — no one reviews it first. Take that seriously: stay inside the rules below, and set needsHumanReview:true the moment you're genuinely unsure rather than guessing.
 
@@ -316,7 +312,6 @@ async function classifyAndDraft(
   collectedEmail: string | null,
   messages: readonly UnmatchedSmsMessage[],
   candidates: readonly MatchCandidate[],
-  pendingConfirmation: boolean,
 ): Promise<Classification> {
   const client = getClient();
   const transcript = buildTranscript(messages);
@@ -324,7 +319,7 @@ async function classifyAndDraft(
   const createPromise = client.messages.create({
     model: MODEL,
     max_tokens: 500,
-    system: systemPrompt(candidates, fromName, collectedEmail, pendingConfirmation),
+    system: systemPrompt(candidates, fromName, collectedEmail),
     tools: [CLASSIFY_TOOL],
     tool_choice: { type: "tool", name: "classify_unmatched_sms" },
     messages: [{ role: "user", content: `From: ${fromPhone}\n\nThread so far:\n${transcript}` }],
@@ -367,7 +362,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * DTC ("text us directly") is a Facebook/Meta ad variant that sends people
  * straight into an SMS reply instead of a lead-gen form — the ad itself
  * hands them a code to mention, e.g. "hey- id like to claim your fall offer
- * for glp-1 my promo code is 44hh45", or "My priority code: LUMK6MF". Ads
+ * for glp-1 my promo code is 44hh45", or "My priority code: TEST001". Ads
  * use different wording for the same thing ("promo code", "priority code"),
  * so this matches either — that's the one reliable signal this pipeline has
  * to tell a DTC-ad lead apart from an ordinary unmatched text, since there's
@@ -413,6 +408,7 @@ async function maybeCreateLead(
   classification: Classification,
   matchedExisting: boolean,
   isDtcLead: boolean,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 ): Promise<{ customerId: string; justCreated: boolean } | null> {
   if (thread.linkedCustomerId) return { customerId: thread.linkedCustomerId, justCreated: false };
   if (matchedExisting) return null;
@@ -424,7 +420,7 @@ async function maybeCreateLead(
   if (!name || !email || !EMAIL_RE.test(email)) return null;
 
   const { firstName, lastName } = splitName(name);
-  const [created] = await db
+  const [created] = await tx
     .insert(customersTable)
     .values({
       firstName,
@@ -440,84 +436,6 @@ async function maybeCreateLead(
   return { customerId: created.id, justCreated: true };
 }
 
-/**
- * Auto-connects to an existing customer with NO human review — the one
- * exception to "any match stays human-gated" above. Two ways in:
- *   1. The texted name AND the collected email both point at the exact same
- *      existing customer — neither signal alone (a name match could be a
- *      common-name coincidence; an email match alone doesn't confirm this
- *      is really the same person texting) is enough, but both agreeing is
- *      unambiguous enough that a rubber-stamp step is friction, not safety.
- *   2. The email matches but the name doesn't (or isn't known), and the
- *      sender has since explicitly confirmed in the conversation that it's
- *      them under a different name (see the pendingConfirmation flow in
- *      recordAndClassifyUnmatchedSms and systemPrompt) — a person, not a
- *      string match, vouched for the identity, which is exactly what the
- *      "held for a person to double check" case above is protecting
- *      against, just answered by the sender themselves instead of staff.
- *
- * Updates the customer's phone to this number so every message after this
- * one routes through the normal known-customer path (findCustomerIdByPhone
- * in iblusend-webhook.service.ts) instead of re-running this unmatched-
- * sender flow every time — otherwise "rolls into the conversation" would
- * only be true for this one message, not an ongoing state.
- */
-async function findAutoConnectCustomerId(
-  nameMatch: MatchCandidate | undefined,
-  emailMatch: MatchCandidate | undefined,
-  emailMatchConfirmed: boolean,
-  phone: string,
-): Promise<string | null> {
-  const matchedId = nameMatch && emailMatch && nameMatch.id === emailMatch.id ? nameMatch.id : emailMatch && emailMatchConfirmed ? emailMatch.id : null;
-  if (!matchedId) return null;
-  await db.update(customersTable).set({ phone }).where(eq(customersTable.id, matchedId));
-  return matchedId;
-}
-
-/**
- * Everything said in this thread before the hand-off, minus the final
- * message — that one gets re-added by processInboundMessage/
- * processInboundSupportMessage themselves as the actual inbound turn, so
- * including it here would double it up.
- *
- * Without this, the guardrailed pipeline a lead or auto-connect gets handed
- * to starts a brand-new conversation with NOTHING in it but that one final
- * message — no name, no "why do you need my email", no context for what
- * they're even asking about. A trigger message that only made sense as an
- * answer to a question this pipeline never saw (e.g. a bare email address
- * on its own) can leave Claude with nothing coherent to react to, which is
- * exactly the kind of input that trips the guardrail loop into silence —
- * confirmed against a real conversation where this happened.
- */
-async function seedPriorHistory(append: (direction: "inbound" | "outbound", body: string) => Promise<unknown>, priorMessages: readonly UnmatchedSmsMessage[]): Promise<void> {
-  for (const m of priorMessages.slice(0, -1)) {
-    await append(m.direction, m.body);
-  }
-}
-
-/**
- * Same support-vs-lead routing as dispatchInboundMessage in
- * iblusend-webhook.service.ts — duplicated rather than imported since that
- * one isn't exported and this is a small, self-contained check.
- */
-async function dispatchToExistingCustomer(customerId: string, body: string, priorMessages: readonly UnmatchedSmsMessage[], mediaUrls?: string[]): Promise<void> {
-  const [supportConversation] = await db.select({ id: supportConversationsTable.id }).from(supportConversationsTable).where(eq(supportConversationsTable.personId, customerId));
-  if (supportConversation) {
-    await seedPriorHistory((direction, msgBody) => appendSupportMessage(supportConversation.id, direction, msgBody), priorMessages);
-    // Only pass mediaUrls through when actually present — an explicit
-    // undefined positional arg still counts as a real arg to a caller-args
-    // test assertion, so this keeps the ordinary text-only call's arg
-    // count exactly as it always was.
-    if (mediaUrls) await processInboundSupportMessage(customerId, body, mediaUrls);
-    else await processInboundSupportMessage(customerId, body);
-    return;
-  }
-  const conversation = await getOrCreateConversation(customerId, "meta_form");
-  await seedPriorHistory((direction, msgBody) => appendMessage(conversation.id, direction, msgBody), priorMessages);
-  if (mediaUrls) await processInboundMessage(customerId, body, "meta_form", mediaUrls);
-  else await processInboundMessage(customerId, body, "meta_form");
-}
-
 export async function listUnmatchedSmsMessages(threadId: string): Promise<UnmatchedSmsMessage[]> {
   return db.select().from(unmatchedSmsMessagesTable).where(eq(unmatchedSmsMessagesTable.threadId, threadId)).orderBy(unmatchedSmsMessagesTable.createdAt);
 }
@@ -527,48 +445,42 @@ const ACK_VARIANTS = [
   "Hi there, thanks for texting Ark Health! What's your name so I know who I'm talking to? We'll follow up with you shortly.",
 ] as const;
 
-/**
- * Sent instead of Claude's drafted reply the first time an email this
- * sender gives turns out to match an existing customer under a different
- * name — fixed and deterministic rather than Claude-drafted because this
- * exact turn is the one where the match is discovered, before Claude ever
- * had a chance to be told about it (see the pendingConfirmation flow one
- * turn later). Deliberately doesn't name the account on file — asking
- * generically avoids handing account details to whoever is actually
- * texting, in case it isn't really that person.
- */
-const EMAIL_MATCH_CONFIRM_VARIANTS = [
-  "Thanks! Quick check on my end — that email's already on file with us under a different name. Do you go by another name too, or should I double check the email?",
-  "Got it! One thing — we've got that email on file under a different name already. Is that you going by another name, or want to double check the email you gave me?",
-] as const;
-
 function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
 }
 
-async function sendSmsAndLog(threadId: string, fromPhone: string, body: string): Promise<boolean> {
-  let providerMessageId: string | null = null;
+async function sendReservedUnmatchedSms(thread: UnmatchedSmsThread, outbound: UnmatchedSmsMessage, scheduled = false): Promise<void> {
   try {
-    const result = await getSmsProvider().sendMessage(fromPhone, body);
-    providerMessageId = result.providerMessageId;
+    await assertPhoneSmsAllowed(thread.fromPhone);
+    if (scheduled) assertScheduledSmsTime();
+    const provider = getSmsProvider();
+    const result = scheduled ? await provider.sendMessage(thread.fromPhone, outbound.body, { scheduled: true }) : await provider.sendMessage(thread.fromPhone, outbound.body);
+    await db.update(unmatchedSmsMessagesTable).set({ providerMessageId: result.providerMessageId })
+      .where(eq(unmatchedSmsMessagesTable.id, outbound.id));
+    await reconcileSmsDelivery(result.providerMessageId);
   } catch (err) {
-    logger.warn({ threadId, reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms send failed");
-    return false;
+    if (err instanceof SmsQuietHoursError) {
+      await db.transaction(async (tx) => {
+        const [current] = await tx.select().from(unmatchedSmsThreadsTable).where(eq(unmatchedSmsThreadsTable.id, thread.id)).for("update");
+        await tx.delete(unmatchedSmsMessagesTable).where(eq(unmatchedSmsMessagesTable.id, outbound.id));
+        // Do not restart the 24-hour inactivity timer when no text was sent.
+        // Preserve the timestamp of any genuinely newer incoming message.
+        await tx.update(unmatchedSmsThreadsTable).set({ updatedAt: current.pendingInboundId ? current.updatedAt : thread.updatedAt })
+          .where(eq(unmatchedSmsThreadsTable.id, thread.id));
+      });
+      return;
+    }
+    if (err instanceof SmsOptOutError) {
+      await db.update(unmatchedSmsMessagesTable).set({ deliveryStatus: "failed" }).where(eq(unmatchedSmsMessagesTable.id, outbound.id));
+      await holdOptedOutThread(thread.id);
+      return;
+    }
+    // A timeout may be after acceptance. Retain the attempt for staff instead
+    // of retrying it or making the conversation appear unsent.
+    await db.update(unmatchedSmsMessagesTable).set({ deliveryStatus: "unknown" })
+      .where(eq(unmatchedSmsMessagesTable.id, outbound.id));
+    await holdForUnmatchedDelivery(thread, [{ ...outbound, deliveryStatus: "unknown" }]);
   }
-  await db.insert(unmatchedSmsMessagesTable).values({ threadId, direction: "outbound", body, providerMessageId });
-  return true;
-}
-
-/**
- * The fixed, content-free acknowledgment asking for a name — the one thing
- * this pipeline sends before Claude has even seen the thread, since it's
- * always the right first move regardless of what the message turns out to
- * say. Only ever fires on a thread's first message. Every message after
- * that goes through classifyAndDraft's own reply instead (auto-sent unless
- * flagged needsHumanReview — see recordAndClassifyUnmatchedSms).
- */
-async function sendAutoAcknowledgment(threadId: string, fromPhone: string): Promise<void> {
-  await sendSmsAndLog(threadId, fromPhone, pickVariant(ACK_VARIANTS));
 }
 
 /**
@@ -582,56 +494,142 @@ async function sendAutoAcknowledgment(threadId: string, fromPhone: string): Prom
  * resurfaces it by resetting status back to needs_review, unless this new
  * message itself gets auto-replied to.
  */
-export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: string, mediaUrls?: string[]): Promise<UnmatchedSmsThread> {
+export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: string, mediaUrls?: string[], metadata?: SmsInboundMetadata): Promise<UnmatchedSmsThread> {
   const normalizedPhone = normalizePhone(fromPhone);
+  const pre = interactivePreCheck(body);
+  if (pre.blocked && pre.code === "OPT_OUT") await recordPhoneSmsOptOut(normalizedPhone);
   const thread = await getOrCreateThread(normalizedPhone);
-
-  const priorMessages = await listUnmatchedSmsMessages(thread.id);
-  const isFirstMessage = priorMessages.length === 0;
-  if (isFirstMessage) {
-    void notifySlack(`New unmatched SMS — ${normalizedPhone}`);
-  }
-
-  await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "inbound", body, mediaUrls: mediaUrls ?? null });
-
-  const messages = await listUnmatchedSmsMessages(thread.id);
-  const transcriptText = messages.map((m) => m.body).join(" ");
-
-  // Computed early (not just where it's used for lead-tagging below) since
-  // needsHumanReview also needs it — see maybeCreateLead's docstring for why
-  // a DTC promo/priority-code sender overrides a mistaken
-  // existing_customer_support classification.
-  const isDtcLead = DTC_CODE_RE.test(transcriptText);
-
-  const candidates = await findMatchCandidates(thread.fromName, transcriptText).catch((err) => {
-    logger.warn({ reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms candidate lookup failed");
-    return [];
+  // Insert before waiting for the phone lock: an in-flight draft must see
+  // newer input, and a restart must leave durable work for the sweep.
+  const firstInbound = await db.transaction(async (tx) => {
+    await tx.select({ id: unmatchedSmsThreadsTable.id }).from(unmatchedSmsThreadsTable)
+      .where(eq(unmatchedSmsThreadsTable.id, thread.id)).for("update");
+    if (metadata?.providerMessageId) {
+      const [duplicate] = await tx.select({ id: unmatchedSmsMessagesTable.id }).from(unmatchedSmsMessagesTable)
+        .where(and(eq(unmatchedSmsMessagesTable.threadId, thread.id), eq(unmatchedSmsMessagesTable.direction, "inbound"),
+          eq(unmatchedSmsMessagesTable.providerMessageId, metadata.providerMessageId))).limit(1);
+      if (duplicate) return null;
+    }
+    const prior = await tx.select({ id: unmatchedSmsMessagesTable.id }).from(unmatchedSmsMessagesTable)
+      .where(eq(unmatchedSmsMessagesTable.threadId, thread.id)).limit(1);
+    const [message] = await tx.insert(unmatchedSmsMessagesTable).values({
+      threadId: thread.id, direction: "inbound", body, mediaUrls: mediaUrls ?? null,
+      providerMessageId: metadata?.providerMessageId, createdAt: metadata?.createdAt,
+    }).returning({ id: unmatchedSmsMessagesTable.id });
+    await tx.update(unmatchedSmsThreadsTable).set({ pendingInboundId: message.id })
+      .where(eq(unmatchedSmsThreadsTable.id, thread.id));
+    return prior.length === 0;
   });
+  if (await isPhoneSmsOptedOut(normalizedPhone)) {
+    await holdOptedOutThread(thread.id);
+    return (await getUnmatchedSmsThread(thread.id))!;
+  }
+  if (firstInbound) void notifySlack(`New unmatched SMS — ${normalizedPhone}`);
+  try {
+    await resumeUnmatchedSms(thread.id);
+  } catch {
+    // The input and work are already committed. A transient resumption
+    // failure must not ask the webhook provider to deliver that input again.
+    logger.error({ threadId: thread.id }, "Onboarding saved; resumption deferred to the reply worker");
+  }
+  return (await getUnmatchedSmsThread(thread.id))!;
+}
 
-  // Pre-classification check: does the email we already collected on a
-  // PRIOR turn match an existing customer whose name doesn't (yet) agree?
-  // If so, we already sent the fixed confirmation question below on that
-  // earlier turn, so this turn's classification needs to know it's likely
-  // reading the sender's answer to it (see pendingConfirmationNote in
-  // systemPrompt). Only looks at thread.collectedEmail — a brand-new email
-  // given THIS turn can't have been asked about yet, so that case is
-  // handled separately below, after classification runs.
-  const preEmailLookup = thread.collectedEmail
-    ? await findExistingCustomerByEmail(thread.collectedEmail).catch((err) => {
-        logger.warn({ reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms pending-confirmation email lookup failed");
-        return { candidate: undefined, ambiguous: false };
-      })
-    : { candidate: undefined, ambiguous: false };
-  const preEmailMatch = preEmailLookup.candidate;
-  const pendingConfirmation = Boolean(preEmailMatch) && !thread.linkedCustomerId && !candidates.some((c) => c.id === preEmailMatch!.id);
+async function holdOptedOutThread(threadId: string): Promise<void> {
+  await db.update(unmatchedSmsThreadsTable).set({
+    onboardingHeld: true, pendingInboundId: null, suggestedReply: null,
+    status: "needs_review", aiSummary: "SMS opt-out recorded. Do not text this phone number; account creation or purchase does not restore SMS consent.",
+  }).where(eq(unmatchedSmsThreadsTable.id, threadId));
+}
 
+export async function resumeUnmatchedSms(threadId: string): Promise<void> {
+  const initial = await getUnmatchedSmsThread(threadId);
+  if (!initial) return;
+  const personId = await withPersonLock(`onboarding:${initial.fromPhone}`, async () => {
+    const thread = await getUnmatchedSmsThread(threadId);
+    if (thread && await isPhoneSmsOptedOut(thread.fromPhone)) { await holdOptedOutThread(threadId); return; }
+    if (!thread?.pendingInboundId || thread.onboardingHeld) return;
+    const generation = thread.pendingInboundId;
+    const messages = await listUnmatchedSmsMessages(threadId);
+    // A prior API acceptance is not a confirmed send. Retain the latest
+    // inbound batch until the receipt arrives; uncertain outcomes need staff.
+    if (await holdForUnmatchedDelivery(thread, messages)) return;
+    if (thread.linkedCustomerId) {
+      const personId = await db.transaction(async (tx) => {
+        const [current] = await tx.select().from(unmatchedSmsThreadsTable)
+          .where(eq(unmatchedSmsThreadsTable.id, threadId)).for("update");
+        if (current.pendingInboundId !== generation || current.onboardingHeld) return null;
+        await transferToAlexis(tx, current, messages);
+        await tx.update(unmatchedSmsThreadsTable).set({ pendingInboundId: null })
+          .where(eq(unmatchedSmsThreadsTable.id, threadId));
+        return current.linkedCustomerId;
+      });
+      return personId;
+    }
+    return classifyPendingUnmatchedSms(thread, generation, messages);
+  });
+  // Release the phone lock before acquiring Alexis's person lock. Both use
+  // the bounded advisory-lock pool; nesting them can exhaust that pool.
+  if (personId) {
+    // A receipt can arrive while the handoff transaction copies history.
+    // Reconcile the copied rows before Alexis evaluates its delivery gate.
+    for (const message of await listUnmatchedSmsMessages(threadId)) {
+      if (message.direction === "outbound") await reconcileSmsDelivery(message.providerMessageId);
+    }
+    await resumeAlexisSms(personId);
+  }
+}
+
+async function holdForUnmatchedDelivery(thread: UnmatchedSmsThread, messages: readonly UnmatchedSmsMessage[]): Promise<boolean> {
+  const unresolved = messages.filter((m) => m.direction === "outbound" &&
+    (!thread.deliveryReviewedAt || m.createdAt > thread.deliveryReviewedAt) &&
+    (m.deliveryStatus === "queued" || m.deliveryStatus === "unknown" || m.deliveryStatus === "failed"));
+  if (unresolved.some((m) => m.deliveryStatus !== "queued" || Date.now() - m.createdAt.getTime() >= 5 * 60 * 1000)) {
+    await db.update(unmatchedSmsThreadsTable).set({
+      onboardingHeld: true, status: "needs_review", suggestedReply: null,
+      // Preserve identity-verification information if this is already held.
+      aiSummary: thread.aiSummary?.startsWith("Identity verification required.") ? thread.aiSummary :
+        "SMS delivery needs human review. Verify the provider conversation before replying; no automatic resend was attempted.",
+    }).where(eq(unmatchedSmsThreadsTable.id, thread.id));
+  }
+  return unresolved.length > 0;
+}
+
+type OnboardingTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Copy history once by stable message ID and queue Alexis in the same transaction
+ * as linking the new lead. A crash cannot leave a visible customer without history. */
+async function transferToAlexis(tx: OnboardingTx, thread: UnmatchedSmsThread, messages: readonly UnmatchedSmsMessage[]): Promise<void> {
+  const personId = thread.linkedCustomerId!;
+  await tx.insert(conversationsTable).values({ personId, leadSource: "meta_form" }).onConflictDoNothing();
+  const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
+  const inserted = await tx.insert(conversationMessagesTable).values(messages.map((m) => ({
+    id: m.id, conversationId: conversation.id, direction: m.direction, body: m.body,
+    mediaUrls: m.mediaUrls, providerMessageId: m.providerMessageId, createdAt: m.createdAt,
+    // A staff-reviewed old acceptance must not reopen Alexis's delivery gate;
+    // preserve uncertainty without falsely claiming it was sent.
+    deliveryStatus: m.deliveryStatus === "queued" && thread.deliveryReviewedAt && m.createdAt <= thread.deliveryReviewedAt ? "unknown" : m.deliveryStatus,
+    sentAt: m.sentAt, deliveredAt: m.deliveredAt, readAt: m.readAt,
+  }))).onConflictDoNothing().returning({ direction: conversationMessagesTable.direction });
+  if (inserted.some((m) => m.direction === "inbound")) {
+    await tx.insert(smsReplyWorkTable).values({ personId, persona: "sales" }).onConflictDoUpdate({
+      target: [smsReplyWorkTable.personId, smsReplyWorkTable.persona],
+      set: { generation: sql`gen_random_uuid()`, updatedAt: new Date() },
+    });
+  }
+}
+
+async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generation: string, messages: UnmatchedSmsMessage[]): Promise<string | undefined> {
+  const transcriptText = messages.map((m) => m.body).join(" ");
+  const isDtcLead = DTC_CODE_RE.test(transcriptText);
+  const isFirstMessage = messages.length === 1;
+  const candidates = await findMatchCandidates(thread.fromName, transcriptText).catch(() => []);
   let classification: Classification | null = null;
   try {
-    classification = await classifyAndDraft(normalizedPhone, thread.fromName, thread.collectedEmail, messages, candidates, pendingConfirmation);
+    classification = await classifyAndDraft(thread.fromPhone, thread.fromName, thread.collectedEmail, messages, candidates);
   } catch (err) {
-    logger.warn({ reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms classification failed");
+    logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms classification failed");
   }
-
   const nameMatch =
     classification?.matchCandidateIndex !== null && classification?.matchCandidateIndex !== undefined ? candidates[classification.matchCandidateIndex] : undefined;
 
@@ -643,7 +641,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
   const emailLookup = knownEmailThisTurn
     ? await findExistingCustomerByEmail(knownEmailThisTurn).catch((err) => {
         logger.warn({ reason: err instanceof Error ? err.message : String(err) }, "unmatched-sms email match lookup failed");
-        return { candidate: undefined, ambiguous: false };
+        return { candidate: undefined, ambiguous: true };
       })
     : { candidate: undefined, ambiguous: false };
   const emailMatch = emailLookup.candidate;
@@ -656,11 +654,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
   // ambiguous case — real data, but we can't safely say which person it
   // is), or someone claiming to already be a customer all need a person to
   // confirm identity before anything goes out, regardless of Claude's own
-  // confidence. Does not apply when the match resolves on its own — either
-  // signal agrees (see findAutoConnectCustomerId) or the sender is about to
-  // be asked to confirm it themselves (see isFirstEncounterWithEmailMatch
-  // below) — an ambiguous email match never qualifies for either, since
-  // neither path can say who, specifically, was confirmed.
+  // confidence. Matching claims never bypass staff verification.
   // Two independent checks on top of Claude's own needsHumanReview flag,
   // neither trusting the other: did it self-report describing a business
   // line beyond the real product, and separately, does the actual drafted
@@ -678,16 +672,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
     );
   }
 
-  // Claude's own self-reported needsHumanReview flag can independently fire
-  // for the same misread the isDtcLead override just below already guards
-  // against — the model deciding on its own "this sounds like an existing
-  // customer" even with no real match, regardless of what it puts in the
-  // intent field. A real Luma production case (Carol DeSena) showed this:
-  // no matchCandidate, no ambiguous email, a priority code right there in
-  // the thread, and Claude still self-reported needsHumanReview:true
-  // alongside intent:existing_customer_support. Scoped narrowly to that
-  // exact pairing — every other reason Claude might set needsHumanReview
-  // (an individualized medical question, genuine confusion) is untouched.
+  // DTC signals override an unsupported existing-customer classification and its review flag; database matches and other review reasons remain enforced.
   const misreadAsExistingCustomer = isDtcLead && classification?.intent === "existing_customer_support" && !matchCandidate && !emailLookup.ambiguous;
 
   const needsHumanReview = Boolean(
@@ -698,113 +683,67 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
       offScopeReply,
   );
 
-  // A message Claude flags for an unrelated reason (needsHumanReview true)
-  // still goes to a person even when the email/name confirmation itself
-  // checks out — "the sender confirmed who they are" doesn't override "this
-  // reply also needs a person to look at it" for some other, separate
-  // reason.
-  const autoConnectCustomerId = thread.linkedCustomerId
-    ? null
-    : await findAutoConnectCustomerId(nameMatch, emailMatch, Boolean(classification?.confirmsExistingCustomer) && !classification?.needsHumanReview, normalizedPhone);
+  // Identity claims are not proof of account ownership. Keep a sticky review
+  // hold so a later "yes", model reclassification, or staff reply cannot
+  // silently resume automated onboarding for this unverified sender.
+  const identityReviewRequired = Boolean(
+    matchCandidate || emailLookup.ambiguous || thread.suggestedMatchCustomerId ||
+    thread.aiSummary?.startsWith("Identity verification required."),
+  );
 
-  const leadResult = classification && !autoConnectCustomerId ? await maybeCreateLead(thread, classification, Boolean(matchCandidate) || emailLookup.ambiguous, isDtcLead) : null;
+  const outcome = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(unmatchedSmsThreadsTable)
+      .where(eq(unmatchedSmsThreadsTable.id, thread.id)).for("update");
+    // Receipt order, not provider timestamps, identifies the newest work.
+    // A newer inbound transaction invalidates the entire stale draft.
+    if (current.pendingInboundId !== generation || current.onboardingHeld) return null;
+    if (await isPhoneSmsOptedOut(current.fromPhone, tx)) return null;
+    const leadResult = classification && !identityReviewRequired
+      ? await maybeCreateLead(current, classification, false, isDtcLead, tx) : null;
+    const firstNameKnown = current.fromName ?? classification?.senderName;
+    const reply = identityReviewRequired || leadResult || classification?.intent === "spam_or_irrelevant" ? null
+      : isFirstMessage && !firstNameKnown ? pickVariant(ACK_VARIANTS)
+      : classification && !needsHumanReview ? classification.suggestedReply : null;
+    const [updated] = await tx.update(unmatchedSmsThreadsTable).set({
+      fromName: current.fromName ?? classification?.senderName ?? undefined,
+      collectedEmail: current.collectedEmail ?? classification?.senderEmail ?? undefined,
+      aiIntent: classification?.intent ?? current.aiIntent,
+      aiSummary: identityReviewRequired ? "Identity verification required. An unknown sender may match an existing account. Staff must verify ownership before linking or changing contact details." : classification?.summary ?? current.aiSummary,
+      suggestedReply: identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
+      suggestedMatchCustomerId: matchCandidate?.id ?? current.suggestedMatchCustomerId,
+      suggestedMatchConfidence: emailMatch ? "high" : matchCandidate ? classification?.matchConfidence ?? null : current.suggestedMatchConfidence,
+      linkedCustomerId: leadResult?.customerId ?? current.linkedCustomerId,
+      status: identityReviewRequired ? "needs_review" : leadResult || (reply && !isFirstMessage) ? "replied"
+        : classification?.intent === "spam_or_irrelevant" ? "dismissed" : "needs_review",
+      repliedAt: leadResult || reply ? new Date() : current.repliedAt,
+      pendingInboundId: null,
+    }).where(eq(unmatchedSmsThreadsTable.id, thread.id)).returning();
+    if (leadResult) await transferToAlexis(tx, updated, messages);
+    const [outbound] = reply ? await tx.insert(unmatchedSmsMessagesTable).values({
+      threadId: thread.id, direction: "outbound", body: reply, deliveryStatus: "queued",
+    }).returning() : [];
+    return { outbound, personId: leadResult?.customerId };
+  });
+  if (!outcome) return;
 
-  // The email just given THIS turn (not previously on file) turns out to
-  // match an existing customer, and the texted name doesn't already agree
-  // — rather than immediately parking for a person to double-check (the
-  // matchCandidate override above would otherwise do exactly that), ask
-  // the sender a generic, account-detail-free confirmation question and
-  // let their next reply resolve it via pendingConfirmation above. Only
-  // the FIRST time we see this (thread.collectedEmail was empty coming
-  // into this turn) — once asked, later turns fall through to the normal
-  // needsHumanReview handling if the reply doesn't clearly resolve it.
-  const isFirstEncounterWithEmailMatch =
-    Boolean(emailMatch) && !autoConnectCustomerId && !thread.linkedCustomerId && !thread.collectedEmail && !(nameMatch && emailMatch && nameMatch.id === emailMatch.id);
-
-  let autoSent = false;
-  if (autoConnectCustomerId) {
-    // Name and email both matched the same existing customer — no review
-    // needed, no new lead to create, just route this message (and every
-    // one after it, via the phone-number update in
-    // findAutoConnectCustomerId) into their real conversation.
-    try {
-      await dispatchToExistingCustomer(autoConnectCustomerId, body, messages, mediaUrls);
-    } catch (err) {
-      logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "auto-connect handoff failed");
-    }
-  } else if (leadResult?.justCreated) {
-    // Confident enough to create the lead means confident enough to hand
-    // THIS message straight to Alexis's real, guardrailed pipeline — not the
-    // generic staff queue. Same trust level Alexis already operates at
-    // unattended for every other lead. Treated as a Meta lead-gen contact
-    // (state/currentlyTaking/product first, then proactive pricing), not
-    // an abandoned-cart lead — this person never started a Bask
-    // questionnaire, they're cold inbound outreach, exactly like a Meta lead.
-    try {
-      const conversation = await getOrCreateConversation(leadResult.customerId, "meta_form");
-      await seedPriorHistory((direction, msgBody) => appendMessage(conversation.id, direction, msgBody), messages);
-      // Same reasoning as dispatchToExistingCustomer above — only pass
-      // mediaUrls when actually present.
-      if (mediaUrls) await processInboundMessage(leadResult.customerId, body, "meta_form", mediaUrls);
-      else await processInboundMessage(leadResult.customerId, body, "meta_form");
-    } catch (err) {
-      logger.warn({ threadId: thread.id, reason: err instanceof Error ? err.message : String(err) }, "handoff to Alexis after lead creation failed");
-    }
-  } else if (isFirstEncounterWithEmailMatch && classification?.intent !== "spam_or_irrelevant") {
-    // Ask instead of park — see isFirstEncounterWithEmailMatch's comment
-    // above. Fixed wording, not Claude-drafted: this turn is the one where
-    // the match is discovered, before Claude could ever have been told
-    // about it to draft an informed question.
-    autoSent = await sendSmsAndLog(thread.id, normalizedPhone, pickVariant(EMAIL_MATCH_CONFIRM_VARIANTS));
-  } else if (isFirstMessage && classification?.intent !== "spam_or_irrelevant") {
-    // One immediate, fixed, content-free acknowledgment per thread — see
-    // sendAutoAcknowledgment's docstring. Only on the thread's first-ever
-    // message; skipped above when Alexis is about to reply live instead. Also
-    // skipped for spam/irrelevant. A failed classification call
-    // (classification is null) still gets the ack, same as the email
-    // version — no way to know it's spam without Claude.
-    await sendAutoAcknowledgment(thread.id, normalizedPhone);
-  } else if (classification && classification.intent !== "spam_or_irrelevant" && !needsHumanReview && classification.suggestedReply) {
-    // Everything past the first message is auto-sent by default now too —
-    // Claude's own drafted reply, sent directly, the same trust level the
-    // fixed first-message ack already operates at. The content itself
-    // stays bounded by the drafting rules in the system prompt (no prices,
-    // no clinical claims, no promises) regardless of who hits send; the
-    // needsHumanReview flag above is the actual safety valve, not a
-    // missing review step.
-    autoSent = await sendSmsAndLog(thread.id, normalizedPhone, classification.suggestedReply);
+  if (identityReviewRequired && !thread.aiSummary?.startsWith("Identity verification required.")) {
+    void notifySlack("Unmatched SMS needs human help: verify account ownership before linking or changing contact details.");
   }
+  if (outcome.outbound) {
+    await sendReservedUnmatchedSms(thread, outcome.outbound);
+  }
+  return outcome.personId;
+}
 
-  const [updated] = await db
-    .update(unmatchedSmsThreadsTable)
-    .set({
-      fromName: thread.fromName ?? classification?.senderName ?? undefined,
-      collectedEmail: thread.collectedEmail ?? classification?.senderEmail ?? undefined,
-      aiIntent: classification?.intent ?? thread.aiIntent,
-      aiSummary: classification?.summary ?? thread.aiSummary,
-      suggestedReply: autoConnectCustomerId || leadResult?.justCreated || autoSent ? null : (classification?.suggestedReply ?? thread.suggestedReply),
-      // Auto-connect means the match was confirmed, not just suggested —
-      // clear the "possible match" fields rather than leaving them set
-      // alongside an already-linked thread.
-      suggestedMatchCustomerId: autoConnectCustomerId ? null : (matchCandidate?.id ?? thread.suggestedMatchCustomerId),
-      // An exact email match is unambiguous — always "high", regardless of
-      // (or even absent) Claude's own matchConfidence, which only ever
-      // covers the name-based candidate list it was shown.
-      suggestedMatchConfidence: autoConnectCustomerId ? null : emailMatch ? "high" : matchCandidate ? (classification?.matchConfidence ?? null) : thread.suggestedMatchConfidence,
-      linkedCustomerId: autoConnectCustomerId ?? leadResult?.customerId ?? thread.linkedCustomerId,
-      // Spam/irrelevant is auto-dismissed rather than left in needs_review —
-      // same rule as the email side, see that service's comment for why.
-      status:
-        autoConnectCustomerId || leadResult?.justCreated || autoSent
-          ? "replied"
-          : classification?.intent === "spam_or_irrelevant"
-            ? "dismissed"
-            : "needs_review",
-      repliedAt: autoConnectCustomerId || leadResult?.justCreated || autoSent ? new Date() : thread.repliedAt,
-    })
-    .where(eq(unmatchedSmsThreadsTable.id, thread.id))
-    .returning();
-  return updated;
+/** The pending marker survives both stale drafts and process restarts. */
+export async function sweepPendingUnmatchedSms(): Promise<void> {
+  const pending = await db.select({ id: unmatchedSmsThreadsTable.id }).from(unmatchedSmsThreadsTable)
+    .where(and(isNotNull(unmatchedSmsThreadsTable.pendingInboundId), eq(unmatchedSmsThreadsTable.onboardingHeld, false)))
+    .orderBy(unmatchedSmsThreadsTable.updatedAt).limit(50);
+  for (const thread of pending) {
+    try { await resumeUnmatchedSms(thread.id); }
+    catch { logger.error({ threadId: thread.id }, "Pending onboarding retained for next sweep"); }
+  }
 }
 
 export interface UnmatchedSmsThreadSummary extends UnmatchedSmsThread {
@@ -817,6 +756,9 @@ export async function listUnmatchedSmsThreads(): Promise<UnmatchedSmsThreadSumma
   const { rows } = await db.execute<{
     id: string;
     fromPhone: string;
+    pendingInboundId: string | null;
+    onboardingHeld: boolean;
+    deliveryReviewedAt: Date | null;
     fromName: string | null;
     collectedEmail: string | null;
     aiIntent: UnmatchedSmsThread["aiIntent"];
@@ -834,6 +776,7 @@ export async function listUnmatchedSmsThreads(): Promise<UnmatchedSmsThreadSumma
   }>(sql`
     select
       t.id, t.from_phone as "fromPhone", t.from_name as "fromName", t.collected_email as "collectedEmail",
+      t.pending_inbound_id as "pendingInboundId", t.onboarding_held as "onboardingHeld", t.delivery_reviewed_at as "deliveryReviewedAt",
       t.ai_intent as "aiIntent", t.ai_summary as "aiSummary",
       t.suggested_match_customer_id as "suggestedMatchCustomerId", t.suggested_match_confidence as "suggestedMatchConfidence",
       t.suggested_reply as "suggestedReply", t.linked_customer_id as "linkedCustomerId", t.status, t.replied_at as "repliedAt",
@@ -859,19 +802,34 @@ export async function getUnmatchedSmsThreadDetail(id: string): Promise<{ thread:
 }
 
 export async function dismissUnmatchedSmsThread(id: string): Promise<boolean> {
-  const [row] = await db.update(unmatchedSmsThreadsTable).set({ status: "dismissed" }).where(eq(unmatchedSmsThreadsTable.id, id)).returning({ id: unmatchedSmsThreadsTable.id });
-  return Boolean(row);
+  const thread = await getUnmatchedSmsThread(id);
+  if (!thread) return false;
+  return withPersonLock(`onboarding:${thread.fromPhone}`, async () => {
+    const [row] = await db.update(unmatchedSmsThreadsTable).set({
+      status: "dismissed",
+      pendingInboundId: sql`case when ${unmatchedSmsThreadsTable.pendingInboundId} is not distinct from ${thread.pendingInboundId}::uuid then null else ${unmatchedSmsThreadsTable.pendingInboundId} end`,
+    })
+      .where(eq(unmatchedSmsThreadsTable.id, id)).returning({ id: unmatchedSmsThreadsTable.id });
+    return Boolean(row);
+  });
 }
 
 export type UnmatchedSmsReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "send_failed" };
 
 /** A staff-approved reply to an unmatched sender — the only other path (besides the auto-ack) by which this pipeline ever sends anything. */
 export async function sendUnmatchedInboundSmsReply(id: string, body: string): Promise<UnmatchedSmsReplyResult> {
-  const thread = await getUnmatchedSmsThread(id);
-  if (!thread) return { sent: false, reason: "not_found" };
+  const initial = await getUnmatchedSmsThread(id);
+  if (!initial) return { sent: false, reason: "not_found" };
+  return withPersonLock(`onboarding:${initial.fromPhone}`, () => sendUnmatchedStaffReplyLocked(id, body));
+}
+
+async function sendUnmatchedStaffReplyLocked(id: string, body: string): Promise<UnmatchedSmsReplyResult> {
+  const thread = (await getUnmatchedSmsThread(id))!;
+  const reviewedAt = new Date();
 
   let providerMessageId: string | null = null;
   try {
+    await assertPhoneSmsAllowed(thread.fromPhone);
     const result = await getSmsProvider().sendMessage(thread.fromPhone, body);
     providerMessageId = result.providerMessageId;
   } catch (err) {
@@ -880,6 +838,10 @@ export async function sendUnmatchedInboundSmsReply(id: string, body: string): Pr
   }
 
   await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "outbound", body, providerMessageId });
-  await db.update(unmatchedSmsThreadsTable).set({ status: "replied", repliedAt: new Date() }).where(eq(unmatchedSmsThreadsTable.id, id));
+  await db.update(unmatchedSmsThreadsTable).set({
+    status: "replied", repliedAt: new Date(), onboardingHeld: false, deliveryReviewedAt: reviewedAt,
+    // Preserve input received while the staff send was in flight.
+    pendingInboundId: sql`case when ${unmatchedSmsThreadsTable.pendingInboundId} is not distinct from ${thread.pendingInboundId}::uuid then null else ${unmatchedSmsThreadsTable.pendingInboundId} end`,
+  }).where(eq(unmatchedSmsThreadsTable.id, id));
   return { sent: true };
 }

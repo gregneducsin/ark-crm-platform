@@ -553,3 +553,10 @@ describe("sweepReviewRequestTriggers", () => {
     expect(trigger.status).toBe("pending");
   });
 });
+
+// Business-flow fixtures run during allowed hours; quiet-hours boundaries
+// and overnight deferral are exercised in scheduled-sms-quiet-hours.service.test.ts.
+vi.mock("../lib/send-window.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/send-window.js")>();
+  return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
+});

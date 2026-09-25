@@ -200,7 +200,7 @@ describe("sendStaffReply", () => {
       providerMessageId: "msg_staff_support_1",
       sentBy: "staff",
       sentByStaffEmail: "staff@example.com",
-      deliveryStatus: "sent",
+      deliveryStatus: "queued",
     });
 
     const updated = await getSupportConversationDetail(conversation.id);

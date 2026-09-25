@@ -264,3 +264,34 @@ describe("supportPostCheck", () => {
     expect(result).toEqual({ ok: false, code: "UNKNOWN_KNOWLEDGE_TOPIC" });
   });
 });
+
+describe("supportPostCheck: follow-up content safety", () => {
+  it.each([
+    ["Would you visit https://unapproved.example.com/help now?", [], "UNAPPROVED_URL"],
+    ["What symptoms are you experiencing?", [], "PROHIBITED_CLINICAL"],
+    ["Would you take a 5 mg dose?", [], "PROHIBITED_CLINICAL"],
+    ["Would you like to discuss side effects?", [], "PROHIBITED_CLINICAL"],
+    ["Would you like information about semaglutide?", [], "PROHIBITED_CLINICAL"],
+    ["We are monitoring right now, shall I connect you?", [], "PROHIBITED_STAFF_CLAIM"],
+  ] as const)("rejects unsafe follow-up: %s", (nextQuestion, knowledgeTopicsUsed, code) => {
+    for (const mainReply of ["Thanks for your message.", null]) {
+      expect(supportPostCheck(reply({ reply: mainReply, nextQuestion, knowledgeTopicsUsed }), null))
+        .toEqual({ ok: false, code });
+    }
+  });
+
+  it("allows ordinary questions and topic-grounded product questions", () => {
+    expect(supportPostCheck(reply({ nextQuestion: "Is there anything else I can help with?" }), null).ok).toBe(true);
+    expect(supportPostCheck(reply({
+      nextQuestion: "Would you like information about semaglutide?",
+      knowledgeTopicsUsed: ["compounded_medication"],
+    }), null).ok).toBe(true);
+  });
+
+  it("does not allow a declared topic to override absolute clinical restrictions in a question", () => {
+    expect(supportPostCheck(reply({
+      nextQuestion: "Would you take a 5 mg dose?",
+      knowledgeTopicsUsed: ["compounded_medication"],
+    }), null)).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+  });
+});

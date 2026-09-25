@@ -1,24 +1,28 @@
+import { recordSmsInbound, getSmsReplyWork, finishSmsReplyWork, holdSmsReplyForStaff, hasPendingSmsDelivery, sendTrackedSms, type SmsInboundMetadata } from "./sms-delivery.service.js";
+import { selectRepeatQuestionAnswer } from "../lib/messaging/repeat-question-answer.js";
+import { interactivePreCheck } from "../lib/messaging/safety.js";
 import { eq } from "drizzle-orm";
 import { db, customersTable } from "@luma/db";
 import { runAlexisTurn, type AlexisTurnResult } from "./alexis-conversation.service.js";
 import {
   getOrCreateConversation,
   listMessages,
-  appendMessage,
   setMessageSentiment,
   updateConversationState,
   toBotPreviewBody,
   countRecentOutboundMessages,
   type ConversationStatePatch,
 } from "./conversations.service.js";
-import { getSmsProvider } from "../lib/sms-provider.js";
 import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
 import { isSalesSmsPaused } from "../lib/sales-sms.js";
 import { scheduleObjectionReengagement } from "./objection-reengagement.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
-import { countTrailingRepeatQuestions } from "../lib/messaging/repeat-question.js";
+import { countRepeatQuestionsInHistory } from "../lib/messaging/repeat-question.js";
+
+
+
 
 /**
  * Hard ceiling on how many texts Alexis can send one person in a row, no
@@ -54,23 +58,14 @@ async function getCustomerContact(personId: string): Promise<{ firstName: string
  * guardrail-approved reply actually was. Failures are logged, not thrown;
  * this function never blocks the caller on a transport problem.
  *
- * DND is checked here rather than earlier in the pipeline, so a customer's
- * own OPT_OUT confirmation reply still goes out: processInboundMessageLocked
- * sends this turn's texts before it flips the DND flag, so this check only
- * ever blocks a *later* turn's sends, never the opt-out confirmation itself.
+ * Opt-out is applied on receipt; only its deterministic confirmation may bypass DND.
  *
- * The sales-SMS pause is checked here too — this is the one chokepoint every
- * Alexis send passes through, so gating it here covers every automated turn
- * and every reply, with no exception for the opt-out confirmation (unlike
- * DND above): while paused, nothing Alexis would say goes out at all.
+ * When the send-burst cap blocks a reply, flag the unanswered customer
+ * message for staff instead of leaving the conversation silently stalled.
  */
-async function sendAndLog(personId: string, conversationId: string, phone: string | null, text: string): Promise<void> {
-  if (isSalesSmsPaused()) {
-    logger.warn({ personId, conversationId }, "outbound Alexis message not sent: sales SMS is paused");
-    return;
-  }
-
-  if (await isCustomerSmsDnd(personId)) {
+async function sendAndLog(personId: string, conversationId: string, phone: string | null, text: string, isCurrent: () => Promise<boolean>, isOptOut = false, generation: string, holdForStaff = false): Promise<void> {
+  if (isSalesSmsPaused()) return;
+  if (!isOptOut && await isCustomerSmsDnd(personId)) {
     logger.warn({ personId, conversationId }, "outbound Alexis message not sent: customer is do-not-disturb");
     return;
   }
@@ -78,23 +73,17 @@ async function sendAndLog(personId: string, conversationId: string, phone: strin
   const recentSends = await countRecentOutboundMessages(conversationId, SEND_BURST_WINDOW_MS);
   if (recentSends >= SEND_BURST_LIMIT) {
     logger.warn({ personId, conversationId, recentSends }, "outbound Alexis message not sent: send-burst limit reached");
+    await updateConversationState(conversationId, {
+      needsAttention: true,
+      needsAttentionReason: "SMS reply withheld because the conversation reached the message limit. Review the latest unanswered customer message and reply manually.",
+    });
     return;
   }
 
-  let providerMessageId: string | null = null;
-  let deliveryStatus: "sent" | "failed" = "failed";
-  if (phone) {
-    try {
-      const result = await getSmsProvider().sendMessage(phone, text);
-      providerMessageId = result.providerMessageId;
-      deliveryStatus = "sent";
-    } catch (err) {
-      logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "outbound Alexis message send failed");
-    }
-  } else {
-    logger.warn({ conversationId }, "outbound Alexis message not sent: no phone number on file");
-  }
-  await appendMessage(conversationId, "outbound", text, { providerMessageId, deliveryStatus });
+  // Recheck after the DND and rate-limit queries, immediately before transport.
+  if (!await isCurrent()) return;
+
+  await sendTrackedSms(personId, "sales", conversationId, phone, text, generation, holdForStaff);
 }
 
 /**
@@ -105,28 +94,54 @@ async function sendAndLog(personId: string, conversationId: string, phone: strin
  * follow-up pipeline, and fails the same way (cleanly, loudly, not silently)
  * until a provider is actually configured.
  *
- * Wrapped in withPersonLock: a customer double-texting sends two inbound
- * webhooks in quick succession, and without serialization both calls would
- * read the same stale conversation state, run independent Claude turns
- * blind to each other's inbound message, and race to write the final state
- * back — losing whichever slot updates the earlier call made. The lock
- * makes the second call wait for the first to fully finish (Claude call,
- * sends, and state write) before it starts, so it always builds its turn on
- * top of what the first one actually did.
+ * Inbound receipt happens before the lock; queued turns coalesce to the latest
+ * inbound and discard drafts superseded while the model was running.
  */
 export async function processInboundMessage(
   personId: string,
   inboundBody: string,
   initialLeadSource?: "abandoned_cart" | "meta_form",
   mediaUrls?: string[],
+  metadata?: SmsInboundMetadata,
 ): Promise<AlexisTurnResult> {
-  return withPersonLock(personId, () => processInboundMessageLocked(personId, inboundBody, initialLeadSource, mediaUrls));
+  // Persist before waiting for the turn lock: an in-flight draft must see new arrivals.
+  const conversation = initialLeadSource ? await getOrCreateConversation(personId, initialLeadSource) : await getOrCreateConversation(personId);
+  await recordSmsInbound(personId, "sales", conversation.id, inboundBody, mediaUrls, metadata);
+  const pre = interactivePreCheck(inboundBody, conversation.lastQuestion);
+  // Safety signals must survive coalescing, including a STOP followed by another text.
+  if (pre.blocked && pre.code === "OPT_OUT") await setCustomerSmsDnd(personId, true);
+  else if (pre.blocked) {
+    await updateConversationState(conversation.id, {
+      needsAttention: true,
+      needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: pre.code }),
+    });
+  }
+  return resumeAlexisSms(personId);
 }
 
-async function processInboundMessageLocked(personId: string, inboundBody: string, initialLeadSource?: "abandoned_cart" | "meta_form", mediaUrls?: string[]): Promise<AlexisTurnResult> {
-  const conversation = initialLeadSource ? await getOrCreateConversation(personId, initialLeadSource) : await getOrCreateConversation(personId);
-  const priorMessages = await listMessages(conversation.id);
-  const inboundMessage = await appendMessage(conversation.id, "inbound", inboundBody, { mediaUrls });
+export async function resumeAlexisSms(personId: string): Promise<AlexisTurnResult> {
+  return withPersonLock(personId, async () => {
+    if (isSalesSmsPaused()) return { ok: false, code: "SALES_PAUSED" };
+    const work = await getSmsReplyWork(personId, "sales");
+    if (!work) return { ok: false, code: "SUPERSEDED" };
+    if (work.heldForStaff || await hasPendingSmsDelivery(personId)) return { ok: false, code: "DELIVERY_PENDING" };
+    const result = await processInboundMessageLocked(personId, work.generation);
+    if (result.ok || result.code !== "SUPERSEDED") await finishSmsReplyWork(personId, "sales", work.generation);
+    return result;
+  });
+}
+
+async function processInboundMessageLocked(personId: string, generation: string): Promise<AlexisTurnResult> {
+  const conversation = await getOrCreateConversation(personId);
+  const messages = await listMessages(conversation.id);
+  const inboundMessage = [...messages].reverse().find((message) => message.direction === "inbound");
+  if (!inboundMessage) return { ok: false, code: "SUPERSEDED" };
+  const inboundMessageId = inboundMessage.id;
+  const priorMessages = messages.filter((message) => message.id !== inboundMessageId);
+  const knownInboundIds = new Set(messages.filter((message) => message.direction === "inbound").map((message) => message.id));
+  const isCurrent = async () => !(await listMessages(conversation.id)).some(
+    (message) => message.direction === "inbound" && !knownInboundIds.has(message.id),
+  );
 
   const customer = await getCustomerContact(personId);
   // "Unknown" is the placeholder a webhook-created customer row gets when no
@@ -134,7 +149,7 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
   // a real name, so it resolves to null the same as no firstName at all.
   const customerFirstName = customer && customer.firstName && customer.firstName !== "Unknown" ? customer.firstName : null;
 
-  const body = toBotPreviewBody(conversation, [...priorMessages, inboundMessage], customerFirstName);
+  const body = toBotPreviewBody(conversation, messages, customerFirstName);
   let result: AlexisTurnResult;
   try {
     result = await runAlexisTurn(personId, body);
@@ -149,6 +164,8 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
     await updateConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "exception" }) });
     return { ok: false, code: "UNEXPECTED_ERROR" };
   }
+
+  if (!await isCurrent()) return { ok: false, code: "SUPERSEDED" };
 
   if (!result.ok) {
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Alexis turn rejected — no outbound message sent");
@@ -169,30 +186,37 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
   }
 
   // Stuck-repeating check: is this turn's nextQuestion essentially the same
-  // one Alexis has already asked (reworded) several times in a row without
-  // the conversation moving forward? Real incident (Luma, same architecture,
-  // ported here): a customer kept answering a "which plan length" question
-  // in different words, none of which the bot recognized as resolving it,
-  // so it just re-asked a reworded version turn after turn — eventually
-  // ~20 real texts to one customer. Every individual turn was a legitimate,
-  // guardrail-approved reply to a real inbound message, so no single-turn or
-  // volume-based check could catch this — only recognizing the repetition
-  // itself can.
-  const recentQuestions = priorMessages.filter((m) => m.direction === "outbound" && m.body.trim().endsWith("?")).map((m) => m.body);
-  const repeatStreak = countTrailingRepeatQuestions(recentQuestions, result.nextQuestion);
+  // one Alexis has already asked (reworded) several times in a row without the
+  // conversation moving forward? Real incident: a customer kept answering a
+  // "which plan length" question in different words, none of which Alexis
+  // recognized as resolving it, so she just re-asked a reworded version
+  // turn after turn — eventually ~20 real texts to one customer. Every
+  // individual turn was a legitimate, guardrail-approved reply to a real
+  // inbound message, so no single-turn or volume-based check could catch
+  // this — only recognizing the repetition itself can.
+  const repeatStreak = countRepeatQuestionsInHistory(priorMessages, result.nextQuestion);
   const isStuckRepeating = repeatStreak >= REPEAT_QUESTION_THRESHOLD - 1;
 
   if (isStuckRepeating) {
-    logger.warn({ personId, conversationId: conversation.id, repeatStreak }, "Alexis stopped auto-replying: asked essentially the same question repeatedly with no progress");
-  } else {
-    const textsToSend = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t));
-    for (const text of textsToSend) {
-      await sendAndLog(personId, conversation.id, customer?.phone ?? null, text);
+    const answer = selectRepeatQuestionAnswer(result, conversation.lastDraft);
+    logger.warn({ personId, conversationId: conversation.id, repeatStreak, answerEligible: answer !== null }, "Alexis suppressed a repeated question and routed the conversation to staff");
+    // Flag before transport, so a delivery failure or a newer safety signal
+    // can replace this reason rather than being overwritten by it afterward.
+    await updateConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason(result.requiresStaff ? { kind: "staff_flagged", preCheckCode: result.preCheckCode } : { kind: "stuck_repeating" }) });
+    try {
+      if (answer) await sendAndLog(personId, conversation.id, customer?.phone ?? null, answer, isCurrent, false, generation, true);
+    } finally {
+      await holdSmsReplyForStaff(personId, "sales");
     }
+    result = { ...result, reply: answer, nextQuestion: null, requiresStaff: true };
+  } else {
+    const text = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t?.trim())).join("\n\n");
+    if (text) await sendAndLog(personId, conversation.id, customer?.phone ?? null, text, isCurrent, result.preCheckCode === "OPT_OUT", generation);
   }
 
-  // Set DND only after this turn's texts have gone out, so the OPT_OUT
-  // confirmation reply above isn't itself blocked by the flag it's about to set.
+  if (!await isCurrent()) return { ok: false, code: "SUPERSEDED" };
+
+  // Retain the deterministic turn result as a second opt-out safeguard.
   if (result.preCheckCode === "OPT_OUT") {
     await setCustomerSmsDnd(personId, true);
   }
@@ -205,14 +229,12 @@ async function processInboundMessageLocked(personId: string, inboundBody: string
   await updateConversationState(conversation.id, {
     ...slotPatch,
     lastQuestion: result.nextQuestion,
-    lastDraft: result.reply,
+    lastDraft: isStuckRepeating ? (result.reply ?? conversation.lastDraft) : result.reply,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
     linkProvided: result.linkProvided,
     promoOffered: result.promoOffered,
-    ...(isStuckRepeating
-      ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "stuck_repeating" }) }
-      : result.requiresStaff
+    ...(!isStuckRepeating && result.requiresStaff
         ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
         : {}),
   });

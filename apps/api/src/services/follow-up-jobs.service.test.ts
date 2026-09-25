@@ -1,15 +1,32 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, intakeLinkTokensTable, followUpJobsTable, questionnaireEventsTable, purchasesTable, conversationsTable, conversationMessagesTable } from "@luma/db";
 import { hashToken } from "../lib/crypto.js";
 import { setCustomerSmsDnd } from "./dnd.service.js";
+
+let receiptPrefix = "";
+beforeEach(async () => {
+  // Sweeps intentionally scan every due job. Isolate this suite's synthetic
+  // jobs from fixtures left by other service suites in the shared test schema.
+  await db.delete(followUpJobsTable);
+  receiptPrefix = crypto.randomUUID();
+});
 
 const sendMessageMock = vi.fn();
 vi.mock("../lib/sms-provider.js", async () => {
   const actual = await vi.importActual<typeof import("../lib/sms-provider.js")>("../lib/sms-provider.js");
   return {
     ...actual,
-    getSmsProvider: () => ({ sendMessage: sendMessageMock }),
+    getSmsProvider: () => ({ sendMessage: async (...args: unknown[]) => {
+      const result = await sendMessageMock(...args);
+      // Successful fixtures include the provider's sent receipt, even if it
+      // arrives before the HTTP response. Timing tests delay receipts explicitly.
+      if (result?.providerMessageId) {
+        const { recordSmsDeliveryReceipt } = await import("./sms-delivery.service.js");
+        await recordSmsDeliveryReceipt(result.providerMessageId, "sent", new Date());
+      }
+      return result;
+    } }),
   };
 });
 
@@ -57,53 +74,7 @@ async function seedPendingJob(
 }
 
 describe("sweepFollowUpJobs", () => {
-  it("leaves not-yet-due jobs untouched", async () => {
-    sendMessageMock.mockClear();
-    const personId = await seedCustomer();
-    const { jobId } = await seedPendingJob(personId, new Date(Date.now() - 60_000), new Date(Date.now() + 60 * 60 * 1000));
-
-    await sweepFollowUpJobs();
-
-    const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
-    expect(job.status).toBe("pending");
-    expect(sendMessageMock).not.toHaveBeenCalled();
-  });
-
-  it("sends the provider_check_in message and schedules intake_questions_check_in 1 hour later on success, clamped to the 9am-11:59pm Eastern send window", async () => {
-    const { clampToSendWindow } = await import("../lib/send-window.js");
-    sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_123" });
-    const personId = await seedCustomer({ phone: "+15559876543" });
-    const { jobId, tokenId } = await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
-
-    const beforeSweep = Date.now();
-    const result = await sweepFollowUpJobs();
-
-    expect(result.sentCount).toBe(1);
-    // Wording is randomized (see provider_check_in's variants) — "completed
-    // questionnaire" is the substring common to all of them.
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559876543", expect.stringContaining("completed questionnaire"));
-
-    const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
-    expect(job.status).toBe("sent");
-    expect(job.sentAt).not.toBeNull();
-    expect(job.providerMessageId).toBe("msg_123");
-
-    const nextJobs = await db
-      .select()
-      .from(followUpJobsTable)
-      .where(eq(followUpJobsTable.intakeLinkTokenId, tokenId));
-    const step2 = nextJobs.find((j) => j.messageStep === "intake_questions_check_in");
-    expect(step2).toBeDefined();
-    expect(step2!.status).toBe("pending");
-    // See send-window.ts — a naive "sent + 1 hour" can land in the overnight
-    // quiet-hours window and get pushed to 9am Eastern instead, so this
-    // computes the same expected value rather than asserting a fixed delta.
-    const expectedDueAt = clampToSendWindow(new Date(beforeSweep + 60 * 60 * 1000));
-    expect(Math.abs(new Date(step2!.dueAt).getTime() - expectedDueAt.getTime())).toBeLessThan(5000);
-  });
-
-  it("does not schedule a third message after intake_questions_check_in sends", async () => {
+it("does not schedule a third message after intake_questions_check_in sends", async () => {
     sendMessageMock.mockClear();
     sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_456" });
     const personId = await seedCustomer();
@@ -119,6 +90,52 @@ describe("sweepFollowUpJobs", () => {
     const jobs = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.intakeLinkTokenId, tokenId));
     expect(jobs.length).toBe(1);
     expect(jobs[0].status).toBe("sent");
+  });
+
+  it("leaves not-yet-due jobs untouched", async () => {
+    sendMessageMock.mockClear();
+    const personId = await seedCustomer();
+    const { jobId } = await seedPendingJob(personId, new Date(Date.now() - 60_000), new Date(Date.now() + 60 * 60 * 1000));
+
+    await sweepFollowUpJobs();
+
+    const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
+    expect(job.status).toBe("pending");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the provider_check_in message and schedules intake_questions_check_in 1 hour later on success, clamped to the 9am-8pm Eastern send window", async () => {
+    const { clampToSendWindow } = await import("../lib/send-window.js");
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_123` });
+    const personId = await seedCustomer({ phone: "+15559876543" });
+    const { jobId, tokenId } = await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
+
+    const beforeSweep = Date.now();
+    const result = await sweepFollowUpJobs();
+
+    expect(result.sentCount).toBe(1);
+    // Wording is randomized (see provider_check_in's variants) — "completed
+    // questionnaire" is the substring common to all of them.
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559876543", expect.stringContaining("completed questionnaire"), { scheduled: true });
+
+    const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
+    expect(job.status).toBe("sent");
+    expect(job.sentAt).not.toBeNull();
+    expect(job.providerMessageId).toBe(`${receiptPrefix}-msg_123`);
+
+    const nextJobs = await db
+      .select()
+      .from(followUpJobsTable)
+      .where(eq(followUpJobsTable.intakeLinkTokenId, tokenId));
+    const step2 = nextJobs.find((j) => j.messageStep === "intake_questions_check_in");
+    expect(step2).toBeDefined();
+    expect(step2!.status).toBe("pending");
+    // See send-window.ts — a naive "sent + 1 hour" can land in the overnight
+    // quiet-hours window and get pushed to 9am Eastern instead, so this
+    // computes the same expected value rather than asserting a fixed delta.
+    const expectedDueAt = clampToSendWindow(new Date(beforeSweep + 60 * 60 * 1000));
+    expect(Math.abs(new Date(step2!.dueAt).getTime() - expectedDueAt.getTime())).toBeLessThan(5000);
   });
 
   it("cancels a due job when the person submitted the questionnaire after clicking", async () => {
@@ -166,7 +183,7 @@ describe("sweepFollowUpJobs", () => {
 
   it("ignores a purchase whose row was actually created before the click, even if its purchaseDate is the same calendar day", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_same_day" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_same_day` });
     const personId = await seedCustomer();
     const clickedAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
@@ -194,7 +211,7 @@ describe("sweepFollowUpJobs", () => {
 
   it("ignores a questionnaire submission that happened before the link was clicked", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_789" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_789` });
     const personId = await seedCustomer();
     const clickedAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
@@ -252,7 +269,7 @@ describe("sweepFollowUpJobs", () => {
     expect(result.failedCount).toBe(1);
     const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
     expect(job.status).toBe("failed");
-    expect(job.failureReason).toBe("SMS_PROVIDER_UNAVAILABLE");
+    expect(job.failureReason).toBe("SMS_DELIVERY_UNCONFIRMED_REVIEW_REQUIRED");
 
     const jobs = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.intakeLinkTokenId, tokenId));
     expect(jobs.length).toBe(1);
@@ -268,7 +285,7 @@ describe("sweepFollowUpJobs", () => {
       () =>
         new Promise((resolve) => {
           callCount += 1;
-          const providerMessageId = callCount === 1 ? "msg_first" : "msg_second";
+          const providerMessageId = callCount === 1 ? `${receiptPrefix}-msg_first` : `${receiptPrefix}-msg_second`;
           setTimeout(() => resolve({ providerMessageId }), callCount === 1 ? 60 : 0);
         }),
     );
@@ -289,7 +306,7 @@ describe("sweepFollowUpJobs", () => {
 
   it("logs a successfully-sent follow-up into the person's conversation history, same as any other proactive SMS", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_logged" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_logged` });
     const personId = await seedCustomer({ phone: "+15551112222" });
     await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
 
@@ -301,13 +318,13 @@ describe("sweepFollowUpJobs", () => {
     const messages = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.conversationId, conversation.id));
     expect(messages).toHaveLength(1);
     expect(messages[0].direction).toBe("outbound");
-    expect(messages[0].providerMessageId).toBe("msg_logged");
+    expect(messages[0].providerMessageId).toBe(`${receiptPrefix}-msg_logged`);
     expect(messages[0].body).toContain("completed questionnaire");
   });
 
   it("creates the conversation with the intake link's leadSource, not the default, when this is the first message a Meta lead ever gets", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_meta_lead" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_meta_lead` });
     const personId = await seedCustomer({ phone: "+15553334444" });
     // A Meta lead who only had email on file when the SMS opener would have
     // fired, then got a phone added before their emailed link's follow-up
@@ -323,7 +340,7 @@ describe("sweepFollowUpJobs", () => {
 
   it("does not reprocess a job that already resolved", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_first" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_first` });
     const personId = await seedCustomer();
     const { jobId } = await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
 
@@ -354,4 +371,11 @@ describe("sweepFollowUpJobs", () => {
       else process.env.SALES_SMS_ENABLED = originalEnv;
     }
   });
+});
+
+// Business-flow fixtures run during allowed hours; quiet-hours boundaries
+// and overnight deferral are exercised in scheduled-sms-quiet-hours.service.test.ts.
+vi.mock("../lib/send-window.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/send-window.js")>();
+  return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
 });
