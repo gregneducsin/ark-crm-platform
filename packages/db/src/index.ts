@@ -39,4 +39,3 @@ export const personLockPool = new Pool({ ...poolConfig, max: 10 });
 export const db = drizzle(pool, { schema });
 
 export * from "./schema/index.js";
-

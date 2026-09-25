@@ -279,4 +279,3 @@ describe("updateSupportConversationState — Slack alert on needsAttention", () 
     expect(notifySlackMock).not.toHaveBeenCalled();
   });
 });
-

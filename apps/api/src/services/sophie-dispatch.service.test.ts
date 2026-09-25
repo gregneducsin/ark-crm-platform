@@ -232,7 +232,7 @@ describe("processInboundSupportMessage", () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock.mock.calls[0][1]).toBe("Answer to the latest concern.");
     expect((await getOrCreateSupportConversation(personId)).lastQuestion).toBeNull();
-    
+
   });
 
   it("retains a new inbound until the combined SMS has provider confirmation", async () => {

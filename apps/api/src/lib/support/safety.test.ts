@@ -295,4 +295,3 @@ describe("supportPostCheck: follow-up content safety", () => {
     }), null)).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
   });
 });
-

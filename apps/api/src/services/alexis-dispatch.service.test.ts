@@ -512,6 +512,8 @@ describe("processInboundMessage", () => {
       const messages = await listMessages(conversation.id);
       // The inbound message is still recorded — only the outbound reply is suppressed.
       expect(messages.map((m) => m.direction)).toEqual(["inbound"]);
+      expect(runAlexisTurnMock).not.toHaveBeenCalled();
+      expect(await getSmsReplyWork(personId, "sales")).toBeDefined();
     } finally {
       if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
       else process.env.SALES_SMS_ENABLED = originalEnv;

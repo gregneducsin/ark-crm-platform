@@ -124,4 +124,3 @@ export const reviewRequestTriggersTable = pgTable(
 export type SupportConversation = typeof supportConversationsTable.$inferSelect;
 export type SupportConversationMessage = typeof supportConversationMessagesTable.$inferSelect;
 export type ReviewRequestTrigger = typeof reviewRequestTriggersTable.$inferSelect;
-

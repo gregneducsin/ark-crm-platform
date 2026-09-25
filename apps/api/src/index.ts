@@ -121,4 +121,3 @@ if (process.env.GOOGLE_WORKSPACE_SMTP_USER) {
 setInterval(() => {
   sweepPendingSmsReplies().catch((err) => logger.error({ err }, "Pending SMS reply sweep failed"));
 }, 15_000);
-

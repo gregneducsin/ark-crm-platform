@@ -386,4 +386,3 @@ export function supportPostCheck(
 
   return { ok: true, result: sanitizedRaw };
 }
-

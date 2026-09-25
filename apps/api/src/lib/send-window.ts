@@ -67,8 +67,8 @@ export function assertScheduledSmsTime(): void {
 
 /**
  * 9:00am Eastern on a plain "YYYY-MM-DD" date — used to turn a customer's
- * stated preferred follow-up date (e.g. from Lucy's
- * preferredReengagementDate, see provider.ts) into a concrete send time,
+ * stated preferred follow-up date
+ * into a concrete send time,
  * rather than firing at midnight UTC or whatever hour a naive `new
  * Date(isoDate)` would land on.
  */

@@ -98,4 +98,3 @@ describe("withPersonLock pool isolation", () => {
     expect(await within(withPersonLock(personId, async () => "recovered"))).toBe("recovered");
   });
 });
-

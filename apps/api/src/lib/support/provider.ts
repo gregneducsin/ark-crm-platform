@@ -286,4 +286,3 @@ export async function callSophieInteractive(
     inboundSentiment: validated.inboundSentiment ?? null,
   };
 }
-

@@ -277,4 +277,3 @@ export async function getSupportConversationDetail(
   const messages = await listSupportMessages(conversationId, 200);
   return { conversation: row.conversation, customer: { firstName: row.firstName, lastName: row.lastName, phone: row.phone }, messages };
 }
-

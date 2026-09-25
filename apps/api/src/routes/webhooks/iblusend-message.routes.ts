@@ -34,4 +34,3 @@ export function createIbluSendMessageWebhookRouter(): RouterType {
 
   return router;
 }
-

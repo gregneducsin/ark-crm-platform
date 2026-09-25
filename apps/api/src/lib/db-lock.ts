@@ -42,4 +42,3 @@ export async function withPersonLock<T>(personId: string, fn: () => Promise<T>):
     client.release(discardClient);
   }
 }
-

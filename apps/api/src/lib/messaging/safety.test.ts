@@ -756,4 +756,3 @@ describe("interactivePostCheck: follow-up content safety", () => {
       .toEqual({ ok: false, code: "QUESTION_MARK_IN_REPLY" });
   });
 });
-
