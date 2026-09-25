@@ -191,7 +191,7 @@ describe("handleIbluSendWebhook", () => {
     const personId = await seedCustomer(phone);
     await handleIbluSendWebhook(envelope({ data: { phone_number: phone, content: "hey is this ark health" } }));
 
-    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hey is this luma health", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
+    expect(processInboundMessageMock).toHaveBeenCalledWith(personId, "hey is this ark health", undefined, undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
     expect(processInboundSupportMessageMock).not.toHaveBeenCalled();
   });
 

@@ -71,6 +71,23 @@ afterEach(async () => {
 });
 
 describe("scheduled sales SMS send-time protections", () => {
+  it.each(kinds)("%s preserves Ark's default sales pause and resumes without duplicate sends", async (kind) => {
+    const item = await seed(kind);
+    const original = process.env.SALES_SMS_ENABLED;
+    try {
+      delete process.env.SALES_SMS_ENABLED;
+      await sweepScheduledSalesSms(kind);
+      expect(mocks.send).not.toHaveBeenCalled();
+      expect((await jobFor(item)).status).toBe("pending");
+      process.env.SALES_SMS_ENABLED = "true";
+      await sweepScheduledSalesSms(kind);
+      await sweepScheduledSalesSms(kind);
+      expect(mocks.send).toHaveBeenCalledTimes(1);
+    } finally {
+      if (original === undefined) delete process.env.SALES_SMS_ENABLED;
+      else process.env.SALES_SMS_ENABLED = original;
+    }
+  });
   it.each(kinds)("%s defers a staff hold without changing its schedule, then sends once after release", async (kind) => {
     const item = await seed(kind);
     const thread = await conversation(item.personId);

@@ -7,12 +7,10 @@ vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: mock
 vi.mock("../lib/sms-provider.js", () => ({ getSmsProvider: () => ({ sendMessage: mocks.send }) }));
 vi.mock("./alexis-dispatch.service.js", () => ({ resumeAlexisSms: mocks.resume }));
 vi.mock("../lib/slack.js", () => ({ notifySlack: vi.fn() }));
-vi.mock("../lib/snapme-webhook.js", () => ({ notifySnapmePriorityCodeReceived: vi.fn(), notifySnapmeDtcReplyReceived: vi.fn() }));
 import { recordAndClassifyUnmatchedSms, resumeUnmatchedSms, sweepPendingUnmatchedSms, getUnmatchedSmsThreadDetail, sendUnmatchedInboundSmsReply } from "./unmatched-inbound-sms.service.js";
 import { recordSmsDeliveryReceipt } from "./sms-delivery.service.js";
 import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
 import { isCustomerSmsDnd, isCustomerEmailDnd, setCustomerSmsDnd } from "./dnd.service.js";
-import { } from "./unmatched-inbound-sms.service.js";
 
 describe("unknown sender SMS opt-out", () => {
   it.each(["STOP", "unsubscribe", "Please do not text me"])("saves %s before classification or a greeting", async (body) => {

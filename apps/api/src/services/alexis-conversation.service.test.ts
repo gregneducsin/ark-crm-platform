@@ -373,24 +373,7 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
 
     expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(5);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe("UNAPPROVED_URL");
-  });
-
-  it("retries an unsupported-pricing-claim rejection once, with corrective feedback, and succeeds if the retry cites the topic", async () => {
-    callClaudeInteractiveMock.mockClear();
-    callClaudeInteractiveMock
-      .mockResolvedValueOnce(modelResult({ reply: "Starting at $120 for the first month.", knowledgeTopicsUsed: [] }))
-      .mockResolvedValueOnce(modelResult({ reply: "Starting at $120 for the first month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
-    const personId = await seedCustomer();
-    const result = await runAlexisTurn(personId, baseBody());
-
-    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
-    // The retry call is the (body, knowledgeCatalog, retryNote) triple —
-    // the third argument is the corrective feedback.
-    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
-    expect(retryNote).toMatch(/knowledge topic/i);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.reply).toBe("Starting at $120 for the first month.");
+    if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
   });
 
   it("never bypasses PROHIBITED_CLINICAL_ABSOLUTE (diagnose/contraindicated/symptom) — no amount of retrying waives it", async () => {

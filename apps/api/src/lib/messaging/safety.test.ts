@@ -747,7 +747,7 @@ describe("interactivePostCheck: follow-up content safety", () => {
 
   it("allows an ordinary question and approved, grounded pricing in a question", () => {
     expect(check(reply({ nextQuestion: "Would you like to continue?" })).ok).toBe(true);
-    expect(check(reply({ nextQuestion: "Would you like the $100 option?", knowledgeTopicsUsed: ["semaglutide_pricing"] })).ok).toBe(true);
+    expect(check(reply({ nextQuestion: "Would you like the $169 option?", knowledgeTopicsUsed: ["semaglutide_pricing"] })).ok).toBe(true);
     expect(check(reply({ nextQuestion: "Would you like details about dosing?", knowledgeTopicsUsed: ["titration"] })).ok).toBe(true);
   });
 

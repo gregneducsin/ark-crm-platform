@@ -109,7 +109,7 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"), { scheduled: true });
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
@@ -143,7 +143,7 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"), { scheduled: true });
     expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.not.stringContaining("this is Alexis"), { scheduled: true });
 
     // Lands in the SAME conversation, not a second one.

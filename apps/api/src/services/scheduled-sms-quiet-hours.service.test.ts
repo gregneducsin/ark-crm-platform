@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({ send: vi.fn(), classify: vi.fn() }));
 vi.mock("../lib/sms-provider.js", () => ({ getSmsProvider: () => ({ sendMessage: mocks.send }) }));
 vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: mocks.classify }; } }));
 vi.mock("../lib/slack.js", () => ({ notifySlack: vi.fn(), notifySmsSlack: vi.fn() }));
-vi.mock("../lib/snapme-webhook.js", () => ({ notifySnapmePriorityCodeReceived: vi.fn(), notifySnapmeDtcReplyReceived: vi.fn() }));
 
 const tables = { follow_up: followUpJobsTable, abandoned_cart: abandonedCartTriggersTable,
   lead_checkin: leadCheckinTriggersTable, objection_reengagement: objectionReengagementTriggersTable };

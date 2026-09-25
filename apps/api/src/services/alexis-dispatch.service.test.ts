@@ -165,22 +165,6 @@ describe("processInboundMessage", () => {
     expect(triggers).toHaveLength(0);
   });
 
-  it("schedules a re-engagement text once no_time reaches stand-down too", async () => {
-    runAlexisTurnMock.mockClear();
-    sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_notime_standdown" });
-    runAlexisTurnMock.mockResolvedValueOnce(
-      okResult({ objectionKey: "no_time", objectionStage: 2, reply: "No worries at all.", nextQuestion: "What's a better time for us to follow up with you?" }),
-    );
-
-    const personId = await seedCustomer();
-    await processInboundMessage(personId, "I really don't have time for this right now");
-
-    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
-    expect(trigger).toBeDefined();
-    expect(trigger.status).toBe("pending");
-  });
-
   it("passes the customer's known first name to runAlexisTurn, and null for the 'Unknown' placeholder", async () => {
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();

@@ -445,21 +445,6 @@ const ACK_VARIANTS = [
   "Hi there, thanks for texting Ark Health! What's your name so I know who I'm talking to? We'll follow up with you shortly.",
 ] as const;
 
-/**
- * Sent instead of Claude's drafted reply the first time an email this
- * sender gives turns out to match an existing customer under a different
- * name — fixed and deterministic rather than Claude-drafted because this
- * exact turn is the one where the match is discovered, before Claude ever
- * had a chance to be told about it (see the pendingConfirmation flow one
- * turn later). Deliberately doesn't name the account on file — asking
- * generically avoids handing account details to whoever is actually
- * texting, in case it isn't really that person.
- */
-const EMAIL_MATCH_CONFIRM_VARIANTS = [
-  "Thanks! Quick check on my end — that email's already on file with us under a different name. Do you go by another name too, or should I double check the email?",
-  "Got it! One thing — we've got that email on file under a different name already. Is that you going by another name, or want to double check the email you gave me?",
-] as const;
-
 function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
 }

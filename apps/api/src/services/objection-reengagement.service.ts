@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { db, objectionReengagementTriggersTable } from "@luma/db";
 import { sweepScheduledSalesSms, type ScheduledSalesSmsSweepResult } from "./scheduled-sales-sms.service.js";
 
@@ -27,31 +26,6 @@ export async function scheduleObjectionReengagement(personId: string, leadSource
     .insert(objectionReengagementTriggersTable)
     .values({ personId, leadSource, dueAt: new Date(Date.now() + REENGAGEMENT_DELAY_MS) })
     .onConflictDoNothing({ target: objectionReengagementTriggersTable.personId });
-}
-
-/**
- * Reschedules this person's re-engagement trigger to a specific date the
- * customer actually asked for (e.g. answering "is there a better time for
- * me to check back in?" with "next month") — see
- * preferredReengagementDate in messaging/types.ts and provider.ts's
- * REENGAGEMENT TIMING prompt section.
- *
- * Only ever UPDATEs an existing `pending` trigger — never creates one.
- * scheduleObjectionReengagement above always fires immediately at
- * stand-down time as the guaranteed fallback (the whole point of that
- * function: outreach doesn't just stop because the customer wasn't ready to
- * push further), so by the time a customer could possibly be answering
- * "when's better," a trigger already exists. If it's already `sent`,
- * `cancelled`, or `failed`, this is a deliberate no-op — nothing left to
- * reschedule, and it's not this function's job to resurrect one.
- */
-export async function rescheduleObjectionReengagementIfPending(personId: string, newDueAt: Date): Promise<boolean> {
-  const [updated] = await db
-    .update(objectionReengagementTriggersTable)
-    .set({ dueAt: newDueAt })
-    .where(and(eq(objectionReengagementTriggersTable.personId, personId), eq(objectionReengagementTriggersTable.status, "pending")))
-    .returning({ id: objectionReengagementTriggersTable.id });
-  return Boolean(updated);
 }
 
 export type ObjectionReengagementSweepResult = ScheduledSalesSmsSweepResult;
