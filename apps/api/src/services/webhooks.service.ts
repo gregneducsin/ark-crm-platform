@@ -79,7 +79,7 @@ export async function recordWebhookEventIfNew(
     INSERT INTO webhook_events (source, external_event_id, raw_payload)
     VALUES (${source}, ${externalEventId}, ${JSON.stringify(rawPayload)}::jsonb)
     ON CONFLICT (source, external_event_id) DO UPDATE
-    SET status = 'received', raw_payload = excluded.raw_payload, error_message = null
+    SET status = 'received', received_at = now(), raw_payload = excluded.raw_payload, error_message = null
     WHERE webhook_events.status = 'failed'
        OR (webhook_events.status = 'received' AND webhook_events.received_at < now() - interval '5 minutes')
     RETURNING id
@@ -750,3 +750,4 @@ export async function handleBaskPaymentRefundedWebhook(payload: BaskPaymentRefun
   }
   return { duplicate: false };
 }
+

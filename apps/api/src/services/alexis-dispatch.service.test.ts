@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { recordSmsDeliveryReceipt, getSmsReplyWork } from "./sms-delivery.service.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, conversationsTable, conversationMessagesTable, objectionReengagementTriggersTable } from "@luma/db";
 import type { AlexisTurnResult } from "./alexis-conversation.service.js";
@@ -16,7 +17,7 @@ vi.mock("../lib/sms-provider.js", async () => {
   return { ...actual, getSmsProvider: () => ({ sendMessage: sendMessageMock }) };
 });
 
-const { processInboundMessage } = await import("./alexis-dispatch.service.js");
+const { processInboundMessage, resumeAlexisSms } = await import("./alexis-dispatch.service.js");
 const { getOrCreateConversation, listMessages, appendMessage } = await import("./conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null; firstName?: string } = {}): Promise<string> {
@@ -55,31 +56,46 @@ function okResult(overrides: Partial<Extract<AlexisTurnResult, { ok: true }>> = 
   };
 }
 
+beforeEach(() => { runAlexisTurnMock.mockReset(); sendMessageMock.mockReset(); });
+
 describe("processInboundMessage", () => {
+  it("continues after financing interest rather than flagging different plan questions", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    await appendMessage(conversation.id, "outbound", "Which plan length works best for you?", { deliveryStatus: "sent" });
+    await appendMessage(conversation.id, "inbound", "Do you offer financing?", {});
+    await appendMessage(conversation.id, "outbound", "Want to see the payment plan options?", { deliveryStatus: "sent" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "Here are the payment options.", nextQuestion: "Which plan works best for you?" }));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "financing-progress" });
+
+    await processInboundMessage(personId, "Yes please");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect((await getOrCreateConversation(personId)).needsAttention).toBe(false);
+  });
+
   it("persists the inbound message, tags its sentiment, and sends+logs both reply and nextQuestion", async () => {
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_1" }).mockResolvedValueOnce({ providerMessageId: "msg_2" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_1" });
     runAlexisTurnMock.mockResolvedValueOnce(okResult({ inboundSentiment: "positive" }));
 
     const personId = await seedCustomer();
     const result = await processInboundMessage(personId, "How much is semaglutide?");
 
     expect(result.ok).toBe(true);
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
-    expect(sendMessageMock).toHaveBeenNthCalledWith(1, "+15551230000", "Semaglutide starts at $120 for the 1-month plan.");
-    expect(sendMessageMock).toHaveBeenNthCalledWith(2, "+15551230000", "Which plan are you considering?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith("+15551230000", "Semaglutide starts at $120 for the 1-month plan.\n\nWhich plan are you considering?");
 
     const conversation = await getOrCreateConversation(personId);
     const messages = await listMessages(conversation.id);
     expect(messages.map((m) => ({ direction: m.direction, body: m.body }))).toEqual([
       { direction: "inbound", body: "How much is semaglutide?" },
-      { direction: "outbound", body: "Semaglutide starts at $120 for the 1-month plan." },
-      { direction: "outbound", body: "Which plan are you considering?" },
+      { direction: "outbound", body: "Semaglutide starts at $120 for the 1-month plan.\n\nWhich plan are you considering?" },
     ]);
     expect(messages[0].sentiment).toBe("positive");
     expect(messages[1].providerMessageId).toBe("msg_1");
-    expect(messages[2].providerMessageId).toBe("msg_2");
+    expect(messages[1].deliveryStatus).toBe("queued");
   });
 
   it("persists objectionKey alongside objectionStage", async () => {
@@ -147,6 +163,22 @@ describe("processInboundMessage", () => {
     await processInboundMessage(earlyPricePersonId, "too expensive");
     triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, earlyPricePersonId));
     expect(triggers).toHaveLength(0);
+  });
+
+  it("schedules a re-engagement text once no_time reaches stand-down too", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_notime_standdown" });
+    runAlexisTurnMock.mockResolvedValueOnce(
+      okResult({ objectionKey: "no_time", objectionStage: 2, reply: "No worries at all.", nextQuestion: "What's a better time for us to follow up with you?" }),
+    );
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "I really don't have time for this right now");
+
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger).toBeDefined();
+    expect(trigger.status).toBe("pending");
   });
 
   it("passes the customer's known first name to runAlexisTurn, and null for the 'Unknown' placeholder", async () => {
@@ -319,48 +351,99 @@ describe("processInboundMessage", () => {
     expect(conversation.needsAttention).toBe(false);
   });
 
-  it("serializes two double-texted inbound messages instead of racing them", async () => {
-    runAlexisTurnMock.mockClear();
-    sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_race" });
-
-    const seenHistoryLengths: number[] = [];
-    runAlexisTurnMock.mockImplementation(async (_personId: string, body: { messages: readonly unknown[] }) => {
-      // Snapshot synchronously at call time — before any delay — so this
-      // reflects exactly what conversation history was visible the instant
-      // Claude was invoked for this turn.
-      seenHistoryLengths.push(body.messages.length);
-      const isFirstCall = seenHistoryLengths.length === 1;
-      if (isFirstCall) {
-        // Force real overlap: the second processInboundMessage call starts
-        // while this first one is still mid-turn.
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      }
-      return okResult({ reply: isFirstCall ? "First reply." : "Second reply.", nextQuestion: null });
-    });
-
-    const personId = await seedCustomer();
-    const [r1, r2] = await Promise.all([processInboundMessage(personId, "first text"), processInboundMessage(personId, "second text")]);
-
-    expect(r1.ok).toBe(true);
-    expect(r2.ok).toBe(true);
-
-    // Without serialization, the second call's Claude turn would start
-    // immediately and only see its own inbound message (history length 1) —
-    // blind to the first text entirely, let alone the first turn's reply.
-    // With the lock, the second call only starts once the first has fully
-    // persisted both its inbound message and its outbound reply, so it sees
-    // both of those plus its own inbound message.
-    expect(seenHistoryLengths).toEqual([1, 3]);
-
+  it("persists queued texts immediately, skips intermediate turns and discards an outdated draft", async () => {
+    runAlexisTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "fresh" });
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    runAlexisTurnMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return okResult({ reply: "Outdated draft.", nextQuestion: "Old question?", validatedSlotUpdates: { state: "NY" }, learnedFirstName: "Wrong" });
+    }).mockResolvedValue(okResult({ reply: "Answer to the latest concern.", nextQuestion: null }));
+    const personId = await seedCustomer({ firstName: "Unknown" });
     const conversation = await getOrCreateConversation(personId);
-    const messages = await listMessages(conversation.id);
-    expect(messages.map((m) => ({ direction: m.direction, body: m.body }))).toEqual([
-      { direction: "inbound", body: "first text" },
-      { direction: "outbound", body: "First reply." },
-      { direction: "inbound", body: "second text" },
-      { direction: "outbound", body: "Second reply." },
-    ]);
+    const first = processInboundMessage(personId, "First request");
+    await entered;
+    const second = processInboundMessage(personId, "More context");
+    await vi.waitFor(async () => expect((await listMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(2));
+    const third = processInboundMessage(personId, "Latest concern");
+    await vi.waitFor(async () => expect((await listMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(3));
+    release();
+    const results = await Promise.all([first, second, third]);
+    expect(results[0]).toEqual({ ok: false, code: "SUPERSEDED" });
+    expect(results.slice(1).filter((result) => result.ok)).toHaveLength(1);
+    expect(results.slice(1).filter((result) => !result.ok)).toHaveLength(1);
+    expect(runAlexisTurnMock).toHaveBeenCalledTimes(2);
+    const latestBody = runAlexisTurnMock.mock.calls[1][1];
+    expect(latestBody.messages.filter((m: { direction: string }) => m.direction === "inbound").map((m: { body: string }) => m.body))
+      .toEqual(["First request", "More context", "Latest concern"]);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][1]).toBe("Answer to the latest concern.");
+    expect((await getOrCreateConversation(personId)).lastQuestion).toBeNull();
+    expect((await getOrCreateConversation(personId)).state).toBeNull();
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, personId));
+    expect(customer.firstName).toBe("Unknown");
+  });
+
+  it("retains a new inbound until the combined SMS has provider confirmation", async () => {
+    runAlexisTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const acceptedId = crypto.randomUUID();
+    sendMessageMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return { providerMessageId: acceptedId };
+    }).mockResolvedValue({ providerMessageId: "latest" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "First answer.", nextQuestion: "Obsolete question?" }))
+      .mockResolvedValue(okResult({ reply: "Updated answer.", nextQuestion: null }));
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const first = processInboundMessage(personId, "First request");
+    await entered;
+    const second = processInboundMessage(personId, "New request");
+    await vi.waitFor(async () => expect((await listMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(2));
+    release();
+    await Promise.all([first, second]);
+    expect(sendMessageMock.mock.calls.map((call) => call[1])).toEqual(["First answer.\n\nObsolete question?"]);
+    expect(await getSmsReplyWork(personId, "sales")).toBeDefined();
+    await recordSmsDeliveryReceipt(acceptedId, "sent", new Date());
+    await resumeAlexisSms(personId);
+    expect(sendMessageMock.mock.calls.map((call) => call[1])).toEqual(["First answer.\n\nObsolete question?", "Updated answer."]);
+    expect(await getSmsReplyWork(personId, "sales")).toBeUndefined();
+  });
+
+  it("honors a queued STOP even when a newer text supersedes its turn", async () => {
+    runAlexisTurnMock.mockReset();
+    sendMessageMock.mockReset();
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    runAlexisTurnMock.mockImplementationOnce(async () => {
+      started();
+      await gate;
+      return okResult();
+    }).mockResolvedValue(okResult());
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const first = processInboundMessage(personId, "Hello");
+    await entered;
+    const stop = processInboundMessage(personId, "STOP");
+    await vi.waitFor(async () => expect(await isCustomerSmsDnd(personId)).toBe(true));
+    const latest = processInboundMessage(personId, "Thank you");
+    await vi.waitFor(async () => expect((await listMessages(conversation.id)).filter((m) => m.direction === "inbound")).toHaveLength(3));
+    release();
+    await Promise.all([first, stop, latest]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
   });
 
   it("does not create a duplicate conversation across multiple inbound turns", async () => {
@@ -452,12 +535,12 @@ describe("processInboundMessage", () => {
   });
 
   it("stops sending once 10 outbound messages have gone out to this person in the last 20 minutes — the send-burst cap", async () => {
-    // Ported from Luma: a stream of fabricated inbound webhook events (not a
-    // real customer, confirmed against the provider's own records) drove
-    // 15+ real texts to one person in ~25 minutes, each individually a
-    // legitimate guardrail-approved reply. This cap doesn't care why the
-    // sends keep coming — only that they stop past the limit, silently,
-    // with no alert.
+    // Regression test for a real incident: a stream of fabricated inbound
+    // webhook events (not a real customer, confirmed against the provider's
+    // own records) drove 15+ real texts to one person in ~25 minutes, each
+    // individually a legitimate guardrail-approved reply. This cap doesn't
+    // care why the sends keep coming — only that they stop past the limit,
+    // with a staff flag for the unanswered inbound.
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();
 
@@ -471,6 +554,9 @@ describe("processInboundMessage", () => {
     await processInboundMessage(personId, "are you still there?");
 
     expect(sendMessageMock).not.toHaveBeenCalled();
+    const updated = await getOrCreateConversation(personId);
+    expect(updated.needsAttention).toBe(true);
+    expect(updated.needsAttentionReason).toMatch(/message limit/i);
   });
 
   it("still sends normally when under the send-burst cap", async () => {
@@ -524,7 +610,7 @@ describe("processInboundMessage", () => {
     await appendMessage(conversation.id, "inbound", "whatever you think is best honestly", {});
     await appendMessage(conversation.id, "outbound", "So just the 3-month plan or the 6-month plan?", { deliveryStatus: "sent" });
 
-    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "Got it, thanks.", nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
     await processInboundMessage(personId, "I really don't have a preference");
 
     expect(sendMessageMock).not.toHaveBeenCalled();
@@ -542,11 +628,106 @@ describe("processInboundMessage", () => {
     const conversation = await getOrCreateConversation(personId);
     await appendMessage(conversation.id, "outbound", "Would you like the 3-month plan or the 6-month plan?", { deliveryStatus: "sent" });
 
-    runAlexisTurnMock.mockResolvedValueOnce(okResult({ nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "Got it, thanks.", nextQuestion: "Should I set you up with the 3-month plan or the 6-month plan?" }));
     await processInboundMessage(personId, "hmm not sure yet");
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
     const updatedConversation = await getOrCreateConversation(personId);
     expect(updatedConversation.needsAttention).toBe(false);
+  });
+});
+
+describe("answer-only repeat escalation", () => {
+  async function repeated() {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const question = "Has your contact info or delivery address changed?";
+    await appendMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    await appendMessage(conversation.id, "inbound", "No changes.", {});
+    await appendMessage(conversation.id, "outbound", question, { deliveryStatus: "sent" });
+    return { personId, conversation, question };
+  }
+
+  it("sends one useful answer without the repeated question and holds subsequent inbound", async () => {
+    const { personId, conversation, question } = await repeated();
+    const reply = "Your order is still under review with the doctor.";
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply, nextQuestion: question }));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "sales-answer-only" });
+    const result = await processInboundMessage(personId, "What is my order status?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][1]).toBe(reply);
+    expect(result).toMatchObject({ ok: true, nextQuestion: null, requiresStaff: true });
+    expect(await getOrCreateConversation(personId)).toMatchObject({ needsAttention: true, lastQuestion: null, lastDraft: reply });
+    expect((await getSmsReplyWork(personId, "sales"))?.heldForStaff).toBe(true);
+    await recordSmsDeliveryReceipt("sales-answer-only", "sent", new Date());
+    await processInboundMessage(personId, "And now?");
+    expect(runAlexisTurnMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect((await listMessages(conversation.id)).at(-1)?.direction).toBe("inbound");
+  });
+
+  it("does not release a model staff escalation through answer-only handling", async () => {
+    const { personId, question } = await repeated();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ requiresStaff: true, nextQuestion: question }));
+    await processInboundMessage(personId, "Please help with my order.");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect((await getOrCreateConversation(personId)).needsAttention).toBe(true);
+    expect((await getSmsReplyWork(personId, "sales"))?.heldForStaff).toBe(true);
+  });
+
+  it("preserves a delivery-failure reason and never resends the answer", async () => {
+    const { personId, question } = await repeated();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "Your order is still under review with the doctor.", nextQuestion: question }));
+    sendMessageMock.mockRejectedValueOnce(new Error("synthetic transport failure"));
+    await processInboundMessage(personId, "What is my order status?");
+    expect((await getOrCreateConversation(personId)).needsAttentionReason).toMatch(/delivery.*unconfirmed or failed/i);
+    expect((await getSmsReplyWork(personId, "sales"))?.heldForStaff).toBe(true);
+    await processInboundMessage(personId, "Any update?");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the staff hold when a newer inbound arrives during transport", async () => {
+    const { personId, conversation, question } = await repeated();
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ reply: "Your order is still under review with the doctor.", nextQuestion: question }));
+    sendMessageMock.mockImplementationOnce(async () => {
+      expect((await getSmsReplyWork(personId, "sales"))?.heldForStaff).toBe(true);
+      const { recordSmsInbound } = await import("./sms-delivery.service.js");
+      await recordSmsInbound(personId, "sales", conversation.id, "Another question.");
+      return { providerMessageId: "sales-answer-race" };
+    });
+    await processInboundMessage(personId, "What is my order status?");
+    expect((await getSmsReplyWork(personId, "sales"))?.heldForStaff).toBe(true);
+    expect((await getOrCreateConversation(personId)).needsAttention).toBe(true);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("confirmed SMS timing", () => {
+  it("keeps an early acknowledgment before the question that was sent later", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const queuedAt = new Date(Date.now() - 60_000);
+    const inboundAt = new Date(queuedAt.getTime() + 10_000);
+    const sentAt = new Date(queuedAt.getTime() + 20_000);
+    const id = crypto.randomUUID();
+    await appendMessage(conversation.id, "outbound", "Synthetic explanation.\n\nWhich option interests you?", { deliveryStatus: "queued", providerMessageId: id, createdAt: queuedAt });
+    runAlexisTurnMock.mockResolvedValue(okResult({ action: "no_reply", reply: null, nextQuestion: null }));
+    await processInboundMessage(personId, "OK sounds good", undefined, undefined, { createdAt: inboundAt });
+    expect(runAlexisTurnMock).not.toHaveBeenCalled();
+    await recordSmsDeliveryReceipt(id, "sent", sentAt);
+    await resumeAlexisSms(personId);
+    const preview = runAlexisTurnMock.mock.calls[0][1];
+    expect(preview.messages.map((m: { body: string }) => m.body)).toEqual(["OK sounds good", "Synthetic explanation.\n\nWhich option interests you?"]);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("applies STOP immediately while an outgoing text is queued", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    await appendMessage(conversation.id, "outbound", "Synthetic pending response", { deliveryStatus: "queued" });
+    await processInboundMessage(personId, "STOP");
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect((await listMessages(conversation.id)).some((m) => m.body === "STOP")).toBe(true);
   });
 });

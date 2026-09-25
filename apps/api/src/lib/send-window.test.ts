@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampToSendWindow } from "./send-window.js";
+import { clampToSendWindow, nineAmEasternOnDate, isScheduledSmsTime } from "./send-window.js";
 
 /** Formats a Date as its America/New_York wall-clock time, for readable assertions. */
 function easternClock(date: Date): string {
@@ -16,11 +16,28 @@ describe("clampToSendWindow", () => {
     expect(clampToSendWindow(input)).toEqual(input);
   });
 
-  it("leaves a late-night-but-still-allowed Eastern time (11:50pm) unchanged", () => {
+  it("defers 11:50pm Eastern to 9am the following calendar day", () => {
     // 2026-01-15 23:50 ET (EST) = 2026-01-16 04:50 UTC
     const input = new Date("2026-01-16T04:50:00.000Z");
     expect(easternClock(input)).toBe("23:50");
-    expect(clampToSendWindow(input)).toEqual(input);
+    expect(clampToSendWindow(input)).toEqual(new Date("2026-01-16T14:00:00Z"));
+  });
+
+  it.each([
+    ["2026-01-16T00:59:59Z", true],
+    ["2026-01-16T01:00:00Z", false],
+    ["2026-01-16T13:59:59Z", false],
+    ["2026-01-16T14:00:00Z", true],
+  ])("checks the opening and closing boundary for %s", (date, allowed) => {
+    expect(isScheduledSmsTime(new Date(date))).toBe(allowed);
+  });
+
+  it.each([
+    ["2026-03-08T01:00:00Z", "2026-03-08T13:00:00Z"],
+    ["2026-11-01T00:00:00Z", "2026-11-01T14:00:00Z"],
+    ["2027-01-01T01:00:00Z", "2027-01-01T14:00:00Z"],
+  ])("defers across DST or calendar rollover from %s", (date, expected) => {
+    expect(clampToSendWindow(new Date(date))).toEqual(new Date(expected));
   });
 
   it("snaps 1am Eastern forward to 9am Eastern the same calendar day (standard time)", () => {

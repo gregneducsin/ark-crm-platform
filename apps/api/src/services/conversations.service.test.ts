@@ -324,7 +324,7 @@ describe("sendStaffReply", () => {
       providerMessageId: "msg_staff_1",
       sentBy: "staff",
       sentByStaffEmail: "staff@example.com",
-      deliveryStatus: "sent",
+      deliveryStatus: "queued",
     });
 
     const updated = await getConversationDetail(conversation.id);
@@ -389,3 +389,4 @@ describe("sendStaffReply", () => {
     }
   });
 });
+

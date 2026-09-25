@@ -24,9 +24,10 @@ function SentimentBadge({ sentiment }: { sentiment: "positive" | "neutral" | "ne
 }
 
 /** Flags an outbound SMS that never actually reached the customer (the provider call itself failed) — distinct from providerMessageId being absent, which can also happen on a message that did send. */
-function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "sent" | "failed" | null | undefined }) {
-  if (deliveryStatus !== "failed") return null;
-  return <Badge color="red">Not delivered</Badge>;
+function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "queued" | "sent" | "delivered" | "read" | "failed" | "unknown" | null | undefined }) {
+  if (!deliveryStatus) return null;
+  const label = { queued: "Queued", sent: "Sent", delivered: "Delivered", read: "Read", failed: "Failed", unknown: "Delivery unconfirmed" }[deliveryStatus];
+  return <Badge color={deliveryStatus === "failed" || deliveryStatus === "unknown" ? "red" : deliveryStatus === "queued" ? "yellow" : "gray"}>{label}</Badge>;
 }
 
 /** Marks who actually wrote an outbound message — the bot vs a staff member typing into the reply box — so the timeline reads as one continuous conversation but staff can still tell AI from human, and which human, at a glance. */
@@ -373,12 +374,12 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
           // the next message came 20 minutes or 6 days later — this divider
           // makes the actual gap between sends visible without staff having
           // to hover/click each timestamp to check.
-          const showDateDivider = i === 0 || formatDate(m.createdAt) !== formatDate(visibleMessages[i - 1].createdAt);
+          const showDateDivider = i === 0 || formatDate(m.sentAt ?? m.createdAt) !== formatDate(visibleMessages[i - 1].sentAt ?? visibleMessages[i - 1].createdAt);
           return (
             <div key={`${m.persona}-${m.channel}-${m.id}`}>
               {showDateDivider && (
                 <div className="my-3 flex items-center justify-center">
-                  <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500">{formatDate(m.createdAt)}</span>
+                  <span className="rounded-full bg-luma-surface-alt px-2.5 py-0.5 text-[11px] font-medium text-luma-ink-secondary">{formatDate(m.sentAt ?? m.createdAt)}</span>
                 </div>
               )}
               <div className={m.direction === "inbound" ? "text-left" : "text-right"}>
@@ -406,7 +407,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                   )}
                   <div className="flex items-center gap-2 px-1">
                     {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName={BOT_NAME[m.persona]} />}
-                    <span className="text-[11px] text-gray-400">{formatTime(m.createdAt)}</span>
+                    <span className="text-[11px] text-luma-ink-muted">{formatTime(m.sentAt ?? m.createdAt)}</span>
                     <SentimentBadge sentiment={m.sentiment} />
                     {m.direction === "outbound" && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}
                   </div>
@@ -474,3 +475,4 @@ export function ConversationsPage() {
     </div>
   );
 }
+

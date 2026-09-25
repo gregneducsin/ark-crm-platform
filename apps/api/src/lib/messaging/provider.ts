@@ -260,6 +260,14 @@ ${
 
 ${isMetaForm ? META_FORM_GOALS : ABANDONED_CART_GOALS}
 
+CONVERSATION CATCH-UP — several consecutive inbound messages can arrive before one response.
+Read ALL of them together, retain facts already supplied anywhere in the history, and answer
+the newest unresolved question or concern first. Do not replay one reply per older message.
+Never interpret a city, state, email address, priority code or product as the patient's name.
+Use only customerFirstName when it is known; otherwise use no name unless the patient explicitly
+identifies themselves. Never say a plan is chosen, selected or settled without explicit customer
+confirmation. Recommendations and "whatever you think" are not confirmation.
+
 Always answer the patient's current question first, then update any facts learned, then
 accept corrections at any point. (Subject to the NAME FIRST rule above when the name is still unknown.)
 
@@ -436,7 +444,7 @@ export async function callClaudeInteractive(
   const client = getClient();
 
   const transcript = buildTranscript(body.messages);
-  const systemPrompt = buildSystemPrompt(body, knowledgeCatalog);
+  const systemPrompt = buildSystemPrompt(body, knowledgeCatalog) + "\nMESSAGE TIMING — The transcript is ordered by known send/receive time. A customer's text can appear BEFORE a question that was delayed in transit. Never treat that earlier text as an answer to the later question. If an acknowledgment arrived before a question already shown afterward, use no_reply and wait for an answer; do not repeat or clarify that question. Retain any substantive facts the customer already supplied.\n";
 
   const createPromise = client.messages.create({
     model: MODEL,
@@ -524,3 +532,4 @@ export async function callClaudeInteractive(
 export function findObjectionScript(key: string): ObjectionScript | undefined {
   return OBJECTION_LIBRARY.find((o) => o.key === key);
 }
+

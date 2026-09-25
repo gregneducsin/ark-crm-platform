@@ -1,21 +1,8 @@
-import { and, eq, lt, lte, or, sql } from "drizzle-orm";
-import { db, customersTable, purchasesTable, objectionReengagementTriggersTable } from "@luma/db";
-import { getOrCreateConversation, appendMessage } from "./conversations.service.js";
-import { getSmsProvider } from "../lib/sms-provider.js";
-import { isSalesSmsPaused } from "../lib/sales-sms.js";
-import { renderReengagementCheckin } from "../lib/messaging/follow-up-templates.js";
-import { logger } from "../lib/logger.js";
-import { isCustomerSmsDnd } from "./dnd.service.js";
-import { withPersonLock } from "../lib/db-lock.js";
+import { and, eq } from "drizzle-orm";
+import { db, objectionReengagementTriggersTable } from "@luma/db";
+import { sweepScheduledSalesSms, type ScheduledSalesSmsSweepResult } from "./scheduled-sales-sms.service.js";
 
 const REENGAGEMENT_DELAY_MS = 14 * 24 * 60 * 60 * 1000;
-
-/**
- * A failed send gets a few retries rather than being lost permanently — same
- * mechanism as sweepLeadCheckinTriggers.
- */
-const MAX_SEND_ATTEMPTS = 3;
-const RETRY_COOLDOWN_MS = 30 * 60 * 1000;
 
 /**
  * Arms a one-time, 2-weeks-out re-engagement text for a lead who just
@@ -42,137 +29,34 @@ export async function scheduleObjectionReengagement(personId: string, leadSource
     .onConflictDoNothing({ target: objectionReengagementTriggersTable.personId });
 }
 
-export interface ObjectionReengagementSweepResult {
-  readonly sentCount: number;
-  readonly cancelledCount: number;
-  readonly failedCount: number;
+/**
+ * Reschedules this person's re-engagement trigger to a specific date the
+ * customer actually asked for (e.g. answering "is there a better time for
+ * me to check back in?" with "next month") — see
+ * preferredReengagementDate in messaging/types.ts and provider.ts's
+ * REENGAGEMENT TIMING prompt section.
+ *
+ * Only ever UPDATEs an existing `pending` trigger — never creates one.
+ * scheduleObjectionReengagement above always fires immediately at
+ * stand-down time as the guaranteed fallback (the whole point of that
+ * function: outreach doesn't just stop because the customer wasn't ready to
+ * push further), so by the time a customer could possibly be answering
+ * "when's better," a trigger already exists. If it's already `sent`,
+ * `cancelled`, or `failed`, this is a deliberate no-op — nothing left to
+ * reschedule, and it's not this function's job to resurrect one.
+ */
+export async function rescheduleObjectionReengagementIfPending(personId: string, newDueAt: Date): Promise<boolean> {
+  const [updated] = await db
+    .update(objectionReengagementTriggersTable)
+    .set({ dueAt: newDueAt })
+    .where(and(eq(objectionReengagementTriggersTable.personId, personId), eq(objectionReengagementTriggersTable.status, "pending")))
+    .returning({ id: objectionReengagementTriggersTable.id });
+  return Boolean(updated);
 }
 
-type ObjectionReengagementSendResult = { kind: "failed"; reason: string } | { kind: "sent"; providerMessageId: string | null };
+export type ObjectionReengagementSweepResult = ScheduledSalesSmsSweepResult;
 
-/**
- * Sends every due re-engagement text, plus any failed one still within its
- * retry budget. Cancels rather than sends when the lead already purchased or
- * has since opted out — same reasoning and mechanism as
- * sweepLeadCheckinTriggers, including the atomic pending→processing claim
- * that makes this safe to call from overlapping sweep runs.
- *
- * While sales SMS is paused, this returns immediately without claiming
- * anything — same reasoning as sweepLeadCheckinTriggers's pause guard.
- */
+/** Recheck eligibility under the shared person lock and await provider receipts. */
 export async function sweepObjectionReengagementTriggers(): Promise<ObjectionReengagementSweepResult> {
-  if (isSalesSmsPaused()) return { sentCount: 0, cancelledCount: 0, failedCount: 0 };
-
-  const retryEligibleBefore = new Date(Date.now() - RETRY_COOLDOWN_MS);
-  const claimed = await db
-    .update(objectionReengagementTriggersTable)
-    .set({ status: "processing" })
-    .where(
-      or(
-        and(eq(objectionReengagementTriggersTable.status, "pending"), lte(objectionReengagementTriggersTable.dueAt, sql`now()`)),
-        and(
-          eq(objectionReengagementTriggersTable.status, "failed"),
-          lt(objectionReengagementTriggersTable.attemptCount, MAX_SEND_ATTEMPTS),
-          lte(objectionReengagementTriggersTable.updatedAt, retryEligibleBefore),
-        ),
-      ),
-    )
-    .returning({
-      id: objectionReengagementTriggersTable.id,
-      personId: objectionReengagementTriggersTable.personId,
-      leadSource: objectionReengagementTriggersTable.leadSource,
-      attemptCount: objectionReengagementTriggersTable.attemptCount,
-    });
-
-  let sentCount = 0;
-  let cancelledCount = 0;
-  let failedCount = 0;
-
-  for (const trigger of claimed) {
-    const [purchased] = await db
-      .select({ id: purchasesTable.id })
-      .from(purchasesTable)
-      .where(and(eq(purchasesTable.customerId, trigger.personId), eq(purchasesTable.status, "completed")))
-      .limit(1);
-    if (purchased) {
-      await db.update(objectionReengagementTriggersTable).set({ status: "cancelled", cancelledReason: "already_purchased" }).where(eq(objectionReengagementTriggersTable.id, trigger.id));
-      cancelledCount++;
-      continue;
-    }
-
-    if (await isCustomerSmsDnd(trigger.personId)) {
-      await db.update(objectionReengagementTriggersTable).set({ status: "cancelled", cancelledReason: "opted_out" }).where(eq(objectionReengagementTriggersTable.id, trigger.id));
-      cancelledCount++;
-      continue;
-    }
-
-    const [customer] = await db.select({ firstName: customersTable.firstName, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, trigger.personId));
-    const nextAttemptCount = trigger.attemptCount + 1;
-
-    if (!customer?.phone) {
-      await db
-        .update(objectionReengagementTriggersTable)
-        .set({ status: "failed", failureReason: "NO_PHONE_NUMBER", attemptCount: nextAttemptCount })
-        .where(eq(objectionReengagementTriggersTable.id, trigger.id));
-      failedCount++;
-      continue;
-    }
-    // Narrowed to a plain string here, before the closure below — TS doesn't
-    // carry the `!customer?.phone` narrowing above into a nested closure.
-    const phone = customer.phone;
-
-    // Locked against the same per-person key processInboundMessage uses
-    // (alexis-dispatch.service.ts) — the conversation read/write here must
-    // happen atomically with respect to a live inbound turn, or this
-    // proactive re-engagement can race a live reply: both read the same
-    // stale state and both send, unaware of each other.
-    const sendResult = await withPersonLock(trigger.personId, async (): Promise<ObjectionReengagementSendResult> => {
-      const conversation = await getOrCreateConversation(trigger.personId, trigger.leadSource);
-      const text = renderReengagementCheckin(customer.firstName);
-
-      // The "sent" outcome below must be returned right after a successful
-      // send, before anything else that could throw — otherwise a failure in
-      // a downstream step (logging into the conversation) falls into the
-      // catch, is treated as failed, and a later sweep retries it: a real
-      // duplicate text to the customer, even though the first one already
-      // went out.
-      let result: { providerMessageId: string | null };
-      try {
-        result = await getSmsProvider().sendMessage(phone, text);
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        logger.warn({ personId: trigger.personId, reason }, "objection re-engagement send failed");
-        await appendMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-        return { kind: "failed", reason };
-      }
-
-      try {
-        await appendMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-      } catch (err) {
-        logger.warn({ personId: trigger.personId, reason: err instanceof Error ? err.message : String(err) }, "failed to log objection re-engagement into the conversation");
-      }
-      return { kind: "sent", providerMessageId: result.providerMessageId };
-    });
-
-    if (sendResult.kind === "failed") {
-      await db
-        .update(objectionReengagementTriggersTable)
-        .set({ status: "failed", failureReason: sendResult.reason, attemptCount: nextAttemptCount })
-        .where(eq(objectionReengagementTriggersTable.id, trigger.id));
-      failedCount++;
-      continue;
-    }
-
-    await db
-      .update(objectionReengagementTriggersTable)
-      .set({ status: "sent", sentAt: sql`now()`, providerMessageId: sendResult.providerMessageId, attemptCount: nextAttemptCount })
-      .where(eq(objectionReengagementTriggersTable.id, trigger.id));
-    sentCount++;
-  }
-
-  if (sentCount > 0 || cancelledCount > 0 || failedCount > 0) {
-    logger.info({ sentCount, cancelledCount, failedCount }, "objection re-engagement sweep completed");
-  }
-
-  return { sentCount, cancelledCount, failedCount };
+  return sweepScheduledSalesSms("objection_reengagement");
 }

@@ -1,13 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, questionnaireEventsTable, purchasesTable, abandonedCartTriggersTable, leadCheckinTriggersTable, intakeLinkTokensTable } from "@luma/db";
 import { setCustomerSmsDnd } from "./dnd.service.js";
 import { withPersonLock } from "../lib/db-lock.js";
 
+let receiptPrefix = "";
+beforeEach(async () => {
+  // Sweeps intentionally scan every due job. Isolate this suite's synthetic
+  // jobs from fixtures left by other service suites in the shared test schema.
+  await db.delete(abandonedCartTriggersTable);
+  receiptPrefix = crypto.randomUUID();
+});
+
 const sendMessageMock = vi.fn();
 vi.mock("../lib/sms-provider.js", async () => {
   const actual = await vi.importActual<typeof import("../lib/sms-provider.js")>("../lib/sms-provider.js");
-  return { ...actual, getSmsProvider: () => ({ sendMessage: sendMessageMock }) };
+  return { ...actual, getSmsProvider: () => ({ sendMessage: async (...args: unknown[]) => {
+      const result = await sendMessageMock(...args);
+      // Successful fixtures include the provider's sent receipt, even if it
+      // arrives before the HTTP response. Timing tests delay receipts explicitly.
+      if (result?.providerMessageId) {
+        const { recordSmsDeliveryReceipt } = await import("./sms-delivery.service.js");
+        await recordSmsDeliveryReceipt(result.providerMessageId, "sent", new Date());
+      }
+      return result;
+    } }) };
 });
 
 const { scheduleAbandonedCartOpener, sweepAbandonedCartTriggers } = await import("./abandoned-cart.service.js");
@@ -83,7 +100,7 @@ describe("scheduleAbandonedCartOpener", () => {
 describe("sweepAbandonedCartTriggers", () => {
   it("sends the opener, logs it in the conversation, and marks promoOffered true", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_opener" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_opener` });
 
     const personId = await seedCustomer();
     const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
@@ -92,11 +109,11 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"));
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"), { scheduled: true });
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
-    expect(trigger.providerMessageId).toBe("msg_opener");
+    expect(trigger.providerMessageId).toBe(`${receiptPrefix}-msg_opener`);
 
     const conversation = await getOrCreateConversation(personId);
     expect(conversation.promoOffered).toBe(true);
@@ -111,7 +128,7 @@ describe("sweepAbandonedCartTriggers", () => {
 
   it("skips the duplicate self-introduction when the person already has an active conversation (e.g. a Meta lead who separately abandoned the questionnaire)", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_followup" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_followup` });
 
     const personId = await seedCustomer();
     // Simulate the person already being a Meta lead with an active thread —
@@ -126,8 +143,8 @@ describe("sweepAbandonedCartTriggers", () => {
 
     const result = await sweepAbandonedCartTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$40 off your first month"));
-    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.not.stringContaining("this is Alexis"));
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.stringContaining("$20 off your first month"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15559990000", expect.not.stringContaining("this is Alexis"), { scheduled: true });
 
     // Lands in the SAME conversation, not a second one.
     const conversation = await getOrCreateConversation(personId);
@@ -146,7 +163,7 @@ describe("sweepAbandonedCartTriggers", () => {
       () =>
         new Promise((resolve) => {
           callCount += 1;
-          const providerMessageId = callCount === 1 ? "msg_first" : "msg_second";
+          const providerMessageId = callCount === 1 ? `${receiptPrefix}-msg_first` : `${receiptPrefix}-msg_second`;
           setTimeout(() => resolve({ providerMessageId }), callCount === 1 ? 60 : 0);
         }),
     );
@@ -281,7 +298,7 @@ describe("sweepAbandonedCartTriggers", () => {
     expect(result.failedCount).toBe(1);
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
-    expect(trigger.failureReason).toBe("SMS_DOWN");
+    expect(trigger.failureReason).toBe("SMS_DELIVERY_UNCONFIRMED_REVIEW_REQUIRED");
 
     const conversation = await getOrCreateConversation(personId);
     const messages = await listMessages(conversation.id);
@@ -339,7 +356,7 @@ describe("sweepAbandonedCartTriggers", () => {
     // in this file can legitimately be claimed and sent in the same sweep
     // call before ours, and a one-shot resolved value would otherwise be
     // consumed by that unrelated send instead of ours.
-    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_after_lock" });
+    sendMessageMock.mockResolvedValue({ providerMessageId: `${receiptPrefix}-msg_after_lock` });
 
     const personId = await seedCustomer();
     const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
@@ -373,7 +390,7 @@ describe("sweepAbandonedCartTriggers", () => {
     // without that meaning OUR trigger raced the held lock.
     await new Promise((resolve) => setTimeout(resolve, 30));
     const [midFlight] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
-    expect(midFlight.status).toBe("processing");
+    expect(midFlight.status).toBe("pending");
 
     releaseHeldLock();
     await holder;
@@ -385,6 +402,13 @@ describe("sweepAbandonedCartTriggers", () => {
     // this file, claimed in the same sweep call.
     const [after] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
     expect(after.status).toBe("sent");
-    expect(after.providerMessageId).toBe("msg_after_lock");
+    expect(after.providerMessageId).toBe(`${receiptPrefix}-msg_after_lock`);
   });
+});
+
+// Business-flow fixtures run during allowed hours; quiet-hours boundaries
+// and overnight deferral are exercised in scheduled-sms-quiet-hours.service.test.ts.
+vi.mock("../lib/send-window.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/send-window.js")>();
+  return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
 });

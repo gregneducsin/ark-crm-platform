@@ -706,3 +706,54 @@ describe("interactivePostCheck: slot validation", () => {
     expect(result).toEqual({ ok: false, code: "INVALID_SLOT_VALUE" });
   });
 });
+
+describe("interactivePostCheck: follow-up content safety", () => {
+  it.each([
+    ["Would you visit https://unapproved.example.com/signup now?", [], "UNAPPROVED_URL"],
+    ["Would you like me to diagnose this?", [], "PROHIBITED_CLINICAL_ABSOLUTE"],
+    ["What symptoms are you experiencing?", [], "PROHIBITED_CLINICAL_ABSOLUTE"],
+    ["Would you like details about dosing?", [], "PROHIBITED_CLINICAL"],
+    ["Would you like a free month?", [], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Would you like zero interest?", ["insurance_payment"], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Would you like to pay with Affirm?", [], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Since we accept insurance, shall we proceed?", ["insurance_payment"], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Would you pay $100?", [], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Would you pay $999?", ["semaglutide_pricing"], "UNSUPPORTED_PRICING_CLAIM"],
+    ["This can be combined with another promotion, interested?", ["first_month_offer"], "UNSUPPORTED_PRICING_CLAIM"],
+    ["Existing customers can receive this discount, interested?", ["first_month_offer"], "UNSUPPORTED_PRICING_CLAIM"],
+    ["We are monitoring right now, shall I connect you?", [], "PROHIBITED_STAFF_CLAIM"],
+    ["Would you use [UNAPPROVED_PLACEHOLDER]?", [], "DISALLOWED_TEMPLATE"],
+  ] as const)("rejects unsafe follow-up: %s", (nextQuestion, knowledgeTopicsUsed, code) => {
+    for (const mainReply of ["Thanks for your message.", null]) {
+      expect(check(reply({ reply: mainReply, nextQuestion, knowledgeTopicsUsed }))).toEqual({ ok: false, code });
+    }
+  });
+
+  it("does not let negation in the reply authorize an insurance claim in the question", () => {
+    expect(check(reply({
+      reply: "We do not accept insurance",
+      nextQuestion: "Since we accept insurance, shall we proceed?",
+      knowledgeTopicsUsed: ["insurance_payment"],
+    }))).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+  });
+
+  it("keeps follow-up content checks active during last-resort retries", () => {
+    const options = { bypassCodes: new Set(["PROHIBITED_CLINICAL", "INVALID_NEXT_QUESTION", "UNEXPECTED_NEXT_QUESTION"]) };
+    expect(check(reply({ nextQuestion: "Would you like details about dosing?" }), null, new Set(), options))
+      .toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(check(reply({ action: "pause", nextQuestion: "What symptoms are you experiencing?" }), null, new Set(), options))
+      .toEqual({ ok: false, code: "PROHIBITED_CLINICAL_ABSOLUTE" });
+  });
+
+  it("allows an ordinary question and approved, grounded pricing in a question", () => {
+    expect(check(reply({ nextQuestion: "Would you like to continue?" })).ok).toBe(true);
+    expect(check(reply({ nextQuestion: "Would you like the $100 option?", knowledgeTopicsUsed: ["semaglutide_pricing"] })).ok).toBe(true);
+    expect(check(reply({ nextQuestion: "Would you like details about dosing?", knowledgeTopicsUsed: ["titration"] })).ok).toBe(true);
+  });
+
+  it("still rejects questions in the statement field", () => {
+    expect(check(reply({ reply: "Would you like to continue?", nextQuestion: "Which option interests you?" })))
+      .toEqual({ ok: false, code: "QUESTION_MARK_IN_REPLY" });
+  });
+});
+

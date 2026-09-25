@@ -41,6 +41,28 @@ function modelResult(overrides: Partial<SophieInteractiveResult> = {}): SophieIn
 }
 
 describe("runSophieTurn", () => {
+it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thing, what state are you in"])("deduplicates the follow-up before safety validation: %s", async (reply) => {
+    callSophieInteractiveMock.mockClear();
+    callSophieInteractiveMock.mockResolvedValue(modelResult({ reply, nextQuestion: "What state are you in?" }));
+    const result = await runSophieTurn(baseBody());
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, reply: "Got it, thanks.", nextQuestion: "What state are you in?", requiresStaff: false, preCheckCode: null });
+  });
+
+  it("still rejects unsafe content in a duplicated follow-up", async () => {
+    callSophieInteractiveMock.mockClear();
+    const nextQuestion = "Can you open https://unapproved.example.com now?";
+    callSophieInteractiveMock.mockResolvedValue(modelResult({ reply: "Thanks. " + nextQuestion, nextQuestion }));
+    const result = await runSophieTurn(baseBody());
+    expect(result).toMatchObject({ ok: false, code: "UNAPPROVED_URL" });
+  });
+
+  it("still rejects unsafe main text after removing a safe duplicate", async () => {
+    callSophieInteractiveMock.mockClear();
+    callSophieInteractiveMock.mockResolvedValue(modelResult({ reply: "Visit https://unapproved.example.com. What state are you in?", nextQuestion: "What state are you in?" }));
+    const result = await runSophieTurn(baseBody());
+    expect(result).toMatchObject({ ok: false, code: "UNAPPROVED_URL" });
+  });
   it("short-circuits on a pre-check block without ever calling the provider", async () => {
     callSophieInteractiveMock.mockClear();
     const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "STOP" }] }));

@@ -1,3 +1,4 @@
+import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
 import { supportPreCheck, supportPostCheck } from "../lib/support/safety.js";
 import { callSophieInteractive, SophieProviderError } from "../lib/support/provider.js";
 import { getSophieEnabledTopics, APPROVED_PORTAL_URL } from "../lib/messaging/knowledge-catalog.js";
@@ -5,16 +6,7 @@ import type { SophiePreviewRequestBody, SophieInteractiveResult } from "../lib/s
 import { logger } from "../lib/logger.js";
 
 /**
- * PRESCRIPTION_QUESTION used to get a null reply — the patient was left in
- * silence while the conversation quietly went to the staff queue (see a real
- * production case: Debbie Terkay asked what dose she was on and got nothing
- * back). Same reasoning as Alexis's INDIVIDUALIZED_MEDICAL_REPLIES: the honest,
- * always-safe answer to any prescription-specifics question is the same
- * regardless of the specific question — log into the patient portal to see
- * the prescription or message the doctor directly — so there's no reason to
- * leave the patient hanging while still routing to staff. Varied rather than
- * fixed (like Alexis's individualized-medical replies) since this isn't a
- * compliance-critical fixed script the way OPT_OUT/EMERGENCY_CONTENT are.
+ * Prescription-specific questions receive a patient-portal reply while routing to staff.
  */
 const PRESCRIPTION_QUESTION_REPLIES = [
   `For anything about your specific prescription or dose, your patient portal is the best place to check. You can view your prescription details or message the doctor directly there: ${APPROVED_PORTAL_URL}`,
@@ -23,13 +15,7 @@ const PRESCRIPTION_QUESTION_REPLIES = [
 ] as const;
 
 /**
- * COLD_CHAIN_CONCERN — a report that the medication may not have stayed cold
- * in transit (real production case: Virginia Kibler). Sophie has no way to
- * assess whether the medication is still safe to use, so this always routes
- * to staff, but the patient still gets pointed straight at the fastest real
- * channel — messaging the doctor or support directly through the patient
- * portal — instead of a vague "we'll follow up" while the report sits in a
- * staff queue.
+ * Reports of potentially compromised medication refrigeration route to staff. The bot cannot assess medication safety; direct the patient to the portal for help.
  */
 const COLD_CHAIN_CONCERN_REPLIES = [
   `That's not something to wait on. Please message your doctor or our support team directly through your patient portal so they can look into it right away: ${APPROVED_PORTAL_URL}`,
@@ -139,6 +125,7 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
       throw err;
     }
 
+    raw = deduplicateFollowUp(raw);
     post = supportPostCheck(raw, body.lastDraft, permittedTopicKeys);
     if (post.ok) break;
 

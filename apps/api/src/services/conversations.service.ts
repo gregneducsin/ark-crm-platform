@@ -1,3 +1,4 @@
+import { reconcileSmsDelivery, releaseSmsReplyHold, type SmsDeliveryStatus } from "./sms-delivery.service.js";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db, conversationsTable, conversationMessagesTable, customersTable, purchasesTable, type Conversation, type ConversationMessage } from "@luma/db";
 import type { BotPreviewRequestBody } from "../lib/messaging/types.js";
@@ -87,7 +88,8 @@ export async function updateConversationState(conversationId: string, patch: Con
 
 /** Staff has looked at a flagged conversation — clears the attention flag until the next thing that needs it. */
 export async function clearNeedsAttention(conversationId: string): Promise<void> {
-  await db.update(conversationsTable).set({ needsAttention: false, needsAttentionReason: null }).where(eq(conversationsTable.id, conversationId));
+  const [row] = await db.update(conversationsTable).set({ needsAttention: false, needsAttentionReason: null }).where(eq(conversationsTable.id, conversationId)).returning({ personId: conversationsTable.personId });
+  if (row) await releaseSmsReplyHold(row.personId, "sales");
 }
 
 export type StaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" | "sales_paused" };
@@ -126,7 +128,7 @@ export async function sendStaffReply(conversationId: string, body: string, staff
     logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "staff reply send failed");
   }
 
-  await appendMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail, deliveryStatus: sendFailed ? "failed" : "sent" });
+  await appendMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail, deliveryStatus: sendFailed ? "failed" : "queued" });
   if (sendFailed) return { sent: false, reason: "send_failed" };
 
   await clearNeedsAttention(conversationId);
@@ -142,7 +144,11 @@ export async function appendMessage(
     providerMessageId?: string | null;
     sentBy?: "ai" | "staff" | null;
     sentByStaffEmail?: string | null;
-    deliveryStatus?: "sent" | "failed" | null;
+    deliveryStatus?: SmsDeliveryStatus | null;
+    createdAt?: Date;
+    sentAt?: Date | null;
+    deliveredAt?: Date | null;
+    readAt?: Date | null;
     mediaUrls?: string[] | null;
   } = {},
 ): Promise<ConversationMessage> {
@@ -157,9 +163,14 @@ export async function appendMessage(
       sentBy: opts.sentBy ?? (direction === "outbound" ? "ai" : null),
       sentByStaffEmail: opts.sentByStaffEmail ?? null,
       deliveryStatus: opts.deliveryStatus ?? null,
+      createdAt: opts.createdAt,
+      sentAt: opts.sentAt,
+      deliveredAt: opts.deliveredAt,
+      readAt: opts.readAt,
       mediaUrls: opts.mediaUrls ?? null,
     })
     .returning();
+  await reconcileSmsDelivery(opts.providerMessageId);
   return row;
 }
 
@@ -173,7 +184,7 @@ export async function listMessages(conversationId: string, limit = MAX_HISTORY_M
     .select()
     .from(conversationMessagesTable)
     .where(eq(conversationMessagesTable.conversationId, conversationId))
-    .orderBy(desc(conversationMessagesTable.createdAt))
+    .orderBy(sql`coalesce(${conversationMessagesTable.sentAt}, ${conversationMessagesTable.createdAt}) desc`, desc(conversationMessagesTable.createdAt))
     .limit(limit);
   return rows.reverse();
 }
@@ -336,3 +347,4 @@ export async function getConversationDetail(
     messages,
   };
 }
+

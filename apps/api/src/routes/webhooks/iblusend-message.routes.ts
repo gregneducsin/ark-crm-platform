@@ -6,9 +6,19 @@ import { respondToInvalidWebhookPayload } from "../../lib/webhook-validation.js"
 
 export function createIbluSendMessageWebhookRouter(): RouterType {
   const router: RouterType = Router();
-  const auth = createIbluSendWebhookAuth("IBLUSEND_WEBHOOK_SECRET");
+  const inboundAuth = createIbluSendWebhookAuth("IBLUSEND_WEBHOOK_SECRET");
+  const deliveryAuth = createIbluSendWebhookAuth("IBLUSEND_DELIVERY_WEBHOOK_SECRET");
+  const deliveryEvents = new Set(["message.sent", "message.delivered", "message.read", "message.failed"]);
 
-  router.post("/", auth, async (req, res, next) => {
+  router.post("/", (req, res, next) => {
+    // A separate delivery subscription has its own signing key. Restrict it
+    // to receipts so it cannot authenticate incoming customer messages.
+    if (process.env.IBLUSEND_DELIVERY_WEBHOOK_SECRET && deliveryEvents.has(req.body?.event)) {
+      deliveryAuth(req, res, next);
+    } else {
+      inboundAuth(req, res, next);
+    }
+  }, async (req, res, next) => {
     try {
       const parsed = ibluSendWebhookEnvelopeSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -24,3 +34,4 @@ export function createIbluSendMessageWebhookRouter(): RouterType {
 
   return router;
 }
+
