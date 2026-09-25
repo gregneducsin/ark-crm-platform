@@ -152,7 +152,14 @@ export const firstTouchSystemSql = sql`(
 
 export async function getCustomersSummary(query: CustomersSummaryQuery) {
   const sinceCondition =
-    query.period === "all" ? undefined : sql`${customersTable.leadReceivedDate} >= (current_date - ${query.period}::int)`;
+    query.dateFrom || query.dateTo
+      ? and(
+          query.dateFrom ? sql`${customersTable.leadReceivedDate} >= ${query.dateFrom}` : undefined,
+          query.dateTo ? sql`${customersTable.leadReceivedDate} <= ${query.dateTo}` : undefined,
+        )
+      : query.period === "all"
+        ? undefined
+        : sql`${customersTable.leadReceivedDate} >= (current_date - ${query.period ?? 30}::int)`;
 
   const [{ totalLeads }] = await db.select({ totalLeads: sql<number>`count(*)::int` }).from(customersTable).where(sinceCondition);
 

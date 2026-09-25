@@ -32,7 +32,17 @@ function getClient(): Anthropic {
 const periodSchema = z
   .union([z.number().int().positive(), z.literal("all")])
   .optional()
-  .describe('Trailing number of days to include, or "all" for no date filter. Defaults to 30 if omitted.');
+  .describe('Trailing number of days to include, or "all" for no date filter. Defaults to 30 if omitted. Ignored if dateFrom/dateTo are given.');
+
+// Shared by every summary tool below — an explicit calendar range (e.g. "last
+// Friday to today") is a fixed window that no relative trailing-day period
+// can express exactly. Compute the actual YYYY-MM-DD values yourself from
+// today's date (given in the system prompt) rather than approximating with
+// period whenever the question names or implies specific dates.
+const dateRangeFields = {
+  dateFrom: z.string().optional().describe("YYYY-MM-DD, inclusive. Use for an exact calendar range instead of period."),
+  dateTo: z.string().optional().describe("YYYY-MM-DD, inclusive. Use for an exact calendar range instead of period."),
+};
 
 // Every tool is a read-only wrapper around an existing service function — the
 // assistant never gets raw SQL or write access, only the same business logic
@@ -42,24 +52,25 @@ const tools = [
   betaZodTool({
     name: "get_leads_summary",
     description:
-      "Get lead/customer summary totals for a time period: total leads, leads sourced from Meta form fill vs questionnaire (first-touch, no double-counting), purchased vs not purchased, and conversion rate. A lead only counts as 'purchased' if it has a completed first-order purchase.",
-    inputSchema: z.object({ period: periodSchema }),
-    run: async ({ period }) => {
-      const parsed = customersSummaryQuerySchema.parse({ period: period ?? 30 });
+      "Get lead/customer summary totals for a time period: total leads, leads sourced from Meta form fill vs questionnaire (first-touch, no double-counting), purchased vs not purchased, and conversion rate. A lead only counts as 'purchased' if it has a completed first-order purchase. For an exact calendar range (e.g. \"last Friday to today\"), pass dateFrom/dateTo instead of period.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async ({ period, dateFrom, dateTo }) => {
+      const parsed = customersSummaryQuerySchema.parse({ period, dateFrom, dateTo });
       return JSON.stringify(await customersService.getCustomersSummary(parsed));
     },
   }),
   betaZodTool({
     name: "list_leads",
     description:
-      "List individual leads/customers with optional filters. Use this to answer questions about specific leads, or to see example rows, not for aggregate counts (use get_leads_summary for those).",
+      "List individual leads/customers with optional filters. Use this to answer questions about specific leads, or to see example rows, not for aggregate counts (use get_leads_summary for those). Returns `total` alongside the returned rows — if total exceeds the rows returned, pass a larger offset to page through the rest.",
     inputSchema: z.object({
       search: z.string().optional().describe("Search by name, email, or phone."),
       leadType: z.string().optional(),
       purchaseStatus: z.enum(["purchased", "not_purchased"]).optional(),
       dateFrom: z.string().optional().describe("YYYY-MM-DD, inclusive, filters by lead-received date."),
       dateTo: z.string().optional().describe("YYYY-MM-DD, inclusive, filters by lead-received date."),
-      limit: z.number().int().min(1).max(25).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional().describe("Skip this many matching rows — use with limit to page past the first batch."),
     }),
     run: async (input) => {
       const parsed = listCustomersQuerySchema.parse({ ...input, limit: input.limit ?? 10 });
@@ -78,19 +89,23 @@ const tools = [
   betaZodTool({
     name: "get_orders_summary",
     description:
-      "Get order/purchase summary totals for a time period: purchasing customers, total revenue, completed orders, new (first-order) customers, and recurring customers. Only completed orders count.",
-    inputSchema: z.object({ period: periodSchema }),
-    run: async ({ period }) => {
-      const parsed = purchasesSummaryQuerySchema.parse({ period: period ?? 30 });
+      "Get order/purchase summary totals for a time period: purchasing customers, total revenue, completed orders, new (first-order) customers, and recurring customers. Only completed orders count. For an exact calendar range (e.g. \"last Friday to today\"), pass dateFrom/dateTo instead of period.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async ({ period, dateFrom, dateTo }) => {
+      const parsed = purchasesSummaryQuerySchema.parse({ period, dateFrom, dateTo });
       return JSON.stringify(await purchasesService.getPurchasesSummary(parsed));
     },
   }),
   betaZodTool({
     name: "list_orders",
-    description: "List individual orders/purchases, optionally filtered to new (first_order) or recurring only.",
+    description:
+      "List individual orders/purchases, optionally filtered to new (first_order) or recurring only, or by date. Returns `total` alongside the returned rows — if total exceeds the rows returned, pass a larger offset to page through the rest.",
     inputSchema: z.object({
       orderClassification: z.enum(["first_order", "recurring", "unknown"]).optional(),
-      limit: z.number().int().min(1).max(25).optional(),
+      dateFrom: z.string().optional().describe("YYYY-MM-DD, inclusive, filters by purchase date."),
+      dateTo: z.string().optional().describe("YYYY-MM-DD, inclusive, filters by purchase date."),
+      limit: z.number().int().min(1).max(100).optional(),
+      offset: z.number().int().min(0).optional().describe("Skip this many matching rows — use with limit to page past the first batch."),
     }),
     run: async (input) => {
       const parsed = listPurchasesQuerySchema.parse({ ...input, limit: input.limit ?? 10 });
@@ -109,10 +124,10 @@ const tools = [
   betaZodTool({
     name: "get_questionnaires_performance",
     description:
-      "Get questionnaire performance for a time period: leads with a questionnaire, first-time customers, completed purchases, total revenue, conversion rate, plus a per-questionnaire-ID breakdown (leads, customers, conversion rate, purchases, revenue, avg order value, last purchase date). 'Within the period' is judged by questionnaire activity date.",
-    inputSchema: z.object({ period: periodSchema }),
-    run: async ({ period }) => {
-      const parsed = questionnairesQuerySchema.parse({ period: period ?? 30 });
+      "Get questionnaire performance for a time period: leads with a questionnaire, first-time customers, completed purchases, total revenue, conversion rate, plus a per-questionnaire-ID breakdown (leads, customers, conversion rate, purchases, revenue, avg order value, last purchase date). 'Within the period' is judged by questionnaire activity date. For an exact calendar range, pass dateFrom/dateTo instead of period.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async ({ period, dateFrom, dateTo }) => {
+      const parsed = questionnairesQuerySchema.parse({ period, dateFrom, dateTo });
       return JSON.stringify(await questionnairesService.getQuestionnairesData(parsed));
     },
   }),
@@ -126,10 +141,10 @@ const tools = [
   betaZodTool({
     name: "get_bot_engagement_summary",
     description:
-      "For leads who made a qualifying (first-order, completed) purchase in a period: how many actually replied to Alexis (SMS or email, a real two-way exchange, not just receiving the automated opener) before buying vs how many never did, and the average days from lead-received to purchase for each group. Use this for questions like 'how many people who purchased talked to the bot' or 'does talking to the bot speed up or slow down closing.'",
-    inputSchema: z.object({ period: periodSchema }),
-    run: async ({ period }) => {
-      const parsed = customersSummaryQuerySchema.parse({ period: period ?? 30 });
+      "For leads who made a qualifying (first-order, completed) purchase in a period: how many actually replied to Alexis (SMS or email, a real two-way exchange, not just receiving the automated opener) before buying vs how many never did, and the average days from lead-received to purchase for each group. Use this for questions like 'how many people who purchased talked to the bot' or 'does talking to the bot speed up or slow down closing.' For an exact calendar range, pass dateFrom/dateTo instead of period.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async ({ period, dateFrom, dateTo }) => {
+      const parsed = customersSummaryQuerySchema.parse({ period, dateFrom, dateTo });
       return JSON.stringify(await botEngagementService.getBotEngagementSummary(parsed));
     },
   }),
@@ -158,6 +173,8 @@ Key domain rules to keep in mind when interpreting tool results:
 - Marketing CPA weeks run Friday through Thursday. A closed deal in a given week is a lead that was *received* that week and later converted — not a lead that merely purchased that week.
 - Lead source (Meta Form Fill vs Questionnaire) is first-touch attributed — a lead is never double-counted across sources.
 - "Talked to the bot" (get_bot_engagement_summary) means the customer actually replied — SMS or email — before their purchase date, not merely receiving the automated opener text. Sophie's support conversations (which only start after a purchase) are excluded from this since they can't have happened "before" it.
+- Whenever a question names or implies specific dates ("last Friday to today," "since the 18th," "in August") rather than a rolling window ("last 30 days," "this week"), compute the exact YYYY-MM-DD dateFrom/dateTo yourself from today's date above and pass those instead of period — period is only a trailing-day count and can't express a fixed calendar range exactly.
+- The list tools (list_leads, list_orders) return a "total" field alongside the rows. If total is larger than the rows you got back, call again with a larger offset to see the rest rather than reporting only the first batch as the complete answer.
 
 This is an internal staff tool with full access to the business's own operational data — there is nothing here to refuse or hedge on. If a question is about leads, orders, CPA, or payroll and a tool can answer it, answer it directly and exactly, with no disclaimers or caveats. If a question genuinely falls outside what these tools cover, say so in one sentence rather than guessing.
 

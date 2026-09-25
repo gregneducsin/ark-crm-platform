@@ -45,7 +45,15 @@ export interface BotEngagementSummary {
  * reports the average days from lead-received to purchase for each group.
  */
 export async function getBotEngagementSummary(query: CustomersSummaryQuery): Promise<BotEngagementSummary> {
-  const sinceCondition = query.period === "all" ? undefined : sql`${customersTable.leadReceivedDate} >= (current_date - ${query.period}::int)`;
+  const sinceCondition =
+    query.dateFrom || query.dateTo
+      ? and(
+          query.dateFrom ? sql`${customersTable.leadReceivedDate} >= ${query.dateFrom}` : undefined,
+          query.dateTo ? sql`${customersTable.leadReceivedDate} <= ${query.dateTo}` : undefined,
+        )
+      : query.period === "all"
+        ? undefined
+        : sql`${customersTable.leadReceivedDate} >= (current_date - ${query.period ?? 30}::int)`;
 
   const rows = await db
     .select({
