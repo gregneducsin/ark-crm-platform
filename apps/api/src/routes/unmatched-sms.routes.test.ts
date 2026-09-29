@@ -153,3 +153,6 @@ describe("Unmatched SMS", () => {
     expect(missingGetRes.status).toBe(404);
   });
 });
+// Route behavior is independent of the quiet period; real pacing has integration coverage.
+vi.mock("../lib/messaging/reply-pacing.js", () => ({ isSmsReplyReady: () => true }));
+
