@@ -507,28 +507,15 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
   });
 });
 
-describe("explicit plan confirmation", () => {
-  it("retries an inferred selection and accepts a clarification without saving a plan", async () => {
+describe("plan selection without repeated confirmation", () => {
+  it("accepts a six-month choice without asking for separate confirmation", async () => {
     callClaudeInteractiveMock.mockReset();
-    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ slotUpdates: { planLength: "3_month" } }))
-      .mockResolvedValueOnce(modelResult({ nextQuestion: "Would you like the 3-month plan?" }));
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ slotUpdates: { planLength: "6_month" } }));
     const result = await runAlexisTurn(await seedCustomer(), baseBody({
-      messages: [{ direction: "inbound", body: "Whatever you think" }],
+      messages: [{ direction: "inbound", body: "I'll take six months" }],
     }));
-    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
-    expect(callClaudeInteractiveMock.mock.calls[1][2]).toContain("not explicitly confirmed");
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.validatedSlotUpdates).not.toHaveProperty("planLength");
-  });
-
-  it("fails closed before minting a signup link if every attempt invents a plan selection", async () => {
-    callClaudeInteractiveMock.mockReset();
-    callClaudeInteractiveMock.mockResolvedValue(modelResult({ action: "send_form", nextQuestion: null, slotUpdates: { planLength: "3_month" } }));
-    const personId = await seedCustomer();
-    const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "I'm unsure" }] }));
-    expect(result).toEqual({ ok: false, code: "UNCONFIRMED_PLAN_SELECTION" });
-    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
-    const tokens = await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId));
-    expect(tokens).toHaveLength(0);
+    if (result.ok) expect(result.validatedSlotUpdates.planLength).toBe("6_month");
   });
 });

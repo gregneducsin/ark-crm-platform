@@ -77,10 +77,16 @@ export const customerWithStatsSchema = customerSchema.extend({
 });
 export type CustomerWithStats = z.infer<typeof customerWithStatsSchema>;
 
-export const customersSummaryQuerySchema = z.object({
-  // Number of trailing days to include, or "all" for no date filter.
-  period: z.union([z.coerce.number().int().positive(), z.literal("all")]).default(30),
-});
+export const customersSummaryQuerySchema = z
+  .object({
+    // Number of trailing days to include, or "all" for no date filter.
+    // Ignored when dateFrom/dateTo are given — see purchasesSummaryQuerySchema's
+    // comment for why an explicit range is kept separate from period.
+    period: z.union([z.coerce.number().int().positive(), z.literal("all")]).optional(),
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+  })
+  .refine((q) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo, { message: "dateFrom must be on or before dateTo" });
 export type CustomersSummaryQuery = z.infer<typeof customersSummaryQuerySchema>;
 
 export const customersSummarySchema = z.object({

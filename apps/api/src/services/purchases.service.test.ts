@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { db, customersTable, purchasesTable } from "@luma/db";
-import { listPurchases, createPurchase } from "./purchases.service.js";
+import { listPurchases, createPurchase, getPurchasesSummary } from "./purchases.service.js";
 import { isCustomerSmsDnd, isCustomerEmailDnd } from "./dnd.service.js";
 
 async function seedCustomer(overrides: Partial<{ phone: string }> = {}): Promise<string> {
@@ -48,6 +48,45 @@ describe("listPurchases", () => {
     const asc = await listPurchases({ sortBy: "purchaseDate", sortDir: "asc", limit: 100, offset: 0 });
     const ascIds = asc.purchases.filter((p) => [first, second, third].includes(p.id)).map((p) => p.id);
     expect(ascIds).toEqual([first, second, third]);
+  });
+
+  it("filters by an exact dateFrom/dateTo range instead of a trailing-day period", async () => {
+    const customerId = await seedCustomer();
+    const before = await seedPurchase(customerId, "2026-06-01", `RANGE-BEFORE-${crypto.randomUUID()}`);
+    const inRange = await seedPurchase(customerId, "2026-06-05", `RANGE-IN-${crypto.randomUUID()}`);
+    const after = await seedPurchase(customerId, "2026-06-10", `RANGE-AFTER-${crypto.randomUUID()}`);
+
+    const { purchases } = await listPurchases({ sortBy: "purchaseDate", sortDir: "asc", limit: 100, offset: 0, dateFrom: "2026-06-03", dateTo: "2026-06-07" });
+    const ids = purchases.map((p) => p.id);
+    expect(ids).not.toContain(before);
+    expect(ids).toContain(inRange);
+    expect(ids).not.toContain(after);
+  });
+});
+
+describe("getPurchasesSummary", () => {
+  it("counts only orders inside an exact dateFrom/dateTo range, not the default trailing-30-day window", async () => {
+    // Before/after delta, not an absolute count — this table is shared live
+    // across the whole suite (no per-test reset), including other tests in
+    // this same file that seed purchases in nearby date ranges.
+    const before = await getPurchasesSummary({ dateFrom: "2000-06-01", dateTo: "2000-06-10" });
+
+    const customerId = await seedCustomer();
+    await seedPurchase(customerId, "2000-01-01", `SUMMARY-OLD-${crypto.randomUUID()}`);
+    await seedPurchase(customerId, "2000-06-05", `SUMMARY-IN-${crypto.randomUUID()}`);
+    await seedPurchase(customerId, "2000-06-20", `SUMMARY-AFTER-${crypto.randomUUID()}`);
+
+    const after = await getPurchasesSummary({ dateFrom: "2000-06-01", dateTo: "2000-06-10" });
+    expect(after.totalCompletedOrders - before.totalCompletedOrders).toBe(1);
+  });
+
+  it("still defaults to a 30-day trailing period when neither period nor a date range is given", async () => {
+    const customerId = await seedCustomer();
+    const today = new Date().toISOString().slice(0, 10);
+    await seedPurchase(customerId, today, `SUMMARY-DEFAULT-${crypto.randomUUID()}`);
+
+    const summary = await getPurchasesSummary({});
+    expect(summary.totalCompletedOrders).toBeGreaterThanOrEqual(1);
   });
 });
 

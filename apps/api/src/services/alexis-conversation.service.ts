@@ -1,5 +1,4 @@
 import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
-import { hasPlanConfirmation } from "../lib/messaging/plan-confirmation.js";
 import { interactivePreCheck, interactivePostCheck } from "../lib/messaging/safety.js";
 import { callClaudeInteractive, ProviderError } from "../lib/messaging/provider.js";
 import { getPreviewEnabledTopics } from "../lib/messaging/knowledge-catalog.js";
@@ -269,12 +268,6 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
         err.category === "SCHEMA_VALIDATION_ERROR" && err.issues
           ? `Your last response's bot_reply tool call was rejected for not matching the required format: ${err.issues}. Fix these specific field(s) this turn.`
           : PROVIDER_RETRY_NOTES[err.category];
-      continue;
-    }
-
-    if (!hasPlanConfirmation(body, raw.slotUpdates.planLength)) {
-      if (attempt >= MAX_ATTEMPTS) return { ok: false, code: "UNCONFIRMED_PLAN_SELECTION" };
-      retryNote = "The customer has not explicitly confirmed that plan length. Do not set planLength or claim they chose it. Answer their current concern, then ask them to confirm one specific duration. A recommendation or vague answer is not consent.";
       continue;
     }
 

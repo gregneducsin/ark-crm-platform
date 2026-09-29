@@ -1,3 +1,4 @@
+import { isSmsReplyReady } from "../lib/messaging/reply-pacing.js";
 import { reconcileSmsDelivery, type SmsInboundMetadata } from "./sms-delivery.service.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNull, isNotNull, lte, sql } from "drizzle-orm";
@@ -516,7 +517,7 @@ export async function recordAndClassifyUnmatchedSms(fromPhone: string, body: str
       threadId: thread.id, direction: "inbound", body, mediaUrls: mediaUrls ?? null,
       providerMessageId: metadata?.providerMessageId, createdAt: metadata?.createdAt,
     }).returning({ id: unmatchedSmsMessagesTable.id });
-    await tx.update(unmatchedSmsThreadsTable).set({ pendingInboundId: message.id })
+    await tx.update(unmatchedSmsThreadsTable).set({ pendingInboundId: message.id, updatedAt: new Date() })
       .where(eq(unmatchedSmsThreadsTable.id, thread.id));
     return prior.length === 0;
   });
@@ -549,6 +550,7 @@ export async function resumeUnmatchedSms(threadId: string): Promise<void> {
     const thread = await getUnmatchedSmsThread(threadId);
     if (thread && await isPhoneSmsOptedOut(thread.fromPhone)) { await holdOptedOutThread(threadId); return; }
     if (!thread?.pendingInboundId || thread.onboardingHeld) return;
+    if (!isSmsReplyReady(thread.updatedAt)) return;
     const generation = thread.pendingInboundId;
     const messages = await listUnmatchedSmsMessages(threadId);
     // A prior API acceptance is not a confirmed send. Retain the latest

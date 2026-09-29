@@ -12,7 +12,9 @@
 
 Use a staff-owned test number, with permission to send test messages. Confirm that signed receipts arrive successfully and the dashboard changes from queued to sent/delivered using provider timestamps. Compare the original inbound webhook and the delivery subscription for signature failures or pauses.
 
-Send two rapid inbound texts, including a first-time sender scenario. The saved inbound history should include both texts; a draft overtaken by the second text should be discarded. The worker processes the latest pending input together after any earlier outbound send is confirmed. This is not a fixed batching delay: a reply already submitted before the second text arrives cannot be recalled.
+Send two rapid inbound texts, including a first-time sender scenario. The saved inbound history should include both texts; a draft overtaken by the second text should be discarded. Automated replies wait for 45 seconds without new inbound input, then the 15-second worker processes the pending batch after any earlier outbound send is confirmed. No lock is held while waiting for the quiet period. STOP is persisted immediately. A reply already submitted before the second text arrives cannot be recalled.
+
+The older explicit plan-duration confirmation gate has been removed. A stated plan choice does not require a second confirmation question; this change does not authorize a charge or alter Ark pricing.
 
 Check that STOP prevents further SMS even before account creation, account name/email matches require human review, repeated follow-up questions are suppressed, and scheduled sales nudges defer for staff holds or pending inbound/delivery work. Scheduled outreach is limited to 9am–8pm Eastern. Confirm support still works while sales is paused.
 

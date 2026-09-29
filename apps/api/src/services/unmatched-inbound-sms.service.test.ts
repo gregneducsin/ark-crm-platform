@@ -1,3 +1,5 @@
+// Flow tests isolate pacing; real delays are covered in sms-reply-pacing.service.test.ts.
+vi.mock("../lib/messaging/reply-pacing.js", () => ({ isSmsReplyReady: () => true }));
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable } from "@luma/db";

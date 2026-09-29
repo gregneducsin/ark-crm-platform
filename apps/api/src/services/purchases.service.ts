@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, lte, or, sql, getTableColumns } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql, getTableColumns } from "drizzle-orm";
 import { db, customersTable, purchasesTable, purchaseClassificationAuditsTable, type PurchaseStatus } from "@luma/db";
 import type { CreatePurchaseRequest, ListPurchasesQuery, PurchasesSummaryQuery, UpdatePurchaseRequest } from "@luma/shared";
 import { setCustomerSmsDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone } from "./dnd.service.js";
@@ -18,11 +18,13 @@ const SORT_COLUMNS = {
 
 /** Order-level list across all customers, for the Orders tab. */
 export async function listPurchases(query: ListPurchasesQuery) {
-  const { sortBy, sortDir, limit, offset, orderClassification, status, search } = query;
+  const { sortBy, sortDir, limit, offset, orderClassification, status, search, dateFrom, dateTo } = query;
   const orderFn = sortDir === "asc" ? asc : desc;
   const conditions = [
     orderClassification ? eq(purchasesTable.orderClassification, orderClassification) : undefined,
     status ? eq(purchasesTable.status, status) : undefined,
+    dateFrom ? gte(purchasesTable.purchaseDate, dateFrom) : undefined,
+    dateTo ? lte(purchasesTable.purchaseDate, dateTo) : undefined,
     search
       ? or(
           // Concatenated, not separate firstName/lastName ilike checks — a
@@ -75,7 +77,15 @@ export async function listPurchases(query: ListPurchasesQuery) {
  * how the Orders list itself surfaces status, and mirrors what the reference
  * dashboard's "Total Completed Orders" tile means. */
 export async function getPurchasesSummary(query: PurchasesSummaryQuery) {
-  const sinceCondition = query.period === "all" ? undefined : sql`${purchasesTable.purchaseDate} >= (current_date - ${query.period}::int)`;
+  const sinceCondition =
+    query.dateFrom || query.dateTo
+      ? and(
+          query.dateFrom ? sql`${purchasesTable.purchaseDate} >= ${query.dateFrom}` : undefined,
+          query.dateTo ? sql`${purchasesTable.purchaseDate} <= ${query.dateTo}` : undefined,
+        )
+      : query.period === "all"
+        ? undefined
+        : sql`${purchasesTable.purchaseDate} >= (current_date - ${query.period ?? 30}::int)`;
   const completedCondition = eq(purchasesTable.status, "completed");
   const baseCondition = sinceCondition ? and(completedCondition, sinceCondition) : completedCondition;
 

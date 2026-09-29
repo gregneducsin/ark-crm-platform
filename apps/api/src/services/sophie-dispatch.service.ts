@@ -1,3 +1,4 @@
+import { isSmsReplyReady } from "../lib/messaging/reply-pacing.js";
 import { recordSmsInbound, getSmsReplyWork, finishSmsReplyWork, holdSmsReplyForStaff, hasPendingSmsDelivery, sendTrackedSms, type SmsInboundMetadata } from "./sms-delivery.service.js";
 import { selectRepeatQuestionAnswer } from "../lib/messaging/repeat-question-answer.js";
 import { interactivePreCheck } from "../lib/messaging/safety.js";
@@ -85,6 +86,7 @@ export async function resumeSophieSms(personId: string): Promise<SophieTurnResul
   return withPersonLock(personId, async () => {
     const work = await getSmsReplyWork(personId, "support");
     if (!work) return { ok: false, code: "SUPERSEDED" };
+    if (!isSmsReplyReady(work.updatedAt)) return { ok: false, code: "REPLY_DEFERRED" };
     if (work.heldForStaff || await hasPendingSmsDelivery(personId)) return { ok: false, code: "DELIVERY_PENDING" };
     const result = await processInboundSupportMessageLocked(personId, work.generation);
     if (result.ok || result.code !== "SUPERSEDED") await finishSmsReplyWork(personId, "support", work.generation);

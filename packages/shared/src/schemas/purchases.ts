@@ -48,6 +48,9 @@ export const listPurchasesQuerySchema = z.object({
   status: purchaseStatusSchema.optional(),
   // Matches by customer full name, customer email, or order number.
   search: z.string().min(1).optional(),
+  // Inclusive, filters by purchaseDate.
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
 });
 export type ListPurchasesQuery = z.infer<typeof listPurchasesQuerySchema>;
 
@@ -58,10 +61,18 @@ export const purchaseWithCustomerSchema = purchaseSchema.extend({
 });
 export type PurchaseWithCustomer = z.infer<typeof purchaseWithCustomerSchema>;
 
-export const purchasesSummaryQuerySchema = z.object({
-  // Number of trailing days to include (by purchaseDate), or "all" for no date filter.
-  period: z.union([z.coerce.number().int().positive(), z.literal("all")]).default(30),
-});
+export const purchasesSummaryQuerySchema = z
+  .object({
+    // Number of trailing days to include (by purchaseDate), or "all" for no
+    // date filter. Ignored when dateFrom/dateTo are given — an explicit
+    // range expresses an exact calendar window ("last Friday to today")
+    // that no relative trailing-day count can. Defaults to 30 only when
+    // none of period/dateFrom/dateTo are given.
+    period: z.union([z.coerce.number().int().positive(), z.literal("all")]).optional(),
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+  })
+  .refine((q) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo, { message: "dateFrom must be on or before dateTo" });
 export type PurchasesSummaryQuery = z.infer<typeof purchasesSummaryQuerySchema>;
 
 export const purchasesSummarySchema = z.object({

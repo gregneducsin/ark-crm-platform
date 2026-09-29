@@ -14,7 +14,18 @@ const EMPTY_RESPONSE: QuestionnairesResponse = {
  * questionnaire this week still shows up in this week's numbers.
  */
 export async function getQuestionnairesData(query: QuestionnairesQuery): Promise<QuestionnairesResponse> {
-  const periodCondition = query.period === "all" ? undefined : sql`${questionnaireEventsTable.lastEventAt} >= (now() - ${query.period}::int * interval '1 day')`;
+  // lastEventAt is a timestamp, not a date — dateTo needs the end of that
+  // calendar day (< dateTo + 1 day), not <= dateTo, or events later that
+  // same day would be excluded.
+  const periodCondition =
+    query.dateFrom || query.dateTo
+      ? and(
+          query.dateFrom ? sql`${questionnaireEventsTable.lastEventAt} >= ${query.dateFrom}::date` : undefined,
+          query.dateTo ? sql`${questionnaireEventsTable.lastEventAt} < (${query.dateTo}::date + interval '1 day')` : undefined,
+        )
+      : query.period === "all"
+        ? undefined
+        : sql`${questionnaireEventsTable.lastEventAt} >= (now() - ${query.period ?? 30}::int * interval '1 day')`;
 
   const eventRows = await db
     .selectDistinct({

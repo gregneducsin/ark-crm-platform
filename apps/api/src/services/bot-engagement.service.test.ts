@@ -134,4 +134,17 @@ describe("getBotEngagementSummary", () => {
     });
     expect(delta).toEqual({ purchasedCount: 0, spokeToBotCount: 0, noBotContactCount: 0 });
   });
+
+  it("filters by an exact dateFrom/dateTo range instead of a trailing-day period", async () => {
+    const before = await getBotEngagementSummary({ dateFrom: "2000-02-01", dateTo: "2000-02-28" });
+
+    const personId = await seedCustomer("2000-02-15");
+    await seedPurchase(personId, "2000-02-20");
+    // Outside the range — should not affect the count.
+    const outOfRangePersonId = await seedCustomer("2000-01-01");
+    await seedPurchase(outOfRangePersonId, "2000-01-05");
+
+    const after = await getBotEngagementSummary({ dateFrom: "2000-02-01", dateTo: "2000-02-28" });
+    expect(after.purchasedCount - before.purchasedCount).toBe(1);
+  });
 });
