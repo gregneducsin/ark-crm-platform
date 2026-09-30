@@ -80,6 +80,31 @@ function modelResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeIn
 }
 
 describe("runAlexisTurn", () => {
+  it("keeps the payment-timing acknowledgment in the actual form reply", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult());
+    const result = await runAlexisTurn(await seedCustomer(),baseBody({currentSlots:{...baseBody().currentSlots,selectedProduct:"semaglutide",planLength:"6_month"},messages:[{direction:"outbound",body:"Have you used Affirm before, or are you familiar with how it works?"},{direction:"inbound",body:"Yes but I cannot pay until October 1st"}]}));
+    expect(result).toMatchObject({ok:true,action:"send_form",nextQuestion:null});
+    if(result.ok){expect(result.reply).toContain("need to wait before paying");expect(result.reply).not.toContain("first charge");}
+  });
+  it("moves a six-month selection to intake at Ark pricing without another price question", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult({ reply:"Let me confirm the price.", nextQuestion:"Does that price work for you?" }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ currentSlots:{...baseBody().currentSlots,selectedProduct:"semaglutide"}, messages:[{direction:"outbound",body:"Which plan would you prefer?"},{direction:"inbound",body:"I'll take six months"}] }));
+    expect(result).toMatchObject({ok:true,action:"send_form",nextQuestion:null,validatedSlotUpdates:{planLength:"6_month"}});
+    if(result.ok){expect(result.reply).toContain("$594");expect(result.reply).not.toContain("$468");}
+  });
+  it.each(["Where do I pay?", "I didn't get an email"])("answers post-link help without generating another link: %s", async text => {
+    callClaudeInteractiveMock.mockReset();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({linkProvided:true,messages:[{direction:"outbound",body:"Here is your intake link."},{direction:"inbound",body:text}]}));
+    expect(result).toMatchObject({ok:true,action:"reply",link:null});
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+    if(result.ok)expect(result.reply).toContain("without waiting for an email");
+  });
+  it("keeps STOP ahead of financing help", async () => {
+    callClaudeInteractiveMock.mockReset();
+    const result = await runAlexisTurn(await seedCustomer(),baseBody({messages:[{direction:"inbound",body:"STOP"}]}));
+    expect(result).toMatchObject({ok:true,action:"pause",preCheckCode:"OPT_OUT"});
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+  });
   it("ignores model claims that a link was already supplied", async () => {
     callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult({ linkProvided: true }));
     const result = await runAlexisTurn(await seedCustomer(), baseBody());

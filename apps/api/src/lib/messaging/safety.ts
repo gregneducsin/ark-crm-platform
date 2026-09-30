@@ -630,6 +630,11 @@ const GUARANTEED_PRICING_RE = [/\bfree\s+(trial|month|consultation)\b/i, /\bguar
  * Declaring the insurance_payment topic does NOT unlock these phrases.
  */
 const UNSUPPORTED_FINANCING_RE = [
+  /\bno(?:thing)?\s+(?:to pay\s+)?up[\s-]?front\b/i,
+  /\b(?:don't|do not|won't|will not)\s+(?:have to|need to)?\s*pay\s+(?:anything\s+)?up[\s-]?front\b/i,
+  /\b(?:pay|charged?)\b[^.!?]{0,40}\b(?:each|every)\s+shipment\b/i,
+  /\bfirst\s+(?:charge|payment)\b[^.!?]{0,45}\b(?:when you're ready|when you are ready|will be|won't be until)\b/i,
+  /\b(?:you'll|you will|you'd|you would|you only)\s+pay\s+\$\d+[^.!?]{0,20}\b(?:per month|a month|monthly)\b/i,
   /\bavailable\s+at\s+checkout\b/i,
   /\beveryone\s+qualifies\b/i,
   /\bno\s+credit[\s-]check\b/i,
