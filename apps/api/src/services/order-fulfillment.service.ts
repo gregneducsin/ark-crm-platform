@@ -1,7 +1,7 @@
 import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { db, customersTable, reviewRequestTriggersTable } from "@luma/db";
 import { getOrCreateSupportConversation, appendSupportMessage, updateSupportConversationState, hasAnyOutboundSupportMessage } from "./support-conversations.service.js";
-import { getOrCreateSupportEmailConversation, appendSupportEmailMessage } from "./support-email-conversations.service.js";
+import { getOrCreateSupportEmailConversation } from "./support-email-conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
 import {
   renderOrderReceivedMessage,
@@ -87,7 +87,6 @@ export async function sendOrderReceivedOpener(personId: string): Promise<void> {
     conversationId: emailConversation.id,
     email: customer.email,
     render: (unsubscribeUrl) => renderOrderReceivedEmail(customer.firstName, unsubscribeUrl),
-    appendMessage: appendSupportEmailMessage,
     logLabel: "order-received",
   });
 }
@@ -130,7 +129,6 @@ export async function sendRefillOrderReceivedNotice(personId: string): Promise<v
     conversationId: emailConversation.id,
     email: customer.email,
     render: (unsubscribeUrl) => renderRefillOrderReceivedEmail(customer.firstName, unsubscribeUrl),
-    appendMessage: appendSupportEmailMessage,
     logLabel: "refill-order-received",
   });
 }
@@ -163,7 +161,6 @@ export async function handlePrescriptionWritten(personId: string): Promise<void>
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => renderPrescriptionWrittenEmail(customer.firstName, unsubscribeUrl),
-    appendMessage: appendSupportEmailMessage,
       logLabel: "prescription-written",
     });
   }
@@ -200,7 +197,6 @@ export async function handleOrderShipped(personId: string, trackingNumber: strin
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => renderOrderShippedEmail(customer.firstName, trackingNumber, unsubscribeUrl),
-    appendMessage: appendSupportEmailMessage,
       logLabel: "order-shipped",
     });
   }
@@ -265,7 +261,6 @@ export async function handlePaymentFailed(personId: string, isFirstOrder: boolea
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => (isFirstOrder ? renderPaymentFailedFirstOrderEmail(customer.firstName, unsubscribeUrl) : renderPaymentFailedRecurringEmail(customer.firstName, unsubscribeUrl)),
-    appendMessage: appendSupportEmailMessage,
       logLabel: "payment-failed",
     });
   }

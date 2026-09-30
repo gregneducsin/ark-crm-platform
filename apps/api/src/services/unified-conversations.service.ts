@@ -251,6 +251,8 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         sentiment: m.sentiment,
         sentBy: m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
+        deliveryStatus: m.deliveryStatus,
+        sentAt: m.sentAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
@@ -283,6 +285,8 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         sentiment: m.sentiment,
         sentBy: m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
+        deliveryStatus: m.deliveryStatus,
+        sentAt: m.sentAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
@@ -361,3 +365,4 @@ export async function sendUnifiedStaffReply(
   if (!row) return { sent: false, reason: "not_found" };
   return sendSophieEmailStaffReply(row.id, body, staffEmail);
 }
+

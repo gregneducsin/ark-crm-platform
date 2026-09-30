@@ -5,15 +5,13 @@ import {
   getOrCreateSupportEmailConversation,
   getSupportEmailConversationDetail,
   listSupportEmailMessages,
-  appendSupportEmailMessage,
   setSupportEmailMessageSentiment,
   updateSupportEmailConversationState,
   toSupportEmailPreviewBody,
   type SupportEmailConversationStatePatch,
 } from "./support-email-conversations.service.js";
-import { getEmailProvider } from "../lib/email-provider.js";
+import { sendTrackedEmail, recordInboundEmail, finishInboundEmail } from "./email-delivery.service.js";
 import { renderConversationReplyEmail } from "../lib/email/templates.js";
-import { buildUnsubscribeUrl } from "../lib/email/unsubscribe.js";
 import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerEmailDnd, setCustomerEmailDnd } from "./dnd.service.js";
@@ -66,23 +64,8 @@ async function sendAndLog(
   }
 
   const signedBody = withGreetingAndSignOff(firstName, bodyText);
-  let messageId: string | null = null;
-  try {
-    const { provider, fromName } = getEmailProvider("sophie");
-    const unsubscribeUrl = buildUnsubscribeUrl(personId);
-    const html = renderConversationReplyEmail(signedBody, unsubscribeUrl);
-    const result = await provider.sendEmail(email, subject, html, {
-      fromName,
-      inReplyTo: inReplyTo ?? undefined,
-      references: inReplyTo ?? undefined,
-      unsubscribeUrl,
-      fromEmailOverride: fromEmailOverride ?? undefined,
-    });
-    messageId = result.messageId;
-  } catch (err) {
-    logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "outbound Sophie email send failed");
-  }
-  await appendSupportEmailMessage(conversationId, "outbound", subject, signedBody, { messageId, inReplyTo });
+  await sendTrackedEmail({ persona: "sophie", personId, conversationId, email, subject, body: signedBody,
+    render: (url) => renderConversationReplyEmail(signedBody, url), inReplyTo, fromEmailOverride });
 }
 
 /**
@@ -97,8 +80,13 @@ export async function processInboundSupportEmail(
   bodyText: string,
   messageId: string | null,
   receivingAddress?: string,
+  inboundEventId?: string,
 ): Promise<SophieTurnResult> {
-  return withPersonLock(personId, () => processInboundSupportEmailLocked(personId, subject, bodyText, messageId, receivingAddress));
+  return withPersonLock(personId, async () => {
+    const result = await processInboundSupportEmailLocked(personId, subject, bodyText, messageId, receivingAddress, inboundEventId);
+    await finishInboundEmail("sophie", personId, inboundEventId ?? messageId);
+    return result;
+  });
 }
 
 async function processInboundSupportEmailLocked(
@@ -107,10 +95,13 @@ async function processInboundSupportEmailLocked(
   bodyText: string,
   messageId: string | null,
   receivingAddress?: string,
+  inboundEventId?: string,
 ): Promise<SophieTurnResult> {
   const conversation = await getOrCreateSupportEmailConversation(personId, receivingAddress);
   const priorMessages = await listSupportEmailMessages(conversation.id);
-  const inboundMessage = await appendSupportEmailMessage(conversation.id, "inbound", subject, bodyText, { messageId });
+  const recorded = await recordInboundEmail("sophie", conversation.id, subject, bodyText, messageId, inboundEventId);
+  if (!recorded.shouldProcess) return { ok: false, code: "EMAIL_REVIEW_OR_DUPLICATE" };
+  const inboundMessage = recorded.message;
 
   const body = toSupportEmailPreviewBody(conversation, [...priorMessages, inboundMessage]);
   let result: SophieTurnResult;
@@ -166,38 +157,23 @@ export type EmailStaffReplyResult = { readonly sent: true } | { readonly sent: f
 export async function sendEmailStaffReply(conversationId: string, body: string, staffEmail: string): Promise<EmailStaffReplyResult> {
   const detail = await getSupportEmailConversationDetail(conversationId);
   if (!detail) return { sent: false, reason: "not_found" };
+  return withPersonLock(detail.conversation.personId, () => sendEmailStaffReplyLocked(conversationId, body, staffEmail));
+}
+
+async function sendEmailStaffReplyLocked(conversationId: string, body: string, staffEmail: string): Promise<EmailStaffReplyResult> {
+  const detail = await getSupportEmailConversationDetail(conversationId);
+  if (!detail) return { sent: false, reason: "not_found" };
 
   const { customer, messages } = detail;
   const lastMessage = messages.at(-1);
+  const threadMessage = [...messages].reverse().find((message) => message.messageId);
   const subject = lastMessage ? replySubject(lastMessage.subject) : "Message from Ark Health";
   const signedBody = withGreetingAndSignOff(customer.firstName, body);
 
-  let messageId: string | null = null;
-  let sendFailed = false;
-  try {
-    const { provider, fromName } = getEmailProvider("sophie");
-    const unsubscribeUrl = buildUnsubscribeUrl(detail.conversation.personId);
-    const html = renderConversationReplyEmail(signedBody, unsubscribeUrl);
-    const result = await provider.sendEmail(customer.email, subject, html, {
-      fromName,
-      inReplyTo: lastMessage?.messageId ?? undefined,
-      references: lastMessage?.messageId ?? undefined,
-      unsubscribeUrl,
-      fromEmailOverride: detail.conversation.receivingAddress ?? undefined,
-    });
-    messageId = result.messageId;
-  } catch (err) {
-    sendFailed = true;
-    logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "staff email reply send failed");
-  }
-
-  await appendSupportEmailMessage(conversationId, "outbound", subject, signedBody, {
-    messageId,
-    inReplyTo: lastMessage?.messageId ?? null,
-    sentBy: "staff",
-    sentByStaffEmail: staffEmail,
-  });
-  if (sendFailed) return { sent: false, reason: "send_failed" };
+  const result = await sendTrackedEmail({ persona: "sophie", personId: detail.conversation.personId, conversationId,
+    email: customer.email, subject, body: signedBody, render: (url) => renderConversationReplyEmail(signedBody, url),
+    inReplyTo: threadMessage?.messageId, fromEmailOverride: detail.conversation.receivingAddress, sentBy: "staff", staffEmail });
+  if (result.status !== "sent") return { sent: false, reason: "send_failed" };
 
   await updateSupportEmailConversationState(conversationId, { needsAttention: false, needsAttentionReason: null });
   return { sent: true };

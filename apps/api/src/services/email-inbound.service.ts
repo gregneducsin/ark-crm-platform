@@ -1,7 +1,8 @@
 import { ImapFlow, type FetchMessageObject } from "imapflow";
 import { simpleParser } from "mailparser";
-import { eq } from "drizzle-orm";
-import { db, customersTable, emailConversationsTable, supportEmailConversationsTable } from "@luma/db";
+import { and, eq } from "drizzle-orm";
+import { db, customersTable, conversationsTable, supportConversationsTable, purchasesTable, emailConversationsTable, supportEmailConversationsTable, emailConversationMessagesTable, supportEmailConversationMessagesTable, webhookEventsTable } from "@luma/db";
+import { sweepEmailDeliveryTimeouts } from "./email-delivery.service.js";
 import { recordWebhookEventIfNew, markWebhookEventProcessed, markWebhookEventFailed, caseInsensitiveEmailEq } from "./webhooks.service.js";
 import { processInboundEmail } from "./alexis-email-dispatch.service.js";
 import { processInboundSupportEmail } from "./sophie-email-dispatch.service.js";
@@ -64,16 +65,39 @@ async function hasEmailConversation(personId: string): Promise<boolean> {
  * dispatchInboundMessage, matched by email instead of phone. See that
  * function's docstring for the full reasoning — identical here.
  */
-async function dispatchInboundEmail(personId: string, subject: string, bodyText: string, messageId: string | null, receivingAddress: string): Promise<void> {
+export async function dispatchInboundEmail(personId: string, subject: string, bodyText: string, messageId: string | null, receivingAddress: string, inboundEventId?: string): Promise<void> {
+  // Keep a retry in its original thread even if a purchase changed routing
+  // between handling the message and acknowledging the IMAP event.
+  const identity = inboundEventId ?? messageId;
+  if (identity) for (const [messages, conversations, support] of [
+    [emailConversationMessagesTable, emailConversationsTable, false],
+    [supportEmailConversationMessagesTable, supportEmailConversationsTable, true],
+  ] as const) {
+    const [existing] = await db.select({ id: messages.id }).from(messages).innerJoin(conversations, eq(conversations.id, messages.conversationId))
+      .where(and(eq(conversations.personId, personId), eq(messages.inboundEventId, identity))).limit(1);
+    if (existing) {
+      if (support) await processInboundSupportEmail(personId, subject, bodyText, messageId, receivingAddress, inboundEventId);
+      else await processInboundEmail(personId, subject, bodyText, messageId, undefined, receivingAddress, inboundEventId);
+      return;
+    }
+  }
   if (await hasSupportEmailConversation(personId)) {
-    await processInboundSupportEmail(personId, subject, bodyText, messageId, receivingAddress);
+    await processInboundSupportEmail(personId, subject, bodyText, messageId, receivingAddress, inboundEventId);
     return;
   }
   if (await hasEmailConversation(personId)) {
-    await processInboundEmail(personId, subject, bodyText, messageId, undefined, receivingAddress);
+    await processInboundEmail(personId, subject, bodyText, messageId, undefined, receivingAddress, inboundEventId);
     return;
   }
-  logger.warn({ personId }, "inbound email from a person with no Alexis or Sophie email conversation — no auto-reply sent");
+  const [support] = await db.select({ id: supportConversationsTable.id }).from(supportConversationsTable).where(eq(supportConversationsTable.personId, personId));
+  const [purchase] = await db.select({ id: purchasesTable.id }).from(purchasesTable)
+    .where(and(eq(purchasesTable.customerId, personId), eq(purchasesTable.status, "completed"))).limit(1);
+  if (support || purchase) {
+    await processInboundSupportEmail(personId, subject, bodyText, messageId, receivingAddress, inboundEventId);
+  } else {
+    const [sales] = await db.select({ leadSource: conversationsTable.leadSource }).from(conversationsTable).where(eq(conversationsTable.personId, personId));
+    await processInboundEmail(personId, subject, bodyText, messageId, sales?.leadSource, receivingAddress, inboundEventId);
+  }
 }
 
 interface ImapMailbox {
@@ -179,6 +203,7 @@ export interface EmailInboundSweepResult {
  * polled on the same sweep.
  */
 export async function sweepInboundEmail(): Promise<EmailInboundSweepResult> {
+  await sweepEmailDeliveryTimeouts();
   const mailboxes = imapConfigs();
   let processedCount = 0;
   let skippedCount = 0;
@@ -250,7 +275,8 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
 
         const parsed = await simpleParser(message.source);
         const fromAddress = parsed.from?.value[0]?.address;
-        const externalEventId = parsed.messageId ?? `imap-uid-${uid}`;
+        if (!parsed.messageId && (!client.mailbox || !client.mailbox.uidValidity)) throw new Error("IMAP UIDVALIDITY is required for messages without Message-ID");
+        const externalEventId = parsed.messageId ?? JSON.stringify(["imap", host, user.toLowerCase(), "INBOX", client.mailbox && String(client.mailbox.uidValidity), uid]);
 
         if (fromAddress && isIgnoredSender(fromAddress, process.env.EMAIL_INBOUND_IGNORED_SENDERS)) {
           await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
@@ -260,9 +286,15 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
 
         const recorded = await recordWebhookEventIfNew("email_inbound", externalEventId, { uid, from: fromAddress, subject: parsed.subject });
         if (!recorded) {
-          // Already processed this delivery — still mark it read so future
-          // polls don't keep re-fetching it.
-          await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
+          // A missing claim can mean another poll is still processing it.
+          // Only acknowledge a durably completed event; in-flight/failed
+          // deliveries must remain unread so a later poll can retry them.
+          const [existing] = await db.select({ status: webhookEventsTable.status })
+            .from(webhookEventsTable)
+            .where(and(eq(webhookEventsTable.source, "email_inbound"), eq(webhookEventsTable.externalEventId, externalEventId)));
+          if (existing?.status === "processed") {
+            await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
+          }
           skippedCount++;
           continue;
         }
@@ -284,10 +316,13 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
             });
             await markWebhookEventProcessed(recorded.id);
           } else {
-            await dispatchInboundEmail(personId, parsed.subject ?? "(no subject)", bodyText, parsed.messageId ?? null, user);
+            await dispatchInboundEmail(personId, parsed.subject ?? "(no subject)", bodyText, parsed.messageId ?? null, user, externalEventId);
             await markWebhookEventProcessed(recorded.id, personId);
           }
           processedCount++;
+          // Keep failed handling unread; a flag failure is safe to retry
+          // because the completed database event prevents reprocessing.
+          await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           await markWebhookEventFailed(recorded.id, reason);
@@ -295,7 +330,6 @@ async function sweepMailbox({ host, user, pass }: ImapMailbox): Promise<EmailInb
           failedCount++;
         }
 
-        await client.messageFlagsAdd({ uid: String(uid) }, ["\\Seen"], { uid: true }).catch(() => undefined);
       }
     } finally {
       lock.release();
