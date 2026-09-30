@@ -167,38 +167,23 @@ export async function requestPasswordReset(email: string): Promise<{ rawResetLin
 
 export async function resetPassword(rawToken: string, newPassword: string): Promise<{ ok: boolean }> {
   const tokenHash = hashToken(rawToken);
-
-  const [redeemed] = await db
-    .update(passwordResetTokensTable)
-    .set({ usedAt: sql`now()` })
-    .where(
-      and(
-        eq(passwordResetTokensTable.tokenHash, tokenHash),
-        isNull(passwordResetTokensTable.usedAt),
-        gt(passwordResetTokensTable.expiresAt, sql`now()`),
-      ),
-    )
-    .returning({ userId: passwordResetTokensTable.userId });
-
-  if (!redeemed) return { ok: false };
-
   const passwordHash = await hashPassword(newPassword);
-  await db
-    .update(appUsersTable)
-    .set({
-      passwordHash,
-      status: "active",
-      lockedUntil: null,
-      failedLoginAttempts: 0,
-    })
-    .where(eq(appUsersTable.id, redeemed.userId));
-
-  // A password reset proves account ownership — revoke every existing
-  // session so a previously-stolen session cookie stops working.
-  await db.update(userSessionsTable).set({ revokedAt: new Date() }).where(eq(userSessionsTable.userId, redeemed.userId));
-
-  await writeUserAuditEvent({ actorUserId: redeemed.userId, targetUserId: redeemed.userId, action: "password_reset_completed" });
-
+  const userId = await db.transaction(async (tx) => {
+    const [token] = await tx.select().from(passwordResetTokensTable).where(eq(passwordResetTokensTable.tokenHash, tokenHash));
+    if (!token) return null;
+    // Lock the account before touching tokens, matching administrative disable.
+    const [user] = await tx.select().from(appUsersTable).where(eq(appUsersTable.id, token.userId)).for("update");
+    if (!user || !(user.status === "active" || user.status === "locked")) return null;
+    const [redeemed] = await tx.update(passwordResetTokensTable).set({ usedAt: sql`now()` })
+      .where(and(eq(passwordResetTokensTable.id, token.id), isNull(passwordResetTokensTable.usedAt), gt(passwordResetTokensTable.expiresAt, sql`now()`)))
+      .returning({ userId: passwordResetTokensTable.userId });
+    if (!redeemed) return null;
+    await tx.update(appUsersTable).set({ passwordHash, status: "active", lockedUntil: null, failedLoginAttempts: 0 }).where(eq(appUsersTable.id, user.id));
+    await tx.update(userSessionsTable).set({ revokedAt: new Date() }).where(eq(userSessionsTable.userId, user.id));
+    return user.id;
+  });
+  if (!userId) return { ok: false };
+  await writeUserAuditEvent({ actorUserId: userId, targetUserId: userId, action: "password_reset_completed" });
   return { ok: true };
 }
 
@@ -223,29 +208,23 @@ export async function createInvitation(userId: string): Promise<{ rawToken: stri
 
 export async function acceptInvitation(rawToken: string, newPassword: string): Promise<{ ok: boolean }> {
   const tokenHash = hashToken(rawToken);
-
-  const [redeemed] = await db
-    .update(userInvitationTokensTable)
-    .set({ usedAt: sql`now()` })
-    .where(
-      and(
-        eq(userInvitationTokensTable.tokenHash, tokenHash),
-        isNull(userInvitationTokensTable.usedAt),
-        gt(userInvitationTokensTable.expiresAt, sql`now()`),
-      ),
-    )
-    .returning({ userId: userInvitationTokensTable.userId });
-
-  if (!redeemed) return { ok: false };
-
   const passwordHash = await hashPassword(newPassword);
-  await db
-    .update(appUsersTable)
-    .set({ passwordHash, status: "active", activatedAt: new Date() })
-    .where(eq(appUsersTable.id, redeemed.userId));
-
-  await writeUserAuditEvent({ actorUserId: redeemed.userId, targetUserId: redeemed.userId, action: "invitation_accepted" });
-
+  const userId = await db.transaction(async (tx) => {
+    const [token] = await tx.select().from(userInvitationTokensTable).where(eq(userInvitationTokensTable.tokenHash, tokenHash));
+    if (!token) return null;
+    // Lock the account before touching tokens, matching administrative disable.
+    const [user] = await tx.select().from(appUsersTable).where(eq(appUsersTable.id, token.userId)).for("update");
+    if (!user || !(user.status === "invited")) return null;
+    const [redeemed] = await tx.update(userInvitationTokensTable).set({ usedAt: sql`now()` })
+      .where(and(eq(userInvitationTokensTable.id, token.id), isNull(userInvitationTokensTable.usedAt), gt(userInvitationTokensTable.expiresAt, sql`now()`)))
+      .returning({ userId: userInvitationTokensTable.userId });
+    if (!redeemed) return null;
+    await tx.update(appUsersTable).set({ passwordHash, status: "active", activatedAt: new Date() }).where(eq(appUsersTable.id, user.id));
+    await tx.update(userSessionsTable).set({ revokedAt: new Date() }).where(eq(userSessionsTable.userId, user.id));
+    return user.id;
+  });
+  if (!userId) return { ok: false };
+  await writeUserAuditEvent({ actorUserId: userId, targetUserId: userId, action: "invitation_accepted" });
   return { ok: true };
 }
 
@@ -332,7 +311,17 @@ export async function updateUser(
   if (input.role !== undefined) patch.role = input.role;
   if (input.status !== undefined) patch.status = input.status;
 
-  const [updated] = await db.update(appUsersTable).set(patch).where(eq(appUsersTable.id, targetUserId)).returning();
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx.update(appUsersTable).set(patch).where(eq(appUsersTable.id, targetUserId)).returning();
+    if (row && input.status === "disabled") {
+      const now = new Date();
+      await tx.update(userSessionsTable).set({ revokedAt: now }).where(eq(userSessionsTable.userId, targetUserId));
+      await tx.update(passwordResetTokensTable).set({ usedAt: now }).where(and(eq(passwordResetTokensTable.userId, targetUserId), isNull(passwordResetTokensTable.usedAt)));
+      await tx.update(userInvitationTokensTable).set({ usedAt: now }).where(and(eq(userInvitationTokensTable.userId, targetUserId), isNull(userInvitationTokensTable.usedAt)));
+    }
+    return row;
+  });
+  if (!updated) return { ok: false, reason: "not_found" };
 
   if (input.role !== undefined && input.role !== existing.role) {
     await writeUserAuditEvent({
@@ -351,9 +340,6 @@ export async function updateUser(
       previousValues: { status: existing.status },
       newValues: { status: input.status },
     });
-    if (input.status === "disabled") {
-      await db.update(userSessionsTable).set({ revokedAt: new Date() }).where(eq(userSessionsTable.userId, targetUserId));
-    }
   }
 
   return { ok: true, user: toAuthUser(updated) };
