@@ -234,6 +234,9 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         sentBy: m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
+        sentAt: m.sentAt?.toISOString() ?? null,
+        deliveredAt: m.deliveredAt?.toISOString() ?? null,
+        readAt: m.readAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
@@ -263,6 +266,9 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         sentBy: m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
+        sentAt: m.sentAt?.toISOString() ?? null,
+        deliveredAt: m.deliveredAt?.toISOString() ?? null,
+        readAt: m.readAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
@@ -280,7 +286,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         createdAt: m.createdAt.toISOString(),
       }),
     ),
-  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  ].sort((a, b) => (a.sentAt ?? a.createdAt).localeCompare(b.sentAt ?? b.createdAt));
 
   const availableReplyTargets: { persona: ConversationPersona; channel: "sms" | "email" }[] = [
     ...(salesSmsRow ? [{ persona: "sales" as const, channel: "sms" as const }] : []),

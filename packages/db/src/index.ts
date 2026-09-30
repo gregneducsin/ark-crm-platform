@@ -20,14 +20,21 @@ if (testSchema) {
   }
 }
 
-export const pool = new Pool({
+const poolConfig = {
   connectionString: process.env.DATABASE_URL,
   ...(testSchema
     ? {
         options: `-c search_path=${testSchema}`,
       }
     : {}),
-});
+};
+
+export const pool = new Pool(poolConfig);
+
+// Locks stay checked out while their callbacks use db/pool. Keeping them in
+// a separate bounded pool prevents lock holders/waiters from exhausting the
+// connections those callbacks need to finish. Same database and test schema.
+export const personLockPool = new Pool({ ...poolConfig, max: 10 });
 
 export const db = drizzle(pool, { schema });
 

@@ -1,3 +1,4 @@
+import { sweepPendingSmsReplies } from "./services/sms-reply-worker.service.js";
 import { env } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
 import { createApp } from "./app.js";
@@ -116,3 +117,7 @@ if (process.env.GOOGLE_WORKSPACE_SMTP_USER) {
 } else {
   logger.info("GOOGLE_WORKSPACE_SMTP_USER not set — inbound email polling disabled");
 }
+
+setInterval(() => {
+  sweepPendingSmsReplies().catch((err) => logger.error({ err }, "Pending SMS reply sweep failed"));
+}, 15_000);

@@ -28,7 +28,10 @@ export const unifiedMessageSchema = z.object({
   sentBy: z.enum(["ai", "staff"]).nullable(),
   sentByStaffEmail: z.string().nullable(),
   /** Only present for SMS-channel outbound messages — omitted on inbound and on email (email delivery failures aren't tracked this way). "failed" means the send never reached the customer, distinct from providerMessageId being absent, which can also happen on a message that did send. */
-  deliveryStatus: z.enum(["sent", "failed"]).nullable().optional(),
+  sentAt: z.string().nullable().optional(),
+  deliveredAt: z.string().nullable().optional(),
+  readAt: z.string().nullable().optional(),
+  deliveryStatus: z.enum(["queued", "sent", "delivered", "read", "failed", "unknown"]).nullable().optional(),
   createdAt: z.string(),
 });
 export type UnifiedMessage = z.infer<typeof unifiedMessageSchema>;

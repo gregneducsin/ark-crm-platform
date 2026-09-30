@@ -1,19 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, purchasesTable, objectionReengagementTriggersTable, conversationsTable } from "@luma/db";
 import { setCustomerSmsDnd } from "./dnd.service.js";
 
+let receiptPrefix = "";
+beforeEach(async () => {
+  // Sweeps intentionally scan every due job. Isolate this suite's synthetic
+  // jobs from fixtures left by other service suites in the shared test schema.
+  await db.delete(objectionReengagementTriggersTable);
+  receiptPrefix = crypto.randomUUID();
+});
+
 const sendMessageMock = vi.fn();
 vi.mock("../lib/sms-provider.js", async () => {
   const actual = await vi.importActual<typeof import("../lib/sms-provider.js")>("../lib/sms-provider.js");
-  return { ...actual, getSmsProvider: () => ({ sendMessage: sendMessageMock }) };
-});
-
-const appendMessageMock = vi.fn();
-vi.mock("./conversations.service.js", async () => {
-  const actual = await vi.importActual<typeof import("./conversations.service.js")>("./conversations.service.js");
-  appendMessageMock.mockImplementation(actual.appendMessage);
-  return { ...actual, appendMessage: appendMessageMock };
+  return { ...actual, getSmsProvider: () => ({ sendMessage: async (...args: unknown[]) => {
+      const result = await sendMessageMock(...args);
+      // Successful fixtures include the provider's sent receipt, even if it
+      // arrives before the HTTP response. Timing tests delay receipts explicitly.
+      if (result?.providerMessageId) {
+        const { recordSmsDeliveryReceipt } = await import("./sms-delivery.service.js");
+        await recordSmsDeliveryReceipt(result.providerMessageId, "sent", new Date());
+      }
+      return result;
+    } }) };
 });
 
 const { scheduleObjectionReengagement, sweepObjectionReengagementTriggers } = await import("./objection-reengagement.service.js");
@@ -70,7 +80,7 @@ describe("scheduleObjectionReengagement", () => {
 describe("sweepObjectionReengagementTriggers", () => {
   it("sends the re-engagement text and logs it in the conversation", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_reengage" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_reengage` });
 
     const personId = await seedCustomer({ firstName: "Taylor" });
     await scheduleObjectionReengagement(personId);
@@ -78,7 +88,7 @@ describe("sweepObjectionReengagementTriggers", () => {
 
     const result = await sweepObjectionReengagementTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15558880000", expect.stringContaining("holding you back"));
+    expect(sendMessageMock).toHaveBeenCalledWith("+15558880000", expect.stringContaining("holding you back"), { scheduled: true });
 
     const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
@@ -89,10 +99,9 @@ describe("sweepObjectionReengagementTriggers", () => {
     expect(messages[0].body).toContain("Taylor");
   });
 
-  it("marks the trigger sent — not failed/retried — when the real text send succeeds but logging it into the conversation throws", async () => {
+  it("keeps a confirmed send terminal across later sweeps", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_logging_blip" });
-    appendMessageMock.mockRejectedValueOnce(new Error("transient db blip"));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_logging_blip` });
 
     const personId = await seedCustomer();
     await scheduleObjectionReengagement(personId);
@@ -105,8 +114,7 @@ describe("sweepObjectionReengagementTriggers", () => {
     const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
 
-    // A later sweep must not re-send the real text just because the
-    // conversation-log write failed the first time.
+    // A confirmed attempt remains terminal across later sweeps.
     sendMessageMock.mockClear();
     await db.update(objectionReengagementTriggersTable).set({ updatedAt: new Date(Date.now() - 60 * 60 * 1000) }).where(eq(objectionReengagementTriggersTable.personId, personId));
     await sweepObjectionReengagementTriggers();
@@ -115,7 +123,7 @@ describe("sweepObjectionReengagementTriggers", () => {
 
   it("creates the conversation with the trigger's stored leadSource when none exists yet", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_reengage_meta" });
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_reengage_meta` });
 
     const personId = await seedCustomer();
     await scheduleObjectionReengagement(personId, "meta_form");
@@ -195,7 +203,7 @@ describe("sweepObjectionReengagementTriggers", () => {
       () =>
         new Promise((resolve) => {
           callCount += 1;
-          const providerMessageId = callCount === 1 ? "msg_first" : "msg_second";
+          const providerMessageId = callCount === 1 ? `${receiptPrefix}-msg_first` : `${receiptPrefix}-msg_second`;
           setTimeout(() => resolve({ providerMessageId }), callCount === 1 ? 60 : 0);
         }),
     );
@@ -233,4 +241,11 @@ describe("sweepObjectionReengagementTriggers", () => {
       else process.env.SALES_SMS_ENABLED = originalEnv;
     }
   });
+});
+
+// Business-flow fixtures run during allowed hours; quiet-hours boundaries
+// and overnight deferral are exercised in scheduled-sms-quiet-hours.service.test.ts.
+vi.mock("../lib/send-window.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/send-window.js")>();
+  return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
 });

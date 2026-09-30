@@ -115,7 +115,37 @@ function isSameQuestion(a: string, b: string): boolean {
   if (wordsA.size === 0 || wordsB.size === 0) return false;
   const intersection = [...wordsA].filter((w) => wordsB.has(w));
   const smaller = Math.min(wordsA.size, wordsB.size);
-  return intersection.length / smaller >= 0.5;
+  // One shared word (e.g. "plan") is not evidence that a longer question
+  // asks for the same decision. Preserve genuinely short repeats like "Email?".
+  const sameWords = intersection.length === wordsA.size && wordsA.size === wordsB.size;
+  return sameWords || (intersection.length >= 2 && intersection.length / smaller >= 0.5);
+}
+
+type RepeatHistoryMessage = {
+  direction: string;
+  body: string;
+  sentBy?: string | null;
+  deliveryStatus?: string | null;
+};
+
+/**
+ * Keep the actual sequence of outbound turns: an answer without a question
+ * or a staff intervention breaks the loop. Failed drafts were never asked.
+ * Inbound replies alone do not reset it: ignoring an answer and asking again
+ * is precisely the loop this guard must still catch.
+ */
+export function countRepeatQuestionsInHistory(messages: readonly RepeatHistoryMessage[], candidateQuestion: string | null): number {
+  const questions: string[] = [];
+  for (const message of messages) {
+    if (message.direction !== "outbound" || message.deliveryStatus === "failed") continue;
+    const body = message.body.trim();
+    if (message.sentBy === "staff" || !body.endsWith("?")) {
+      questions.length = 0;
+      continue;
+    }
+    questions.push(body.split(/\n\s*\n/).at(-1)!);
+  }
+  return countTrailingRepeatQuestions(questions, candidateQuestion);
 }
 
 /**

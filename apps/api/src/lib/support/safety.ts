@@ -147,14 +147,7 @@ const PRESCRIPTION_QUESTION_PHRASES_LOWER = [
 const MG_DOSAGE_RE = /\bmg\b|\d\s?mg\b/i;
 
 /**
- * A patient reporting their medication's cold-chain may have failed in
- * transit (real production case: Virginia Kibler — "one ice pack, hot to
- * the touch, providing no refrigeration at all"). This is a potential
- * medication-safety issue, not a routine shipping complaint — Sophie has no
- * way to assess whether the medication is still safe to use, so this routes
- * straight to staff the same way a prescription question does, rather than
- * falling through to the generic "acknowledge and say the team will follow
- * up" fallback for uncovered topics.
+ * Reports of potentially compromised medication refrigeration route to staff. The bot cannot assess medication safety; direct the patient to the portal for help.
  */
 const COLD_CHAIN_CONCERN_PHRASES_LOWER = ["ice pack", "not refrigerated", "wasn't refrigerated", "no refrigeration", "not cold", "warm to the touch", "hot to the touch", "melted", "spoiled"] as const;
 
@@ -306,9 +299,11 @@ export function supportPostCheck(
   lastDraft: string | null,
   permittedTopicKeys: ReadonlySet<string> = new Set(),
 ): SupportPostCheckResult {
-  const { reply } = raw;
-
-  if (reply !== null) {
+  // Check each outbound message independently: safe reply text must not
+  // hide unsafe content (or negate a claim) in the separate follow-up.
+  for (const field of ["reply", "nextQuestion"] as const) {
+    const reply = raw[field];
+    if (reply === null || reply === undefined) continue;
     URL_RE.lastIndex = 0;
     const urlMatches = [...reply.matchAll(URL_RE)];
     for (const match of urlMatches) {
@@ -323,7 +318,7 @@ export function supportPostCheck(
     // before checking, so only a real "?" elsewhere in the text trips this.
     URL_RE.lastIndex = 0;
     const replyWithoutUrls = reply.replace(URL_RE, "");
-    if (replyWithoutUrls.includes("?")) {
+    if (field === "reply" && replyWithoutUrls.includes("?")) {
       return { ok: false, code: "QUESTION_MARK_IN_REPLY" };
     }
 
@@ -344,7 +339,7 @@ export function supportPostCheck(
       return { ok: false, code: "PROHIBITED_STAFF_CLAIM" };
     }
 
-    if (lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft)) {
+    if (field === "reply" && lastDraft !== null && normalizeForComparison(reply) === normalizeForComparison(lastDraft)) {
       return { ok: false, code: "REPEATED_DRAFT" };
     }
 

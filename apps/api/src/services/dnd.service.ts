@@ -1,6 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db, customersTable, purchasesTable } from "@luma/db";
 import { phoneMatchKey } from "../lib/phone.js";
+import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
 
 /**
  * SMS/iMessage and email opt-out are tracked independently (customers.dnd
@@ -9,10 +10,10 @@ import { phoneMatchKey } from "../lib/phone.js";
  * every email send path must check isCustomerEmailDnd.
  */
 
-/** True once a customer has texted STOP/UNSUBSCRIBE and hasn't purchased since. */
+/** Account DND plus any phone-level STOP received before account creation. */
 export async function isCustomerSmsDnd(personId: string): Promise<boolean> {
-  const [row] = await db.select({ dnd: customersTable.dnd }).from(customersTable).where(eq(customersTable.id, personId));
-  return row?.dnd ?? false;
+  const [row] = await db.select({ dnd: customersTable.dnd, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
+  return Boolean(row?.dnd) || Boolean(row?.phone && await isPhoneSmsOptedOut(row.phone));
 }
 
 /**
@@ -22,7 +23,8 @@ export async function isCustomerSmsDnd(personId: string): Promise<boolean> {
  * automatically the moment the customer makes a purchase
  * (purchases.service.ts's createPurchase and webhooks.service.ts's
  * handleBaskOrderWebhook) — a purchase is treated as fresh consent to be
- * messaged again.
+ * messaged again. This account flag cannot clear an independent phone-level
+ * opt-out received before the account existed.
  */
 export async function setCustomerSmsDnd(personId: string, dnd: boolean): Promise<void> {
   await db

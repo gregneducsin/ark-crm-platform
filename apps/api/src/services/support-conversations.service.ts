@@ -1,3 +1,4 @@
+import { reconcileSmsDelivery, releaseSmsReplyHold, type SmsDeliveryStatus } from "./sms-delivery.service.js";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db, supportConversationsTable, supportConversationMessagesTable, customersTable, type SupportConversation, type SupportConversationMessage } from "@luma/db";
 import type { SophiePreviewRequestBody } from "../lib/support/types.js";
@@ -75,7 +76,8 @@ export async function updateSupportConversationState(conversationId: string, pat
 }
 
 export async function clearSupportNeedsAttention(conversationId: string): Promise<void> {
-  await db.update(supportConversationsTable).set({ needsAttention: false, needsAttentionReason: null }).where(eq(supportConversationsTable.id, conversationId));
+  const [row] = await db.update(supportConversationsTable).set({ needsAttention: false, needsAttentionReason: null }).where(eq(supportConversationsTable.id, conversationId)).returning({ personId: supportConversationsTable.personId });
+  if (row) await releaseSmsReplyHold(row.personId, "support");
 }
 
 export type StaffReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "no_phone" | "send_failed" };
@@ -108,7 +110,7 @@ export async function sendStaffReply(conversationId: string, body: string, staff
     logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "staff reply send failed");
   }
 
-  await appendSupportMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail, deliveryStatus: sendFailed ? "failed" : "sent" });
+  await appendSupportMessage(conversationId, "outbound", body, { providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail, deliveryStatus: sendFailed ? "failed" : "queued" });
   if (sendFailed) return { sent: false, reason: "send_failed" };
 
   await clearSupportNeedsAttention(conversationId);
@@ -124,7 +126,11 @@ export async function appendSupportMessage(
     providerMessageId?: string | null;
     sentBy?: "ai" | "staff" | null;
     sentByStaffEmail?: string | null;
-    deliveryStatus?: "sent" | "failed" | null;
+    deliveryStatus?: SmsDeliveryStatus | null;
+    createdAt?: Date;
+    sentAt?: Date | null;
+    deliveredAt?: Date | null;
+    readAt?: Date | null;
     mediaUrls?: string[] | null;
   } = {},
 ): Promise<SupportConversationMessage> {
@@ -139,9 +145,14 @@ export async function appendSupportMessage(
       sentBy: opts.sentBy ?? (direction === "outbound" ? "ai" : null),
       sentByStaffEmail: opts.sentByStaffEmail ?? null,
       deliveryStatus: opts.deliveryStatus ?? null,
+      createdAt: opts.createdAt,
+      sentAt: opts.sentAt,
+      deliveredAt: opts.deliveredAt,
+      readAt: opts.readAt,
       mediaUrls: opts.mediaUrls ?? null,
     })
     .returning();
+  await reconcileSmsDelivery(opts.providerMessageId);
   return row;
 }
 
@@ -155,7 +166,7 @@ export async function listSupportMessages(conversationId: string, limit = MAX_HI
     .select()
     .from(supportConversationMessagesTable)
     .where(eq(supportConversationMessagesTable.conversationId, conversationId))
-    .orderBy(desc(supportConversationMessagesTable.createdAt))
+    .orderBy(sql`coalesce(${supportConversationMessagesTable.sentAt}, ${supportConversationMessagesTable.createdAt}) desc`, desc(supportConversationMessagesTable.createdAt))
     .limit(limit);
   return rows.reverse();
 }

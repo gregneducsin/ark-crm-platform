@@ -8,3 +8,7 @@
 export function isSalesSmsPaused(): boolean {
   return process.env.SALES_SMS_ENABLED !== "true";
 }
+
+export class SalesSmsPausedError extends Error {
+  constructor() { super("Sales SMS is paused; no provider submission attempted"); }
+}

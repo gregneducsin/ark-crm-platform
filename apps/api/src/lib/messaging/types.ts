@@ -155,3 +155,4 @@ export interface BotPreviewRequestBody {
    */
   readonly customerFirstName: string | null;
 }
+

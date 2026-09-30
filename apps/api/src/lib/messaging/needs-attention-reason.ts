@@ -89,6 +89,6 @@ export function describeNeedsAttentionReason(source: NeedsAttentionSource): stri
         ? (STAFF_FLAGGED_REASONS[source.preCheckCode] ?? `Flagged for a person to review (${source.preCheckCode}).`)
         : AI_DIDNT_UNDERSTAND_REASON;
     case "stuck_repeating":
-      return "The bot kept asking essentially the same question without the conversation moving forward, so it stopped auto-replying instead of asking again.";
+      return "The bot kept asking essentially the same question. The repeated question was withheld; only an independently approved, useful answer may have been submitted. Check message delivery and the latest customer request. Further automated replies are paused for staff review.";
   }
 }

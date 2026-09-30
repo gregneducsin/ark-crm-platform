@@ -1,4 +1,5 @@
 import { pgTable, text, uuid, timestamp, boolean, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { customersTable } from "./customers";
 import { questionnaireEventsTable } from "./webhooks";
 
@@ -212,18 +213,11 @@ export const conversationMessagesTable = pgTable(
     sentBy: text("sent_by", { enum: ["ai", "staff"] }),
     /** Which staff member actually sent it — set only when sentBy is "staff". Denormalized (not an FK), same convention as customer_notes.authorEmail, so history reads correctly even if the account is later renamed/disabled. */
     sentByStaffEmail: text("sent_by_staff_email"),
-    /**
-     * Null on inbound (delivery status is only meaningful for something we
-     * sent). On outbound: "sent" when the provider call actually returned
-     * successfully (this still covers a 200 with an unparseable
-     * message_id — see sms-provider.ts — since the text genuinely went
-     * out), "failed" when the send itself threw. This is a separate flag
-     * from providerMessageId being present, precisely because that field
-     * can legitimately be null on a message that *did* send — staff need
-     * an explicit, unambiguous "this never reached the customer" signal,
-     * not an inferred one.
-     */
-    deliveryStatus: text("delivery_status", { enum: ["sent", "failed"] }),
+    /** API acceptance is queued; provider receipts confirm sent/delivered/read. Unknown requires staff review. */
+    deliveryStatus: text("delivery_status", { enum: ["queued", "sent", "delivered", "read", "failed", "unknown"] }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],
@@ -374,6 +368,10 @@ export const unmatchedSmsThreadsTable = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     fromPhone: text("from_phone").notNull(),
+    /** Latest durably received onboarding message; cleared only by a matching turn. */
+    pendingInboundId: uuid("pending_inbound_id"),
+    onboardingHeld: boolean("onboarding_held").notNull().default(false),
+    deliveryReviewedAt: timestamp("delivery_reviewed_at", { withTimezone: true }),
     fromName: text("from_name"),
     collectedEmail: text("collected_email"),
     aiIntent: text("ai_intent"),
@@ -390,7 +388,10 @@ export const unmatchedSmsThreadsTable = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [uniqueIndex("unmatched_sms_threads_from_phone_key").on(t.fromPhone)],
+  (t) => [
+    uniqueIndex("unmatched_sms_threads_from_phone_key").on(t.fromPhone),
+    index("unmatched_sms_threads_pending_idx").on(t.updatedAt).where(sql`${t.pendingInboundId} is not null and not ${t.onboardingHeld}`),
+  ],
 );
 
 /** Every message in an unmatched-sender SMS thread, in order — inbound (their texts) and outbound (the auto-ack, or a staff-approved reply). */
@@ -406,16 +407,11 @@ export const unmatchedSmsMessagesTable = pgTable(
     providerMessageId: text("provider_message_id"),
     /** Same convention as conversation_messages.mediaUrls — set on inbound only, when the sender's text included MMS attachments. */
     mediaUrls: jsonb("media_urls").$type<string[]>(),
-    /**
-     * Same convention as conversation_messages.deliveryStatus. Null on
-     * insert for an outbound message here (unlike that table, which sets
-     * "sent"/"failed" synchronously at send time) — this only ever gets set
-     * retroactively to "failed" when iBluSend's async message.failed
-     * webhook arrives for this row's providerMessageId (see
-     * handleIbluSendWebhook), since a provider accepting a send
-     * synchronously doesn't guarantee the carrier actually delivered it.
-     */
-    deliveryStatus: text("delivery_status", { enum: ["sent", "failed"] }),
+    /** API acceptance is queued; provider receipts confirm sent/delivered/read. Unknown requires staff review. */
+    deliveryStatus: text("delivery_status", { enum: ["queued", "sent", "delivered", "read", "failed", "unknown"] }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("unmatched_sms_messages_thread_id_idx").on(t.threadId, t.createdAt)],

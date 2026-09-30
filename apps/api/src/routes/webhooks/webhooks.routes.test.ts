@@ -1262,14 +1262,7 @@ describe("Webhooks", () => {
     });
 
     it("retries an abandoned-cart opener that already permanently failed for lack of a phone number, once a later webhook backfills one", async () => {
-      // Real production case (Luma sibling app, identical pipeline): the
-      // new-patient event created the customer with no phone, its
-      // abandoned-cart opener was scheduled and then failed with
-      // NO_PHONE_NUMBER (the trigger is uniquely tied to that questionnaire
-      // event, so a later webhook can never re-arm it the normal way) — a
-      // subsequent webhook backfilling the phone must also make that failed
-      // trigger due again, or the customer never gets the text at all
-      // despite now having a phone.
+      // A later phone backfill must re-arm the opener that failed with NO_PHONE_NUMBER.
       const newPatientPayload = {
         eventId: "luma-new-patient-evt-retry-1",
         externalPersonId: "bask-person-new-patient-retry-1",
@@ -2203,6 +2196,31 @@ describe("Webhooks", () => {
         },
       };
     }
+
+    it("accepts each delivery event with its separate key while preserving inbound authentication", async () => {
+      const saved = process.env.IBLUSEND_DELIVERY_WEBHOOK_SECRET;
+      process.env.IBLUSEND_DELIVERY_WEBHOOK_SECRET = "test-delivery-key";
+      const signedWith = (payload: unknown, key: string) => {
+        const raw = JSON.stringify(payload);
+        return request(app).post("/api/webhooks/iblusend-message")
+          .set("Content-Type", "application/json")
+          .set("X-iBluSend-Signature", "sha256=" + crypto.createHmac("sha256", key).update(raw).digest("hex"))
+          .send(raw);
+      };
+      try {
+        for (const event of ["message.sent", "message.delivered", "message.read", "message.failed"]) {
+          expect((await signedWith(envelope({ event }), "test-delivery-key")).status).toBe(200);
+          expect((await signedWith(envelope({ event }), "wrong-key")).status).toBe(401);
+        }
+        // Outgoing echoes are authenticated but do not trigger customer replies.
+        const inbound = envelope({ data: { direction: "outgoing" } });
+        expect((await signedWith(inbound, IBLUSEND_SECRET)).status).toBe(200);
+        expect((await signedWith(envelope(), "test-delivery-key")).status).toBe(401);
+      } finally {
+        if (saved === undefined) delete process.env.IBLUSEND_DELIVERY_WEBHOOK_SECRET;
+        else process.env.IBLUSEND_DELIVERY_WEBHOOK_SECRET = saved;
+      }
+    });
 
     it("rejects a missing signature with 401", async () => {
       const res = await request(app).post("/api/webhooks/iblusend-message").send(envelope());

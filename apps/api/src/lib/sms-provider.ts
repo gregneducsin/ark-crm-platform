@@ -1,4 +1,6 @@
 import { notifySmsSlack } from "./slack.js";
+import { assertPhoneSmsAllowed } from "./sms-opt-out.js";
+import { assertScheduledSmsTime } from "./send-window.js";
 
 /**
  * Outbound SMS provider abstraction. getSmsProvider() throws until one is
@@ -45,7 +47,7 @@ function describeIbluSendError(rawBody: string): string {
 }
 
 export interface SmsProvider {
-  sendMessage(to: string, body: string): Promise<SmsSendResult>;
+  sendMessage(to: string, body: string, options?: { scheduled?: boolean }): Promise<SmsSendResult>;
 }
 
 export class SmsProviderNotConfiguredError extends Error {
@@ -105,12 +107,15 @@ class IbluSendProvider implements SmsProvider {
     // first attempt never reached the customer, when it likely had. Alert
     // so someone investigates the response shape, but don't throw — a
     // caller with retry logic must not re-send over this.
-    const json = (await res.json()) as { message_id?: string };
-    if (!json.message_id) {
+    const json: unknown = await res.json().catch(() => null);
+    const messageId = json !== null && typeof json === "object" && "message_id" in json
+      ? json.message_id
+      : null;
+    if (typeof messageId !== "string" || !messageId.trim()) {
       void notifySmsSlack(`SMS send to ${to} got an unexpected iBluSend response shape (no message_id) — treating as sent, not retrying. Response body should be checked.`);
       return { providerMessageId: null };
     }
-    return { providerMessageId: json.message_id };
+    return { providerMessageId: messageId };
   }
 }
 
@@ -122,7 +127,11 @@ class IbluSendProvider implements SmsProvider {
  */
 function withFailureAlert(provider: SmsProvider): SmsProvider {
   return {
-    async sendMessage(to: string, body: string): Promise<SmsSendResult> {
+    async sendMessage(to: string, body: string, options?: { scheduled?: boolean }): Promise<SmsSendResult> {
+      // Final transport gate, shared by automated and staff sends. An opt-out
+      // is an intentional suppression, not a provider failure alert.
+      await assertPhoneSmsAllowed(to);
+      if (options?.scheduled) assertScheduledSmsTime();
       try {
         return await provider.sendMessage(to, body);
       } catch (err) {

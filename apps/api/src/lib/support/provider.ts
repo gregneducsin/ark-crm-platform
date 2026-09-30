@@ -219,7 +219,7 @@ export async function callSophieInteractive(
   const client = getClient();
 
   const transcript = buildTranscript(body.messages);
-  const systemPrompt = buildSystemPrompt(body, knowledgeCatalog);
+  const systemPrompt = buildSystemPrompt(body, knowledgeCatalog) + "\nMESSAGE TIMING — The transcript is ordered by known send/receive time. A customer's text can appear BEFORE a question that was delayed in transit. Never treat that earlier text as an answer to the later question. If an acknowledgment arrived before a question already shown afterward, use no_reply and wait for an answer; do not repeat or clarify that question. Retain any substantive facts the customer already supplied.\n";
 
   const createPromise = client.messages.create({
     model: MODEL,

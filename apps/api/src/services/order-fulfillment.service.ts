@@ -23,6 +23,7 @@ import {
 import { sendTriggerEmail } from "../lib/email/send-trigger-email.js";
 import { logger } from "../lib/logger.js";
 import { isCustomerSmsDnd } from "./dnd.service.js";
+import { assertScheduledSmsTime, isScheduledSmsTime, clampToSendWindow, SmsQuietHoursError } from "../lib/send-window.js";
 
 /**
  * There's no explicit "delivered" signal from Bask, so the review check-in
@@ -162,7 +163,7 @@ export async function handlePrescriptionWritten(personId: string): Promise<void>
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => renderPrescriptionWrittenEmail(customer.firstName, unsubscribeUrl),
-      appendMessage: appendSupportEmailMessage,
+    appendMessage: appendSupportEmailMessage,
       logLabel: "prescription-written",
     });
   }
@@ -199,7 +200,7 @@ export async function handleOrderShipped(personId: string, trackingNumber: strin
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => renderOrderShippedEmail(customer.firstName, trackingNumber, unsubscribeUrl),
-      appendMessage: appendSupportEmailMessage,
+    appendMessage: appendSupportEmailMessage,
       logLabel: "order-shipped",
     });
   }
@@ -264,7 +265,7 @@ export async function handlePaymentFailed(personId: string, isFirstOrder: boolea
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => (isFirstOrder ? renderPaymentFailedFirstOrderEmail(customer.firstName, unsubscribeUrl) : renderPaymentFailedRecurringEmail(customer.firstName, unsubscribeUrl)),
-      appendMessage: appendSupportEmailMessage,
+    appendMessage: appendSupportEmailMessage,
       logLabel: "payment-failed",
     });
   }
@@ -305,6 +306,7 @@ export interface ReviewRequestSweepResult {
  * happens, so two sweeps racing on the same due trigger can't both send it.
  */
 export async function sweepReviewRequestTriggers(): Promise<ReviewRequestSweepResult> {
+  if (!isScheduledSmsTime()) return { sentCount: 0, failedCount: 0, cancelledCount: 0 };
   const retryEligibleBefore = new Date(Date.now() - RETRY_COOLDOWN_MS);
   const claimed = await db
     .update(reviewRequestTriggersTable)
@@ -358,8 +360,14 @@ export async function sweepReviewRequestTriggers(): Promise<ReviewRequestSweepRe
     // though the first one already went out.
     let result: { providerMessageId: string | null };
     try {
-      result = await getSmsProvider().sendMessage(customer.phone, text);
+      assertScheduledSmsTime();
+      result = await getSmsProvider().sendMessage(customer.phone, text, { scheduled: true });
     } catch (err) {
+      if (err instanceof SmsQuietHoursError) {
+        await db.update(reviewRequestTriggersTable).set({ status: "pending", dueAt: clampToSendWindow(new Date()) })
+          .where(and(eq(reviewRequestTriggersTable.id, trigger.id), eq(reviewRequestTriggersTable.status, "processing")));
+        continue;
+      }
       const reason = err instanceof Error ? err.message : String(err);
       await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
       await db
