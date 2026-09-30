@@ -44,7 +44,9 @@ async function loginAgent(app: ReturnType<typeof createApp>, email: string) {
 }
 
 function toolResponse(input: Record<string, unknown>) {
-  return { content: [{ type: "tool_use", name: "classify_unmatched_sms", input }] };
+  return { content: [{ type: "tool_use", name: "classify_unmatched_sms", input: {
+    needsHumanReview: false, confirmsExistingCustomer: false, productCategoryMentioned: "none", ...input,
+  } }] };
 }
 
 let phoneCounter = 0;
@@ -155,4 +157,3 @@ describe("Unmatched SMS", () => {
 });
 // Route behavior is independent of the quiet period; real pacing has integration coverage.
 vi.mock("../lib/messaging/reply-pacing.js", () => ({ isSmsReplyReady: () => true }));
-
