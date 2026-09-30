@@ -6,15 +6,13 @@ import {
   getOrCreateEmailConversation,
   getEmailConversationDetail,
   listEmailMessages,
-  appendEmailMessage,
   setEmailMessageSentiment,
   updateEmailConversationState,
   toEmailPreviewBody,
   type EmailConversationStatePatch,
 } from "./email-conversations.service.js";
-import { getEmailProvider } from "../lib/email-provider.js";
+import { sendTrackedEmail, recordInboundEmail, finishInboundEmail } from "./email-delivery.service.js";
 import { renderConversationReplyEmail } from "../lib/email/templates.js";
-import { buildUnsubscribeUrl } from "../lib/email/unsubscribe.js";
 import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerEmailDnd, setCustomerEmailDnd } from "./dnd.service.js";
@@ -55,9 +53,8 @@ function withGreetingAndSignOff(firstName: string, bodyText: string): string {
 }
 
 /**
- * Sends a threaded reply email and logs it in the email conversation
- * regardless of whether the send succeeds — same fail-soft reasoning as
- * alexis-dispatch.service.ts's sendAndLog. DND is checked here, not earlier
+ * Reserves a threaded reply before transport and records the delivery outcome.
+ * Failed or unconfirmed replies remain visible for staff review. DND is checked here, not earlier
  * in the pipeline, for the identical reason documented there: an OPT_OUT
  * confirmation reply must still go out before the flag it's about to set
  * would otherwise block it.
@@ -78,23 +75,8 @@ async function sendAndLog(
   }
 
   const signedBody = withGreetingAndSignOff(firstName, bodyText);
-  let messageId: string | null = null;
-  try {
-    const { provider, fromName } = getEmailProvider("alexis");
-    const unsubscribeUrl = buildUnsubscribeUrl(personId);
-    const html = renderConversationReplyEmail(signedBody, unsubscribeUrl);
-    const result = await provider.sendEmail(email, subject, html, {
-      fromName,
-      inReplyTo: inReplyTo ?? undefined,
-      references: inReplyTo ?? undefined,
-      unsubscribeUrl,
-      fromEmailOverride: fromEmailOverride ?? undefined,
-    });
-    messageId = result.messageId;
-  } catch (err) {
-    logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "outbound Alexis email send failed");
-  }
-  await appendEmailMessage(conversationId, "outbound", subject, signedBody, { messageId, inReplyTo });
+  await sendTrackedEmail({ persona: "alexis", personId, conversationId, email, subject, body: signedBody,
+    render: (url) => renderConversationReplyEmail(signedBody, url), inReplyTo, fromEmailOverride });
 }
 
 /**
@@ -113,8 +95,13 @@ export async function processInboundEmail(
   messageId: string | null,
   initialLeadSource?: "abandoned_cart" | "meta_form",
   receivingAddress?: string,
+  inboundEventId?: string,
 ): Promise<AlexisTurnResult> {
-  return withPersonLock(personId, () => processInboundEmailLocked(personId, subject, bodyText, messageId, initialLeadSource, receivingAddress));
+  return withPersonLock(personId, async () => {
+    const result = await processInboundEmailLocked(personId, subject, bodyText, messageId, initialLeadSource, receivingAddress, inboundEventId);
+    await finishInboundEmail("alexis", personId, inboundEventId ?? messageId);
+    return result;
+  });
 }
 
 async function processInboundEmailLocked(
@@ -124,15 +111,18 @@ async function processInboundEmailLocked(
   messageId: string | null,
   initialLeadSource?: "abandoned_cart" | "meta_form",
   receivingAddress?: string,
+  inboundEventId?: string,
 ): Promise<AlexisTurnResult> {
   const conversation = await getOrCreateEmailConversation(personId, initialLeadSource, receivingAddress);
   const priorMessages = await listEmailMessages(conversation.id);
-  const inboundMessage = await appendEmailMessage(conversation.id, "inbound", subject, bodyText, { messageId });
+  const recorded = await recordInboundEmail("alexis", conversation.id, subject, bodyText, messageId, inboundEventId);
+  if (!recorded.shouldProcess) return { ok: false, code: "EMAIL_REVIEW_OR_DUPLICATE" };
+  const inboundMessage = recorded.message;
 
   const emailCustomer = await getCustomerContact(personId);
   const customerFirstName = emailCustomer && emailCustomer.firstName && emailCustomer.firstName !== "Unknown" ? emailCustomer.firstName : null;
 
-  const linkProvided = await hasConfirmedIntakeLink(personId, priorMessages.map(m => ({ ...m, deliveryStatus: m.messageId ? "sent" : null })));
+  const linkProvided = await hasConfirmedIntakeLink(personId, priorMessages.map(m => ({ ...m, deliveryStatus: m.deliveryStatus ?? (m.messageId ? "sent" : null) })));
   const body = toEmailPreviewBody({ ...conversation, linkProvided }, [...priorMessages, inboundMessage], customerFirstName);
   let result: AlexisTurnResult;
   try {
@@ -186,7 +176,7 @@ async function processInboundEmailLocked(
     lastDraft: result.reply,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    linkProvided: await hasConfirmedIntakeLink(personId, (await listEmailMessages(conversation.id)).map(m => ({ ...m, deliveryStatus: m.messageId ? "sent" : null }))),
+    linkProvided: await hasConfirmedIntakeLink(personId, (await listEmailMessages(conversation.id)).map(m => ({ ...m, deliveryStatus: m.deliveryStatus ?? (m.messageId ? "sent" : null) }))),
     promoOffered: result.promoOffered,
     ...(result.requiresStaff
       ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
@@ -216,38 +206,23 @@ export type EmailStaffReplyResult = { readonly sent: true } | { readonly sent: f
 export async function sendEmailStaffReply(conversationId: string, body: string, staffEmail: string): Promise<EmailStaffReplyResult> {
   const detail = await getEmailConversationDetail(conversationId);
   if (!detail) return { sent: false, reason: "not_found" };
+  return withPersonLock(detail.conversation.personId, () => sendEmailStaffReplyLocked(conversationId, body, staffEmail));
+}
+
+async function sendEmailStaffReplyLocked(conversationId: string, body: string, staffEmail: string): Promise<EmailStaffReplyResult> {
+  const detail = await getEmailConversationDetail(conversationId);
+  if (!detail) return { sent: false, reason: "not_found" };
 
   const { customer, messages } = detail;
   const lastMessage = messages.at(-1);
+  const threadMessage = [...messages].reverse().find((message) => message.messageId);
   const subject = lastMessage ? replySubject(lastMessage.subject) : "Message from Ark Health";
   const signedBody = withGreetingAndSignOff(customer.firstName, body);
 
-  let messageId: string | null = null;
-  let sendFailed = false;
-  try {
-    const { provider, fromName } = getEmailProvider("alexis");
-    const unsubscribeUrl = buildUnsubscribeUrl(detail.conversation.personId);
-    const html = renderConversationReplyEmail(signedBody, unsubscribeUrl);
-    const result = await provider.sendEmail(customer.email, subject, html, {
-      fromName,
-      inReplyTo: lastMessage?.messageId ?? undefined,
-      references: lastMessage?.messageId ?? undefined,
-      unsubscribeUrl,
-      fromEmailOverride: detail.conversation.receivingAddress ?? undefined,
-    });
-    messageId = result.messageId;
-  } catch (err) {
-    sendFailed = true;
-    logger.warn({ conversationId, reason: err instanceof Error ? err.message : String(err) }, "staff email reply send failed");
-  }
-
-  await appendEmailMessage(conversationId, "outbound", subject, signedBody, {
-    messageId,
-    inReplyTo: lastMessage?.messageId ?? null,
-    sentBy: "staff",
-    sentByStaffEmail: staffEmail,
-  });
-  if (sendFailed) return { sent: false, reason: "send_failed" };
+  const result = await sendTrackedEmail({ persona: "alexis", personId: detail.conversation.personId, conversationId,
+    email: customer.email, subject, body: signedBody, render: (url) => renderConversationReplyEmail(signedBody, url),
+    inReplyTo: threadMessage?.messageId, fromEmailOverride: detail.conversation.receivingAddress, sentBy: "staff", staffEmail });
+  if (result.status !== "sent") return { sent: false, reason: "send_failed" };
 
   await updateEmailConversationState(conversationId, { needsAttention: false, needsAttentionReason: null });
   return { sent: true };

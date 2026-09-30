@@ -1,6 +1,6 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db, abandonedCartEmailTriggersTable, metaLeadEmailTriggersTable, customersTable, purchasesTable, questionnaireEventsTable } from "@luma/db";
-import { getOrCreateEmailConversation, appendEmailMessage, updateEmailConversationState } from "./email-conversations.service.js";
+import { getOrCreateEmailConversation, updateEmailConversationState } from "./email-conversations.service.js";
 import { createIntakeLink } from "./intake-links.service.js";
 import { sendTriggerEmail } from "../lib/email/send-trigger-email.js";
 import {
@@ -190,7 +190,6 @@ export async function sweepAbandonedCartEmailTriggers(): Promise<AbandonedCartEm
       conversationId: emailConversation.id,
       email: customer.email,
       render: (unsubscribeUrl) => renderStep(step, customer.firstName, ctaUrl, unsubscribeUrl),
-      appendMessage: appendEmailMessage,
       logLabel: `abandoned-cart email (${step})`,
     });
 

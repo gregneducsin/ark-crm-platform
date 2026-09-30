@@ -86,13 +86,17 @@ export const emailConversationMessagesTable = pgTable(
     sentiment: text("sentiment", { enum: ["positive", "neutral", "negative"] }),
     messageId: text("message_id"),
     inReplyTo: text("in_reply_to"),
+    deliveryStatus: text("delivery_status", { enum: ["queued", "sent", "failed", "unknown"] }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    inboundEventId: text("inbound_event_id"),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
     /** Who actually wrote an outbound message — Alexis (or an automated trigger) vs a staff member typing into the reply box. Null on inbound (always the customer). */
     sentBy: text("sent_by", { enum: ["ai", "staff"] }),
     /** Which staff member actually sent it — set only when sentBy is "staff". Denormalized (not an FK), same convention as customer_notes.authorEmail, so history reads correctly even if the account is later renamed/disabled. */
     sentByStaffEmail: text("sent_by_staff_email"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("email_conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],
+  (t) => [uniqueIndex("email_conversation_messages_inbound_event_key").on(t.conversationId, t.inboundEventId), index("email_conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],
 );
 
 /** Email twin of supportConversationsTable (support.ts) — one Sophie email thread per customer (1:1). */
@@ -145,13 +149,17 @@ export const supportEmailConversationMessagesTable = pgTable(
     sentiment: text("sentiment", { enum: ["positive", "neutral", "negative"] }),
     messageId: text("message_id"),
     inReplyTo: text("in_reply_to"),
+    deliveryStatus: text("delivery_status", { enum: ["queued", "sent", "failed", "unknown"] }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    inboundEventId: text("inbound_event_id"),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
     /** Who actually wrote an outbound message — Sophie (or an automated trigger) vs a staff member typing into the reply box. Null on inbound (always the customer). */
     sentBy: text("sent_by", { enum: ["ai", "staff"] }),
     /** Which staff member actually sent it — set only when sentBy is "staff". Denormalized (not an FK), same convention as customer_notes.authorEmail, so history reads correctly even if the account is later renamed/disabled. */
     sentByStaffEmail: text("sent_by_staff_email"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("support_email_conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],
+  (t) => [uniqueIndex("support_email_conversation_messages_inbound_event_key").on(t.conversationId, t.inboundEventId), index("support_email_conversation_messages_conversation_id_idx").on(t.conversationId, t.createdAt)],
 );
 
 /**
@@ -304,3 +312,4 @@ export type AbandonedCartEmailTrigger = typeof abandonedCartEmailTriggersTable.$
 export type MetaLeadEmailTrigger = typeof metaLeadEmailTriggersTable.$inferSelect;
 export type UnmatchedEmailThread = typeof unmatchedEmailThreadsTable.$inferSelect;
 export type UnmatchedEmailMessage = typeof unmatchedEmailMessagesTable.$inferSelect;
+

@@ -2,6 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
   supportEmailConversationsTable,
+  supportConversationsTable,
   supportEmailConversationMessagesTable,
   customersTable,
   type SupportEmailConversation,
@@ -46,9 +47,15 @@ export async function getOrCreateSupportEmailConversation(personId: string, rece
     return existing;
   }
 
+  const [sms] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.personId, personId));
   const [created] = await db
     .insert(supportEmailConversationsTable)
-    .values({ personId, receivingAddress: receivingAddress ?? null })
+    .values({ personId, receivingAddress: receivingAddress ?? null, ...(sms ? {
+      prescriptionWritten: sms.prescriptionWritten, prescriptionWrittenAt: sms.prescriptionWrittenAt,
+      orderShipped: sms.orderShipped, orderShippedAt: sms.orderShippedAt, trackingNumber: sms.trackingNumber,
+      paymentFailed: sms.paymentFailed, paymentFailedAt: sms.paymentFailedAt,
+      needsAttention: sms.needsAttention, needsAttentionReason: sms.needsAttentionReason,
+    } : {}) })
     .onConflictDoNothing({ target: supportEmailConversationsTable.personId })
     .returning();
   if (created) return created;
