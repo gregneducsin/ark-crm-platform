@@ -80,6 +80,64 @@ function modelResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeIn
 }
 
 describe("runAlexisTurn", () => {
+  it.each(["Which one should I take?", "Can the provider decide for me?", "I'm not sure", "Yes"])("defers uncertain product choice toward intake: %s", async text => {
+    callClaudeInteractiveMock.mockClear();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ lastQuestion: "Which medication are you interested in?", messages: [{ direction: "inbound", body: text }] }));
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, action: "reply", requiresStaff: false, nextQuestion: "Do you have a few minutes to get your intake started?", validatedSlotUpdates: { dosagePreference: null } });
+    if (result.ok) {
+      expect(result.reply).toContain("licensed provider");
+      expect(result.validatedSlotUpdates).not.toHaveProperty("selectedProduct");
+      expect(result.validatedSlotUpdates).not.toHaveProperty("currentlyTaking");
+    }
+  });
+  it("does not infer current medication use from an uncertain answer", async () => {
+    callClaudeInteractiveMock.mockClear();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ lastQuestion: "Are you currently taking semaglutide or tirzepatide?", messages: [{ direction: "inbound", body: "I don't know" }] }));
+    expect(result).toMatchObject({ ok: true, action: "reply", validatedSlotUpdates: { dosagePreference: null } });
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+  });
+  it.each(["I am having nausea", "Is this safe with my medical condition?"])("retains clinical review before a rapid choice question: %s", async concern => {
+    callClaudeInteractiveMock.mockClear();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ messages: [{ direction: "inbound", body: concern }, { direction: "inbound", body: "Which one should I take?" }] }));
+    expect(result).toMatchObject({ ok: true, action: "staff_review", requiresStaff: true });
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+  });
+  it("defers an ambiguous prior-dose number without guessing or calling the model", async () => {
+    callClaudeInteractiveMock.mockClear();
+    const request = baseBody({ messages: [{ direction: "inbound", body: "I took tirzepatide before." }, { direction: "inbound", body: "I was up to 8" }] });
+    const result = await runAlexisTurn(await seedCustomer(), request);
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, action: "reply", requiresStaff: false, link: null, validatedSlotUpdates: { dosagePreference: null } });
+    if (result.ok) expect(result.reply).not.toMatch(/8|mg/);
+  });
+  it.each(["Can I take 4 mg?", "Is 4 mg okay?"])("acknowledges a dosing question and flags clinical review: %s", async text => {
+    callClaudeInteractiveMock.mockClear();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ messages: [{ direction: "inbound", body: text }] }));
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, action: "staff_review", requiresStaff: true, preCheckCode: "DOSING_REVIEW", link: null, nextQuestion: null });
+    if (result.ok) expect(result.reply).toContain("clinical team");
+  });
+  it.each(["reply", "nextQuestion"] as const)("replaces dosing details in %s with a safe flagged handoff", async field => {
+    callClaudeInteractiveMock.mockClear();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ [field]: field === "reply" ? "You can request to continue at 8 mg with provider review." : "Do you want to continue at 8 mg?", knowledgeTopicsUsed: ["previous_prescriptions"], slotUpdates: { dosagePreference: "8 mg" } }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, requiresStaff: true, preCheckCode: "DOSING_REVIEW", nextQuestion: null, validatedSlotUpdates: { dosagePreference: null } });
+    if (result.ok) expect(result.reply).not.toContain("8 mg");
+  });
+  it("does not save a model-inferred dose with an otherwise safe answer", async () => {
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ slotUpdates: { dosagePreference: "8 mg" } }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(result).toMatchObject({ ok: true, requiresStaff: false, validatedSlotUpdates: { dosagePreference: null } });
+  });
+  it.each(["STOP, I was on 4 mg", "This is an emergency, I took 4 mg"])("preserves higher-priority safety handling: %s", async text => {
+    callClaudeInteractiveMock.mockClear();
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ messages: [{ direction: "inbound", body: text }] }));
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, preCheckCode: text.startsWith("STOP") ? "OPT_OUT" : "EMERGENCY_CONTENT" });
+  });
+
 it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thing, what state are you in"])("deduplicates the follow-up before safety validation: %s", async (reply) => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock.mockResolvedValue(modelResult({ reply, nextQuestion: "What state are you in?" }));
@@ -120,7 +178,7 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
   it("routes a suitability question to staff_review via pre-check, no provider call, but still replies instead of leaving the customer in silence", async () => {
     callClaudeInteractiveMock.mockClear();
     const personId = await seedCustomer();
-    const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "which one is right for me?" }] }));
+    const result = await runAlexisTurn(personId, baseBody({ messages: [{ direction: "inbound", body: "Is this safe with my medical condition?" }] }));
 
     expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -184,7 +242,7 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
     }
   });
 
-  it("pre-check-blocks an active side-effect report as SIDE_EFFECT_REPORT, with a reply naming real options for the doctor to review", async () => {
+  it("routes an active side-effect report to clinical review without suggesting remedies", async () => {
     callClaudeInteractiveMock.mockClear();
     const personId = await seedCustomer();
     const result = await runAlexisTurn(
@@ -197,8 +255,9 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
     if (result.ok) {
       expect(result.action).toBe("staff_review");
       expect(result.preCheckCode).toBe("SIDE_EFFECT_REPORT");
-      expect(result.reply).toMatch(/doctor/i);
-      expect(result.reply).toMatch(/zofran|dose/i);
+      expect(result.reply).toMatch(/licensed provider/i);
+      expect(result.reply).toMatch(/clinical review|prescribing clinician/i);
+      expect(result.reply).not.toMatch(/zofran|common|ease up/i);
     }
   });
 

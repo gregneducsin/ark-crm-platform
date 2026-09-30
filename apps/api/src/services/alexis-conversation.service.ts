@@ -1,3 +1,4 @@
+import { DOSING_DEFERRAL, hasDosingDetails, inboundDosingBoundary, isProviderChoiceRequest } from "../lib/messaging/dosing-boundary.js";
 import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
 import { interactivePreCheck, interactivePostCheck } from "../lib/messaging/safety.js";
 import { callClaudeInteractive, ProviderError } from "../lib/messaging/provider.js";
@@ -52,24 +53,9 @@ const INDIVIDUALIZED_MEDICAL_REPLIES = [
   "That one's for the doctor to review. Complete the questionnaire and they'll take a look at your info and confirm what's approved for you.",
 ] as const;
 
-/**
- * A lead describing an active side effect (nausea, vomiting, diarrhea) on a
- * medication they're currently taking — see SIDE_EFFECT_PHRASES_LOWER's
- * docstring in safety.ts for why this is its own code instead of falling
- * into MEDICAL_CONTENT's generic deflection or, worse, Claude reaching its
- * own "don't discuss symptoms" boundary and going silent.
- *
- * Deliberately names real options (an anti-nausea medication, or adjusting
- * the dose) instead of just deflecting — the lead is asking because they're
- * uncomfortable right now, and "that's up to the doctor" alone doesn't tell
- * them anything is actually fixable. Still frames both as things the doctor
- * reviews/discusses, never as Alexis telling them what to do — nothing here
- * is an instruction to take an OTC medication or change a dose on their own.
- */
+/** Active side effects require clinical review, not sales advice or suggested remedies. */
 const SIDE_EFFECT_REPORT_REPLIES = [
-  "Nausea and diarrhea are pretty common when starting semaglutide or tirzepatide, and they often ease up after a few weeks. If it doesn't get better, your doctor can go over options like an anti-nausea medication (such as Zofran) or adjusting your dose once you're set up with us.",
-  "That's a common early side effect and it usually settles down over the first few weeks. If it sticks around, your doctor can talk through options like an anti-nausea medication (like Zofran) or lowering your dose to help.",
-  "Those symptoms are pretty common when starting out and often ease up after a bit. If they don't, your doctor can discuss options like an anti-nausea medication (Zofran is a common one) or adjusting your dose.",
+  "I'm flagging this for our team so they can help route your question to a licensed provider. Please contact your prescribing clinician about these symptoms; medication and dose decisions need clinical review.",
 ] as const;
 
 function pickVariant(variants: readonly string[]): string {
@@ -200,10 +186,34 @@ const MAX_ATTEMPTS = 3;
  * check below).
  */
 export async function runAlexisTurn(personId: string, body: BotPreviewRequestBody): Promise<AlexisTurnResult> {
+  const dosingResponse = (review: boolean): AlexisTurnResult => ({
+    ok: true, action: review ? "staff_review" : "reply",
+    reply: DOSING_DEFERRAL, nextQuestion: review ? null : body.linkProvided ? "Do you need help opening your intake link?" : "Do you have a few minutes to get your intake started?",
+    link: null, objectionStage: body.objectionStage, objectionKey: body.objectionKey,
+    linkProvided: body.linkProvided, promoOffered: body.promoOffered,
+    inboundSentiment: null, requiresStaff: review, knowledgeTopicsUsed: [],
+    validatedSlotUpdates: { dosagePreference: null }, source: "pre_check_block",
+    preCheckCode: review ? "DOSING_REVIEW" : "DOSE_HISTORY_DEFERRED", learnedFirstName: null,
+  });
   const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
   if (lastInbound) {
     const pre = interactivePreCheck(lastInbound.body, body.lastQuestion);
-    if (pre.blocked) {
+    const dosing = inboundDosingBoundary(body);
+    const pending = [...body.messages].reverse();
+    const lastOutbound = pending.findIndex(m => m.direction === "outbound");
+    const batch = pending.slice(0, lastOutbound < 0 ? pending.length : lastOutbound).filter(m => m.direction === "inbound");
+    const checks = batch.map(m => interactivePreCheck(m.body, body.lastQuestion));
+    const urgent = checks.find(p => p.blocked && p.code === "OPT_OUT")
+      ?? checks.find(p => p.blocked && p.code === "EMERGENCY_CONTENT")
+      ?? checks.find(p => p.blocked && !["MEDICAL_CONTENT", "SUITABILITY_QUESTION"].includes(p.code))
+      ?? checks.find((p, index) => p.blocked && p.code === "SUITABILITY_QUESTION"
+        && !isProviderChoiceRequest({ messages: [batch[index]], lastQuestion: body.lastQuestion }));
+    // A quick follow-up must not hide STOP, emergencies or active side effects.
+    const clinicalPriority = urgent?.blocked ? urgent : pre;
+    if (!urgent?.blocked && dosing && (!pre.blocked || ["MEDICAL_CONTENT", "SUITABILITY_QUESTION"].includes(pre.code))) return dosingResponse(dosing === "review");
+    if (!urgent?.blocked && isProviderChoiceRequest(body) && (!pre.blocked || pre.code === "SUITABILITY_QUESTION")) return dosingResponse(false);
+    if (clinicalPriority.blocked) {
+      const pre = clinicalPriority;
       const deterministic = PRE_CHECK_RESULTS[pre.code] ?? { action: "staff_review" as const, reply: null };
       const reply =
         pre.code === "SIDE_EFFECT_REPORT"
@@ -272,6 +282,8 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     }
 
     raw = deduplicateFollowUp(raw);
+    if (hasDosingDetails(raw.reply) || hasDosingDetails(raw.nextQuestion)) return dosingResponse(true);
+    raw = { ...raw, slotUpdates: { ...raw.slotUpdates, dosagePreference: null } };
     post = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys);
     if (post.ok) break;
 
