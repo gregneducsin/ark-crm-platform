@@ -1,3 +1,6 @@
+import { applyAffirmFlow } from "../lib/messaging/affirm-flow.js";
+import { signupHelp } from "../lib/messaging/signup-help.js";
+import { priceOfferFor, priceConfirmationText } from "../lib/messaging/price-offer.js";
 import { DOSING_DEFERRAL, hasDosingDetails, inboundDosingBoundary, isProviderChoiceRequest } from "../lib/messaging/dosing-boundary.js";
 import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
 import { interactivePreCheck, interactivePostCheck } from "../lib/messaging/safety.js";
@@ -253,6 +256,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   const enabledTopics = getPreviewEnabledTopics();
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
+  const assistance = signupHelp(body, asksForLink);
   const overallMaxAttempts = Math.max(MAX_ATTEMPTS, CLINICAL_MAX_ATTEMPTS);
   let post: ReturnType<typeof interactivePostCheck> | undefined;
   let retryNote: string | undefined;
@@ -260,7 +264,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   for (let attempt = 1; attempt <= overallMaxAttempts; attempt++) {
     let raw: ClaudeInteractiveResult;
     try {
-      raw = await callClaudeInteractive(body, enabledTopics, retryNote);
+      raw = assistance ?? await callClaudeInteractive(body, enabledTopics, retryNote);
     } catch (err) {
       if (!(err instanceof ProviderError)) throw err;
 
@@ -289,6 +293,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
       continue;
     }
 
+    raw = applyAffirmFlow(body, raw);
     raw = deduplicateFollowUp(raw);
     if (hasDosingDetails(raw.reply) || hasDosingDetails(raw.nextQuestion)) return dosingResponse(true);
     raw = { ...raw, slotUpdates: { ...raw.slotUpdates, dosagePreference: null } };
@@ -338,7 +343,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   if (!post?.ok) {
     throw new Error("unreachable: post-check loop exited without an ok result");
   }
-  let result = post.result;
+  let result = { ...post.result, promoOffered: body.promoOffered || post.result.promoOffered };
   if (body.linkProvided && result.action === "send_form" && !asksForLink) {
     return { ok: false, code: "DUPLICATE_INTAKE_LINK" };
   }
@@ -350,14 +355,15 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     try {
       const minted = await createIntakeLink(personId, result.promoOffered ? "first_month_20" : "none", body.leadSource);
       link = minted.url;
-      finalReply = result.reply ? `${result.reply} ${link}` : link;
+      const offer = priceOfferFor(body, post.validatedSlotUpdates, result.promoOffered);
+      finalReply = `${offer ? priceConfirmationText(offer) + " " : ""}Here's your intake form: ${link}`;
       // Deterministic, not AI-drafted — same reasoning as the link itself
       // never being something Claude generates: a financing mention is a
       // real claim about a third-party product, not something to leave to
       // per-turn phrasing. Sent every time a real link goes out, not gated
       // on plan size — the conversation doesn't track which specific
       // duration/tier the patient ends up choosing at checkout.
-      finalReply = `${finalReply} If a bigger package works better for you, you can use Affirm at checkout to split it into payments.`;
+      finalReply = `${finalReply} You can apply to split the total into payments with Affirm at checkout.`;
     } catch (err) {
       // Never promise a link that could not be created; flag a clear handoff.
       logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "send_form: failed to mint intake link");
