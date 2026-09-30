@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import {
   db,
   webhookEventsTable,
@@ -7,6 +7,8 @@ import {
   purchasesTable,
   questionnaireEventsTable,
   failedPaymentEventsTable,
+  supportConversationsTable,
+  supportEmailConversationsTable,
   abandonedCartTriggersTable,
   type WebhookEvent,
 } from "@luma/db";
@@ -671,6 +673,8 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
 
     if (customerId) {
       await db.transaction(async (tx) => {
+        // Serialize recoveries for different orders belonging to the same customer.
+        await tx.select({ id: customersTable.id }).from(customersTable).where(eq(customersTable.id, customerId)).for("update");
         const [purchase] = await tx
           .select({ id: purchasesTable.id, status: purchasesTable.status })
           .from(purchasesTable)
@@ -693,6 +697,19 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
               recoveredTransactionId: payload.transactionId,
             })
             .where(and(eq(failedPaymentEventsTable.transactionId, payload.transactionId), eq(failedPaymentEventsTable.resolutionStatus, "open")));
+
+          const [openFailure] = await tx.select({ id: failedPaymentEventsTable.id }).from(failedPaymentEventsTable)
+            .where(and(or(eq(failedPaymentEventsTable.personId, customerId), eq(failedPaymentEventsTable.externalPersonId, payload.externalPersonId)), eq(failedPaymentEventsTable.resolutionStatus, "open"))).limit(1);
+          const [failedOrder] = await tx.select({ id: purchasesTable.id }).from(purchasesTable)
+            .where(and(eq(purchasesTable.customerId, customerId), eq(purchasesTable.status, "payment_failed"))).limit(1);
+          if (!openFailure && !failedOrder) {
+            // Sophie's state is customer-wide, so one recovered order must not
+            // hide another outstanding failure. Keep all staff flags/holds.
+            for (const table of [supportConversationsTable, supportEmailConversationsTable]) {
+              await tx.update(table).set({ paymentFailed: false, paymentFailedAt: null })
+                .where(eq(table.personId, customerId));
+            }
+          }
         } else if (!purchase) {
           logger.warn({ customerId, transactionId: payload.transactionId }, "payment-succeeded webhook: no matching purchase found — recorded for reporting only");
         }

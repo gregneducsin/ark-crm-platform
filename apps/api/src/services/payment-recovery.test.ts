@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { db, customersTable, purchasesTable, failedPaymentEventsTable, webhookEventsTable, type PurchaseStatus } from "@luma/db";
+import { db, customersTable, purchasesTable, failedPaymentEventsTable, webhookEventsTable, supportConversationsTable, supportEmailConversationsTable, type PurchaseStatus } from "@luma/db";
 
 vi.mock("../lib/slack.js", () => ({ notifySlack: vi.fn(), notifySmsSlack: vi.fn() }));
 const { handleBaskPaymentSucceededWebhook } = await import("./webhooks.service.js");
@@ -79,5 +79,43 @@ describe("atomic payment recovery", () => {
     expect(recovered.failure.resolutionStatus).toBe("resolved");
     await handleBaskPaymentSucceededWebhook({ ...s.payload, eventId: `${s.payload.eventId}-third` });
     expect((await state(s)).failure.resolvedAt).toEqual(recovered.failure.resolvedAt);
+  });
+});
+
+describe("Sophie payment state after confirmed recovery", () => {
+  it("clears SMS/email payment state while preserving staff review flags", async () => {
+    const s = await seed();
+    for (const table of [supportConversationsTable, supportEmailConversationsTable]) {
+      await db.insert(table).values({ personId: s.purchase.customerId, paymentFailed: true, paymentFailedAt: new Date(), needsAttention: true, needsAttentionReason: "Unrelated clinical review" });
+    }
+    await handleBaskPaymentSucceededWebhook(s.payload);
+    for (const table of [supportConversationsTable, supportEmailConversationsTable]) {
+      const [row] = await db.select().from(table).where(eq(table.personId, s.purchase.customerId));
+      expect(row.paymentFailed).toBe(false);
+      expect(row.paymentFailedAt).toBeNull();
+      expect(row.needsAttention).toBe(true);
+      expect(row.needsAttentionReason).toBe("Unrelated clinical review");
+    }
+  });
+
+  it("keeps payment failure state while another failed order remains", async () => {
+    const s = await seed();
+    const [conversation] = await db.insert(supportConversationsTable).values({ personId: s.purchase.customerId, paymentFailed: true, paymentFailedAt: new Date() }).returning();
+    const otherKey = crypto.randomUUID();
+    await db.insert(purchasesTable).values({ customerId: s.purchase.customerId, purchaseDate: "2026-01-01", orderNumber: otherKey, productName: "Test product", amountPaid: "100.00", ecommerceOrderId: otherKey, status: "payment_failed" });
+    await handleBaskPaymentSucceededWebhook(s.payload);
+    const [row] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.id, conversation.id));
+    expect(row.paymentFailed).toBe(true);
+    expect(row.paymentFailedAt).toEqual(conversation.paymentFailedAt);
+  });
+
+  it("keeps state for another unresolved failure even without a matched order", async () => {
+    const s = await seed();
+    await db.insert(supportConversationsTable).values({ personId: s.purchase.customerId, paymentFailed: true });
+    const otherKey = crypto.randomUUID();
+    await db.insert(failedPaymentEventsTable).values({ externalEventId: otherKey, transactionId: otherKey, personId: s.purchase.customerId, externalPersonId: s.payload.externalPersonId, failureDate: new Date(), rawPayload: {} });
+    await handleBaskPaymentSucceededWebhook(s.payload);
+    const [row] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.personId, s.purchase.customerId));
+    expect(row.paymentFailed).toBe(true);
   });
 });
