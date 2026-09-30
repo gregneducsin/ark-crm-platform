@@ -1,3 +1,4 @@
+import { withScheduledJobLock } from "./scheduled-job-recovery.service.js";
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db, metaLeadEmailTriggersTable, abandonedCartEmailTriggersTable, customersTable, purchasesTable } from "@luma/db";
 import { getOrCreateEmailConversation, updateEmailConversationState } from "./email-conversations.service.js";
@@ -115,6 +116,10 @@ export interface MetaLeadEmailSweepResult {
  * atomic pending->processing claim pattern as every other sweep here.
  */
 export async function sweepMetaLeadEmailTriggers(): Promise<MetaLeadEmailSweepResult> {
+  return (await withScheduledJobLock("meta_lead_email", sweepMetaLeadEmailTriggersLocked)) ?? { sentCount: 0, failedCount: 0, cancelledCount: 0 };
+}
+
+async function sweepMetaLeadEmailTriggersLocked(): Promise<MetaLeadEmailSweepResult> {
   const claimed = await db
     .update(metaLeadEmailTriggersTable)
     .set({ status: "processing" })

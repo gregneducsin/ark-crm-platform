@@ -1,3 +1,4 @@
+import { recoverInterruptedScheduledJobs } from "./services/scheduled-job-recovery.service.js";
 import { sweepPendingSmsReplies } from "./services/sms-reply-worker.service.js";
 import { env } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
@@ -121,3 +122,8 @@ if (process.env.GOOGLE_WORKSPACE_SMTP_USER) {
 setInterval(() => {
   sweepPendingSmsReplies().catch((err) => logger.error({ err }, "Pending SMS reply sweep failed"));
 }, 15_000);
+
+// Recover interrupted persisted jobs independently of SMS send windows.
+const recoverScheduledJobs = () => recoverInterruptedScheduledJobs().catch((err) => logger.error({ err }, "Scheduled-job recovery failed"));
+void recoverScheduledJobs();
+setInterval(() => { void recoverScheduledJobs(); }, 2 * 60_000);
