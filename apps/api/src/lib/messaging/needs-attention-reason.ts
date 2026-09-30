@@ -56,6 +56,7 @@ const REJECTED_REASONS: Record<string, string> = {
  * know what to glance at.
  */
 const STAFF_FLAGGED_REASONS: Record<string, string> = {
+  DOSING_REVIEW: "A dosing question or unsafe dose detail needs clinical review. Alexis deferred to the licensed provider without confirming or recommending a dose.",
   STOP_WORD: "The customer used a word that might mean they want to stop texts, but it wasn't clear enough to auto-confirm.",
   EMERGENCY_CONTENT: "The customer's message may describe a medical emergency — flagged immediately rather than answered automatically.",
   SUITABILITY_QUESTION: "The customer asked something needing individual medical/suitability judgment (e.g. \"is this safe for me\") — not something to answer generically.",

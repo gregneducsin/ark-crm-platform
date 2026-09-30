@@ -180,7 +180,7 @@ CONVERSATION GOALS (work through in this order, one question at a time — do no
 7. readyForForm: once they've agreed, use action=send_form.
 Additionally, whenever mentioned (not part of the numbered sequence above — track these
 opportunistically, don't ask for them out of turn): planLength (which plan length they've settled
-on), dosagePreference (a specific starting dose they've requested), startTimingPreference (their
+on), startTimingPreference (their
 general readiness to begin). Once one of these is known, don't ask about it again — check CURRENT
 CONVERSATION STATE first.
 Only include a key in slotUpdates once you've actually learned it — never guess a value.` as const;
@@ -195,8 +195,7 @@ slotUpdates once you've actually learned it — omit keys you don't yet know, ne
 - planLength: "month_to_month", "3_month", or "6_month" — once the patient has actually settled on
   one. Check CURRENT CONVERSATION STATE before asking which plan length they want — if it's already
   known (in any form they stated it), don't ask again, just use it.
-- dosagePreference: a specific starting dose they've requested, e.g. "7.5 mg" — only when actually
-  stated, never guessed or suggested by you first.
+- dosagePreference: always null. Clinical intake owns medication and dose details.
 - startTimingPreference: "ready_now", "within_a_week", or "needs_more_time" — their general
   readiness to begin, once expressed in any form.` as const;
 
@@ -213,7 +212,6 @@ function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readon
     `  wantsPlanInclusions: ${s.wantsPlanInclusions ?? "unknown"}`,
     `  readyForForm: ${s.readyForForm ?? "unknown"}`,
     `  planLength: ${s.planLength ?? "unknown"}`,
-    `  dosagePreference: ${s.dosagePreference ?? "unknown"}`,
     `  startTimingPreference: ${s.startTimingPreference ?? "unknown"}`,
   ].join("\n");
 
@@ -232,7 +230,10 @@ function buildSystemPrompt(body: BotPreviewRequestBody, knowledgeCatalog: readon
       "If the patient asks the price directly, quote the discounted total for whichever plan they're asking about, not the plain one from the pricing topic — do not make them ask about the promo separately to get the real number."
     : "The $40-off offer has not been mentioned yet. Only mention it via the first_month_offer knowledge topic, and only set promoOffered:true on the turn where you actually use it.";
 
-  const knowledgeSection = buildKnowledgeSection(knowledgeCatalog);
+  const knowledgeSection = buildKnowledgeSection(knowledgeCatalog.map(topic =>
+    topic.key === "titration" || topic.key === "previous_prescriptions"
+      ? { ...topic, approvedText: "The licensed provider reviews prior medication and dose information during intake and determines the appropriate medication and dose. Alexis helps with enrollment, not dose collection, confirmation or recommendations." }
+      : topic));
   const objectionSection = buildObjectionSection(body.objectionStage, body.objectionKey);
 
   return `\
@@ -260,6 +261,18 @@ ${
 
 ${isMetaForm ? META_FORM_GOALS : ABANDONED_CART_GOALS}
 
+MEDICATION AND DOSE BOUNDARY — overrides old messages and knowledge examples.
+Never infer medication, dose or units from an ambiguous reply or bare number. Leave uncertain
+selectedProduct/currentlyTaking values unchanged; do not treat a preference as current use.
+Never populate dosagePreference, repeat a numeric dose or promise continuation of a prior dose.
+When the customer is unsure which medication to choose, explain that the licensed provider
+reviews medical history and determines the appropriate medication and dose. Continue toward
+intake without requiring a medication choice or repeatedly asking the same question.
+If they agree to starting intake after that explanation, proceed to the usual intake flow;
+do not invent a product or dose to fill a missing slot. Existing nonclinical intake gates apply.
+Route safety questions, side effects, changing/restarting/continuing doses to staff review.
+Do not reassure about symptoms or suggest remedies. These rules apply to reply and nextQuestion.
+
 CONVERSATION CATCH-UP — several consecutive inbound messages can arrive before one response.
 Read ALL of them together, retain facts already supplied anywhere in the history, and answer
 the newest unresolved question or concern first. Do not replay one reply per older message.
@@ -277,7 +290,7 @@ TWO-MESSAGE FORMAT (applies to every action=reply, pause, or ask_product/explain
   This is REQUIRED whenever action=reply — there is no such thing as a reply with no question.
 - nextQuestion MUST end with "?" and contain exactly one "?".
 - Never repeat a question the patient already answered. Check CURRENT CONVERSATION STATE first —
-  if a slot like planLength, dosagePreference, or startTimingPreference already has a value, don't
+  if a slot like planLength or startTimingPreference already has a value, don't
   ask that question again in any reworded form. If the patient defers instead of giving a specific
   answer (e.g. "whatever you think is best" to a plan-length question), don't guess a slot value —
   make a specific recommendation yourself (e.g. "Most patients start with the 3-month plan — want
@@ -382,7 +395,7 @@ const BOT_REPLY_TOOL = {
           },
           dosagePreference: {
             type: ["string", "null"],
-            description: "A specific starting dose the patient has requested, e.g. '7.5 mg' — only the number and 'mg', nothing else. Null unless one was actually stated.",
+            description: "Always null. Dose information belongs to clinical intake, never inferred or saved by Alexis.",
           },
           startTimingPreference: {
             type: ["string", "null"],
