@@ -9,7 +9,7 @@ vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: mock
 vi.mock("../lib/sms-provider.js", () => ({ getSmsProvider: () => ({ sendMessage: mocks.send }) }));
 vi.mock("./alexis-dispatch.service.js", () => ({ resumeAlexisSms: mocks.resume }));
 vi.mock("../lib/slack.js", () => ({ notifySlack: vi.fn() }));
-import { recordAndClassifyUnmatchedSms, resumeUnmatchedSms, sweepPendingUnmatchedSms, getUnmatchedSmsThreadDetail, sendUnmatchedInboundSmsReply } from "./unmatched-inbound-sms.service.js";
+import { recordAndClassifyUnmatchedSms, resumeUnmatchedSms, sweepPendingUnmatchedSms, getUnmatchedSmsThreadDetail, sendUnmatchedInboundSmsReply, flagOverdueUnmatchedSms, extractOnboardingSlots } from "./unmatched-inbound-sms.service.js";
 import { recordSmsDeliveryReceipt } from "./sms-delivery.service.js";
 import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
 import { isCustomerSmsDnd, isCustomerEmailDnd, setCustomerSmsDnd } from "./dnd.service.js";
@@ -94,6 +94,80 @@ beforeEach(() => {
   mocks.classify.mockReset().mockResolvedValue(result());
   mocks.send.mockReset().mockImplementation(async () => ({ providerMessageId: `synthetic-${crypto.randomUUID()}` }));
   mocks.resume.mockReset().mockResolvedValue({ ok: true });
+});
+
+describe("onboarding validation and visibility", () => {
+  it.each(["unknown", " N/A ", "not provided", "anonymous"])("rejects placeholder contact values: %s", async (value) => {
+    mocks.classify.mockResolvedValue(result({ senderName: value, senderEmail: value }));
+    const thread = await recordAndClassifyUnmatchedSms(phone(), "Hello, I am interested");
+    expect(thread.fromName).toBeNull();
+    expect(thread.collectedEmail).toBeNull();
+    expect(thread.linkedCustomerId).toBeNull();
+    expect(mocks.send.mock.calls[0][1]).toMatch(/name/i);
+  });
+
+  it("holds a safety-reviewed lead even when name and email are complete", async () => {
+    mocks.classify.mockResolvedValue(result({ senderEmail: `${crypto.randomUUID()}@example.com`, needsHumanReview: true }));
+    const thread = await recordAndClassifyUnmatchedSms(phone(), "I have an individualized medical question");
+    expect(thread.linkedCustomerId).toBeNull();
+    expect(thread.onboardingHeld).toBe(true);
+    expect(thread.status).toBe("needs_review");
+    expect(thread.aiSummary).toContain("Human reply required.");
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
+
+  it("flags unusable replies rather than leaving only a suggestion", async () => {
+    mocks.classify.mockResolvedValue(result({ suggestedReply: "   ", senderEmail: "invalid-email" }));
+    const thread = await recordAndClassifyUnmatchedSms(phone(), "My name is Synthetic");
+    expect(thread.collectedEmail).toBeNull();
+    expect(thread.onboardingHeld).toBe(true);
+    expect(thread.aiSummary).toContain("No usable automatic reply");
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("flags malformed classification after the first greeting", async () => {
+    const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone(), fromName: "Synthetic" }).returning();
+    mocks.classify.mockResolvedValue({ content: [{ type: "tool_use", name: "classify_unmatched_sms", input: {} }] });
+    const updated = await recordAndClassifyUnmatchedSms(thread.fromPhone, "Can you help?");
+    expect(updated.aiSummary).toContain("Automatic classification failed");
+    expect(updated.onboardingHeld).toBe(true);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("flags overdue work while preserving pending input and intentional holds", async () => {
+    const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone() }).returning();
+    const [message] = await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "inbound", body: "How much does it cost?" }).returning();
+    await db.update(unmatchedSmsThreadsTable).set({ pendingInboundId: message.id, updatedAt: new Date(Date.now() - 11 * 60_000) }).where(eq(unmatchedSmsThreadsTable.id, thread.id));
+    const [held] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone(), onboardingHeld: true, status: "dismissed", aiSummary: "Intentional staff hold" }).returning();
+    await flagOverdueUnmatchedSms();
+    const updated = await threadFor(thread.fromPhone);
+    expect(updated.pendingInboundId).toBe(message.id);
+    expect(updated.onboardingHeld).toBe(true);
+    expect(updated.aiSummary).toContain("more than 10 minutes");
+    expect((await threadFor(held.fromPhone)).aiSummary).toBe("Intentional staff hold");
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("transfers earlier questions and explicit answers when creating the lead", async () => {
+    const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone(), fromName: "Synthetic" }).returning();
+    await db.insert(unmatchedSmsMessagesTable).values([
+      { threadId: thread.id, direction: "inbound", body: "How much does it cost?" },
+      { threadId: thread.id, direction: "inbound", body: "Virginia" },
+    ]);
+    const email = `${crypto.randomUUID()}@example.com`;
+    mocks.classify.mockResolvedValue(result({ senderEmail: email }));
+    const updated = await recordAndClassifyUnmatchedSms(thread.fromPhone, email);
+    const [conversation] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, updated.linkedCustomerId!));
+    expect(conversation.state).toBe("Virginia");
+    const messages = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.conversationId, conversation.id));
+    expect(messages.some(m => m.body === "How much does it cost?")).toBe(true);
+    expect(messages.some(m => m.body === email)).toBe(true);
+  });
+
+  it("does not turn questions or conditional statements into confirmed answers", () => {
+    expect(extractOnboardingSlots([{ direction: "inbound", body: "Maybe Virginia. I want semaglutide?" }])).toEqual({});
+  });
 });
 
 describe("durable onboarding message timing", () => {

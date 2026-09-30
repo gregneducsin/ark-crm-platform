@@ -1,6 +1,7 @@
 import { isSmsReplyReady } from "../lib/messaging/reply-pacing.js";
 import { reconcileSmsDelivery, type SmsInboundMetadata } from "./sms-delivery.service.js";
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import { and, eq, isNull, isNotNull, lte, sql } from "drizzle-orm";
 import { db, customersTable, conversationsTable, conversationMessagesTable, smsReplyWorkTable, unmatchedSmsThreadsTable, unmatchedSmsMessagesTable, type UnmatchedSmsThread, type UnmatchedSmsMessage } from "@luma/db";
 import { getSmsProvider } from "../lib/sms-provider.js";
@@ -136,18 +137,31 @@ async function findExistingCustomerByEmail(email: string): Promise<{ candidate: 
   return { candidate: rows[0], ambiguous: false };
 }
 
-interface Classification {
-  readonly intent: "new_lead_interest" | "existing_customer_support" | "spam_or_irrelevant" | "other";
-  readonly summary: string;
-  readonly suggestedReply: string | null;
-  readonly senderName: string | null;
-  readonly senderEmail: string | null;
-  readonly matchCandidateIndex: number | null;
-  readonly matchConfidence: "high" | "medium" | "low" | null;
-  readonly needsHumanReview: boolean;
-  readonly confirmsExistingCustomer: boolean;
-  readonly productCategoryMentioned: "weight_loss_medication" | "other_business_line" | "none";
+function contactValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return !text || /^(unknown|not\s+(known|provided|available|supplied)|n\/?a|none|null|undefined|anonymous)$/i.test(text) ? null : text;
 }
+
+function contactEmail(value: unknown): string | null {
+  const text = contactValue(value);
+  return text && z.string().email().safeParse(text).success ? text : null;
+}
+
+const classificationSchema = z.object({
+  intent: z.enum(["new_lead_interest", "existing_customer_support", "spam_or_irrelevant", "other"]),
+  summary: z.string(),
+  suggestedReply: z.string().trim().nullable().transform((value) => value || null),
+  senderName: z.unknown().transform(contactValue),
+  senderEmail: z.unknown().transform(contactEmail),
+  matchCandidateIndex: z.number().int().nonnegative().nullable(),
+  matchConfidence: z.enum(["high", "medium", "low"]).nullable(),
+  needsHumanReview: z.boolean(),
+  confirmsExistingCustomer: z.boolean(),
+  productCategoryMentioned: z.enum(["weight_loss_medication", "other_business_line", "none"]),
+});
+type Classification = z.infer<typeof classificationSchema>;
+
 
 /**
  * Second, independent layer on top of the system prompt's grounding
@@ -293,6 +307,7 @@ Rules for the suggested reply:
 - If we don't know their name yet, the reply MUST ask for it (e.g. "Hey! Could you share your name so I know who I'm chatting with?") — this takes priority over anything else, including a product/pricing question they may have already asked.
 - If we know their name but not their email, the reply MUST ask for their email instead, framed as getting an account started before going over product or pricing details (e.g. "Thanks ${knownName}! Before I go over pricing or product details, let me get an account started for you — what's your email?") — never ask for both name and email in the same message, and still don't answer their product/pricing question yet even though you now know their name.
 - If they push back on giving their email — asking why you need it (e.g. "why do you need my email"), or saying they'd rather wait/hold off — do NOT just ask for it again with different wording. Re-asking the same question three times in a row reads as nagging, not helpful, even when each version is phrased differently. On the FIRST pushback, switch to a different, low-friction question instead of repeating yourself: ask what state they're in, framed around checking what promotions/pricing are available there (e.g. "No worries! What state are you in? I can look into what promotions are available for you there."). Check the thread above first — if you already asked this state question, don't ask it again; instead circle back to email, framed around what's actually in it for them (e.g. "Just need your email too so I can actually get you those numbers — what's your email?"). Still asking for the email eventually, just not on every single turn in a row.
+- Preserve earlier unanswered questions in your summary, including pricing questions deferred while collecting contact details. The full history will be passed to Alexis at handoff.
 - Do not include a greeting/sign-off beyond what reads naturally in a text.
 - If the message is spam, a phishing attempt, an automated notification, or otherwise not a real inquiry, set intent to spam_or_irrelevant and suggestedReply to null.
 
@@ -301,7 +316,7 @@ needsHumanReview — set it true for:
 - Anything where you're genuinely unsure what they're asking or how to respond safely within the rules above.
 Leave it false for the ordinary cases: asking for a name or email, a plain informational question you can answer within the rules, or straightforward small talk.
 
-For senderName and senderEmail: if we already know them, just return those same values. Otherwise extract only what the sender actually states themselves somewhere in the thread — never guess.
+For senderName and senderEmail: use null for missing details, never placeholders such as "unknown", "none" or "N/A". If we already know them, just return those same values. Otherwise extract only what the sender actually states themselves somewhere in the thread — never guess.
 
 Possible existing customers this sender might be (matched by name appearing in their messages) — only pick one if you're confident, based on real evidence, never based on the topic alone. Note: even a confident match here always gets held for human review before anything is linked or sent — never treat a match as license to skip that.
 ${candidateList}`;
@@ -333,7 +348,7 @@ async function classifyAndDraft(
   if (!toolBlock) {
     throw new Error("Claude did not return a classify_unmatched_sms tool call.");
   }
-  return toolBlock.input as Classification;
+  return classificationSchema.parse(toolBlock.input);
 }
 
 async function getOrCreateThread(fromPhone: string): Promise<UnmatchedSmsThread> {
@@ -416,8 +431,8 @@ async function maybeCreateLead(
   if (classification.intent === "spam_or_irrelevant") return null;
   if (classification.intent === "existing_customer_support" && !isDtcLead) return null;
 
-  const name = thread.fromName ?? classification.senderName;
-  const email = thread.collectedEmail ?? classification.senderEmail;
+  const name = contactValue(thread.fromName) ?? classification.senderName;
+  const email = contactEmail(thread.collectedEmail) ?? classification.senderEmail;
   if (!name || !email || !EMAIL_RE.test(email)) return null;
 
   const { firstName, lastName } = splitName(name);
@@ -597,13 +612,34 @@ async function holdForUnmatchedDelivery(thread: UnmatchedSmsThread, messages: re
   return unresolved.length > 0;
 }
 
+export function extractOnboardingSlots(messages: readonly Pick<UnmatchedSmsMessage, "direction" | "body">[]) {
+  const slots: { state?: string; selectedProduct?: "semaglutide" | "tirzepatide"; currentlyTaking?: "yes" | "no" } = {};
+  const states = "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia".split("|");
+  for (const message of messages) {
+    if (message.direction !== "inbound") continue;
+    for (const part of message.body.replace(/[’‘]/g, "'").split(/[.!\n]/)) {
+      const text = part.trim();
+      if (!text || text.includes("?") || /\b(?:maybe|might|used to|moving|visiting|or|but)\b/i.test(text)) continue;
+      for (const state of states) {
+        if (new RegExp("^(?:(?:i'm|i am|i live) in |my state is |state: ?)?"+state+"$", "i").test(text)) slots.state = state;
+      }
+      const choice = text.match(/^(?:i (?:want|prefer|choose)|i(?:'m| am) interested in) (semaglutide|tirzepatide)$/i);
+      if (choice) slots.selectedProduct = choice[1].toLowerCase() as "semaglutide" | "tirzepatide";
+      if (/^(?:i(?:'m| am)(?: currently)? (?:on|taking)|i (?:currently )?take) (?:semaglutide|tirzepatide|a glp-?1)(?: medication)?$/i.test(text)) slots.currentlyTaking = "yes";
+      if (/^(?:no[, ]+)?i(?:'m| am) not (?:currently )?(?:on|taking) (?:anything|any(?: weight[- ]loss)? medication|any glp-?1(?: medication)?)$/i.test(text)) slots.currentlyTaking = "no";
+    }
+  }
+  return slots;
+}
+
+
 type OnboardingTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Copy history once by stable message ID and queue Alexis in the same transaction
  * as linking the new lead. A crash cannot leave a visible customer without history. */
 async function transferToAlexis(tx: OnboardingTx, thread: UnmatchedSmsThread, messages: readonly UnmatchedSmsMessage[]): Promise<void> {
   const personId = thread.linkedCustomerId!;
-  await tx.insert(conversationsTable).values({ personId, leadSource: "meta_form" }).onConflictDoNothing();
+  await tx.insert(conversationsTable).values({ personId, leadSource: "meta_form", ...extractOnboardingSlots(messages) }).onConflictDoNothing();
   const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
   const inserted = await tx.insert(conversationMessagesTable).values(messages.map((m) => ({
     id: m.id, conversationId: conversation.id, direction: m.direction, body: m.body,
@@ -622,6 +658,7 @@ async function transferToAlexis(tx: OnboardingTx, thread: UnmatchedSmsThread, me
 }
 
 async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generation: string, messages: UnmatchedSmsMessage[]): Promise<string | undefined> {
+  thread = { ...thread, fromName: contactValue(thread.fromName), collectedEmail: contactEmail(thread.collectedEmail) };
   const transcriptText = messages.map((m) => m.body).join(" ");
   const isDtcLead = DTC_CODE_RE.test(transcriptText);
   const isFirstMessage = messages.length === 1;
@@ -700,17 +737,23 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
     // A newer inbound transaction invalidates the entire stale draft.
     if (current.pendingInboundId !== generation || current.onboardingHeld) return null;
     if (await isPhoneSmsOptedOut(current.fromPhone, tx)) return null;
-    const leadResult = classification && !identityReviewRequired
+    const leadResult = classification && !identityReviewRequired && !needsHumanReview
       ? await maybeCreateLead(current, classification, false, isDtcLead, tx) : null;
-    const firstNameKnown = current.fromName ?? classification?.senderName;
-    const reply = identityReviewRequired || leadResult || classification?.intent === "spam_or_irrelevant" ? null
+    const firstNameKnown = contactValue(current.fromName) ?? classification?.senderName;
+    const reply = identityReviewRequired || needsHumanReview || leadResult || classification?.intent === "spam_or_irrelevant" ? null
       : isFirstMessage && !firstNameKnown ? pickVariant(ACK_VARIANTS)
       : classification && !needsHumanReview ? classification.suggestedReply : null;
+    const humanReplyRequired = !reply && !leadResult && (identityReviewRequired || classification?.intent !== "spam_or_irrelevant");
+    const reviewReason = !classification ? "Automatic classification failed."
+      : offScopeReply ? "The drafted reply failed the service-scope safety check."
+      : classification.needsHumanReview ? "The automated safety review requested staff assistance."
+      : "No usable automatic reply was produced.";
     const [updated] = await tx.update(unmatchedSmsThreadsTable).set({
-      fromName: current.fromName ?? classification?.senderName ?? undefined,
-      collectedEmail: current.collectedEmail ?? classification?.senderEmail ?? undefined,
+      fromName: contactValue(current.fromName) ?? classification?.senderName ?? null,
+      collectedEmail: contactEmail(current.collectedEmail) ?? classification?.senderEmail ?? null,
+      onboardingHeld: humanReplyRequired,
       aiIntent: classification?.intent ?? current.aiIntent,
-      aiSummary: identityReviewRequired ? "Identity verification required. An unknown sender may match an existing account. Staff must verify ownership before linking or changing contact details." : classification?.summary ?? current.aiSummary,
+      aiSummary: identityReviewRequired ? "Identity verification required. An unknown sender may match an existing account. Staff must verify ownership before linking or changing contact details." : humanReplyRequired ? `Human reply required. ${reviewReason} No automatic reply was sent; review this thread and respond.` : classification?.summary ?? current.aiSummary,
       suggestedReply: identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
       suggestedMatchCustomerId: matchCandidate?.id ?? current.suggestedMatchCustomerId,
       suggestedMatchConfidence: emailMatch ? "high" : matchCandidate ? classification?.matchConfidence ?? null : current.suggestedMatchConfidence,
@@ -737,8 +780,22 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
   return outcome.personId;
 }
 
+
+/** Flag stalled, unlinked work without resending messages or overriding intentional holds. */
+export async function flagOverdueUnmatchedSms(): Promise<void> {
+  await db.execute(sql`update unmatched_sms_threads t
+    set status = 'needs_review', onboarding_held = true, suggested_reply = null,
+      ai_summary = 'Human reply required. Onboarding processing or handoff has been pending for more than 10 minutes. Review the latest messages before responding.',
+      updated_at = now()
+    where t.linked_customer_id is null and t.onboarding_held = false
+      and t.pending_inbound_id is not null
+      and t.updated_at < now() - interval '10 minutes'
+      and exists (select 1 from unmatched_sms_messages m where m.id = t.pending_inbound_id and m.direction = 'inbound')`);
+}
+
 /** The pending marker survives both stale drafts and process restarts. */
 export async function sweepPendingUnmatchedSms(): Promise<void> {
+  await flagOverdueUnmatchedSms();
   const pending = await db.select({ id: unmatchedSmsThreadsTable.id }).from(unmatchedSmsThreadsTable)
     .where(and(isNotNull(unmatchedSmsThreadsTable.pendingInboundId), eq(unmatchedSmsThreadsTable.onboardingHeld, false)))
     .orderBy(unmatchedSmsThreadsTable.updatedAt).limit(50);
