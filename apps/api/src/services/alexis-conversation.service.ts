@@ -356,7 +356,8 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
       const minted = await createIntakeLink(personId, result.promoOffered ? "first_month_20" : "none", body.leadSource);
       link = minted.url;
       const offer = priceOfferFor(body, post.validatedSlotUpdates, result.promoOffered);
-      finalReply = `${offer ? priceConfirmationText(offer) + " " : ""}Here's your intake form: ${link}`;
+      const timingAcknowledgment = result.reply?.startsWith("I understand you need to wait before paying.") ? "I understand you need to wait before paying. " : "";
+      finalReply = `${timingAcknowledgment}${offer ? priceConfirmationText(offer) + " " : ""}Here's your intake form: ${link}`;
       // Deterministic, not AI-drafted — same reasoning as the link itself
       // never being something Claude generates: a financing mention is a
       // real claim about a third-party product, not something to leave to

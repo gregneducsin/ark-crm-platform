@@ -80,6 +80,12 @@ function modelResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeIn
 }
 
 describe("runAlexisTurn", () => {
+  it("keeps the payment-timing acknowledgment in the actual form reply", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult());
+    const result = await runAlexisTurn(await seedCustomer(),baseBody({currentSlots:{...baseBody().currentSlots,selectedProduct:"semaglutide",planLength:"6_month"},messages:[{direction:"outbound",body:"Have you used Affirm before, or are you familiar with how it works?"},{direction:"inbound",body:"Yes but I cannot pay until October 1st"}]}));
+    expect(result).toMatchObject({ok:true,action:"send_form",nextQuestion:null});
+    if(result.ok){expect(result.reply).toContain("need to wait before paying");expect(result.reply).not.toContain("first charge");}
+  });
   it("moves a six-month selection to intake at Ark pricing without another price question", async () => {
     callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult({ reply:"Let me confirm the price.", nextQuestion:"Does that price work for you?" }));
     const result = await runAlexisTurn(await seedCustomer(), baseBody({ currentSlots:{...baseBody().currentSlots,selectedProduct:"semaglutide"}, messages:[{direction:"outbound",body:"Which plan would you prefer?"},{direction:"inbound",body:"I'll take six months"}] }));
