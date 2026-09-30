@@ -651,7 +651,7 @@ export async function handleBaskPaymentFailedWebhook(payload: BaskPaymentFailedW
  * update, or (less commonly) the normal first-attempt confirmation. Purely a
  * data correction, no customer notification: if handleBaskPaymentFailedWebhook
  * had earlier corrected the matching purchase to "payment_failed", this flips
- * it back to "completed" and auto-resolves the corresponding
+ * it back to "completed" and atomically resolves the corresponding
  * failed_payment_events row, recording which purchase/transaction recovered
  * it — the same recoveredPurchaseId/recoveredTransactionId columns the
  * Failed Payments page's manual "Resolve" action leaves untouched, since a
@@ -670,26 +670,33 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
     const customerId = await tryFindCustomerByExternalIdentityOrEmail("bask", payload.externalPersonId, payload.email);
 
     if (customerId) {
-      const [purchase] = await db
-        .select({ id: purchasesTable.id, status: purchasesTable.status })
-        .from(purchasesTable)
-        .where(and(eq(purchasesTable.customerId, customerId), eq(purchasesTable.ecommerceOrderId, payload.transactionId)));
+      await db.transaction(async (tx) => {
+        const [purchase] = await tx
+          .select({ id: purchasesTable.id, status: purchasesTable.status })
+          .from(purchasesTable)
+          .where(and(eq(purchasesTable.customerId, customerId), eq(purchasesTable.ecommerceOrderId, payload.transactionId)))
+          .for("update");
 
-      if (purchase && purchase.status === "payment_failed") {
-        await db.update(purchasesTable).set({ status: "completed" }).where(eq(purchasesTable.id, purchase.id));
+        if (purchase && (purchase.status === "payment_failed" || purchase.status === "completed")) {
+          if (purchase.status === "payment_failed") {
+            await tx.update(purchasesTable).set({ status: "completed" }).where(eq(purchasesTable.id, purchase.id));
+          }
+          // Also repair a completed order left with an open failure by an older
+          // partial attempt. Refunded/cancelled/pending orders are not recovered.
 
-        await db
-          .update(failedPaymentEventsTable)
-          .set({
-            resolutionStatus: "resolved",
-            resolvedAt: new Date(),
-            recoveredPurchaseId: purchase.id,
-            recoveredTransactionId: payload.transactionId,
-          })
-          .where(and(eq(failedPaymentEventsTable.transactionId, payload.transactionId), eq(failedPaymentEventsTable.resolutionStatus, "open")));
-      } else if (!purchase) {
-        logger.warn({ customerId, transactionId: payload.transactionId }, "payment-succeeded webhook: no matching purchase found — recorded for reporting only");
-      }
+          await tx
+            .update(failedPaymentEventsTable)
+            .set({
+              resolutionStatus: "resolved",
+              resolvedAt: new Date(),
+              recoveredPurchaseId: purchase.id,
+              recoveredTransactionId: payload.transactionId,
+            })
+            .where(and(eq(failedPaymentEventsTable.transactionId, payload.transactionId), eq(failedPaymentEventsTable.resolutionStatus, "open")));
+        } else if (!purchase) {
+          logger.warn({ customerId, transactionId: payload.transactionId }, "payment-succeeded webhook: no matching purchase found — recorded for reporting only");
+        }
+      });
     } else {
       logger.warn({ transactionId: payload.transactionId }, "payment-succeeded webhook: could not resolve a customer — recorded for reporting only");
     }
@@ -701,6 +708,7 @@ export async function handleBaskPaymentSucceededWebhook(payload: BaskPaymentSucc
   }
   return { duplicate: false };
 }
+
 
 /**
  * Flips a completed purchase to "refunded" and flags the support
