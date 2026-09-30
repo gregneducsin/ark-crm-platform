@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, afterEach } from "vitest";
-import { db, customersTable, intakeLinkTokensTable, followUpJobsTable } from "@luma/db";
+import { db, customersTable, intakeLinkTokensTable, followUpJobsTable, questionnaireEventsTable, purchasesTable } from "@luma/db";
 import { hashToken } from "../lib/crypto.js";
 import { eq } from "drizzle-orm";
 
@@ -32,6 +32,19 @@ describe("intake-links.service", () => {
       BASK_QUESTIONNAIRE_URL: "https://bask.example.com/questionnaire",
       BASK_QUESTIONNAIRE_PROMO_URL: "https://bask.example.com/questionnaire?promo=Get20",
     };
+  });
+
+  it.each(["submission", "purchase"])("does not arm reminders when a customer clicks after %s", async (completion) => {
+    const { createIntakeLink, handleIntakeLinkClick } = await import("./intake-links.service.js");
+    const personId = await seedCustomer();
+    const { url } = await createIntakeLink(personId);
+    if (completion === "submission") await db.insert(questionnaireEventsTable).values({
+      personId, questionnaireId: crypto.randomUUID(), status: "submitted", lastEventAt: new Date() });
+    else await db.insert(purchasesTable).values({ customerId: personId, purchaseDate: "2026-09-27",
+      orderNumber: crypto.randomUUID(), productName: "Synthetic", amountPaid: "1.00", status: "completed" });
+    const result = await handleIntakeLinkClick(url.split("/go/")[1]);
+    expect(result.redirectUrl).toBe("https://bask.example.com/questionnaire");
+    expect(await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, personId))).toHaveLength(0);
   });
 
   describe("createIntakeLink", () => {

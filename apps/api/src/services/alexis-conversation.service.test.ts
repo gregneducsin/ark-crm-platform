@@ -80,6 +80,42 @@ function modelResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeIn
 }
 
 describe("runAlexisTurn", () => {
+  it("ignores model claims that a link was already supplied", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValueOnce(modelResult({ linkProvided: true }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody());
+    expect(result).toMatchObject({ ok: true, linkProvided: false, link: null });
+  });
+
+  it.each(["Thanks", "Where do I enter my name on the form?", "I filled out the form again", "Don't send another link"])("blocks unsolicited repeated links: %s", async (text) => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValue(modelResult({ action: "send_form", reply: "Here is the form.", nextQuestion: null, knowledgeTopicsUsed: [] }));
+    const personId = await seedCustomer();
+    const body = baseBody();
+    const result = await runAlexisTurn(personId, { ...body, linkProvided: true,
+      messages: [...body.messages, { direction: "inbound", body: text }] });
+    expect(result).toEqual({ ok: false, code: "DUPLICATE_INTAKE_LINK" });
+    expect(await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId))).toHaveLength(0);
+  });
+
+  it("redrafts an unsolicited duplicate into an answer", async () => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ action: "send_form", reply: "Here is the form.", nextQuestion: null, knowledgeTopicsUsed: [] }))
+      .mockResolvedValueOnce(modelResult({ reply: "You're welcome!", nextQuestion: "Anything else?", knowledgeTopicsUsed: [] }));
+    const result = await runAlexisTurn(await seedCustomer(), { ...baseBody(), linkProvided: true });
+    expect(result).toMatchObject({ ok: true, action: "reply", link: null });
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows an explicitly requested replacement link after price agreement", async () => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ action: "send_form", reply: "Here is the form.", nextQuestion: null, knowledgeTopicsUsed: [] }));
+    const body = baseBody();
+    const result = await runAlexisTurn(await seedCustomer(), { ...body, linkProvided: true,
+      messages: [...body.messages, { direction: "inbound", body: "Please resend the link." }] });
+    expect(result).toMatchObject({ ok: true, action: "send_form" });
+    if (result.ok) expect(result.link).toContain("/go/");
+  });
+
   it.each(["Which one should I take?", "Can the provider decide for me?", "I'm not sure", "Yes"])("defers uncertain product choice toward intake: %s", async text => {
     callClaudeInteractiveMock.mockClear();
     const result = await runAlexisTurn(await seedCustomer(), baseBody({ lastQuestion: "Which medication are you interested in?", messages: [{ direction: "inbound", body: text }] }));
@@ -312,7 +348,7 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
       expect(result.link).toMatch(/^http:\/\/localhost:3000\/go\/.+/);
       expect(result.reply).toContain(result.link as string);
       expect(result.reply).toContain("Affirm");
-      expect(result.linkProvided).toBe(true);
+      expect(result.linkProvided).toBe(false);
     }
   });
 
@@ -343,7 +379,8 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
       if (result.ok) {
         expect(result.action).toBe("send_form");
         expect(result.link).toBeNull();
-        expect(result.reply).toBe("Perfect, sending you the signup link now.");
+        expect(result.reply).toContain("couldn't create");
+        expect(result.linkProvided).toBe(false);
         expect(result.requiresStaff).toBe(true);
       }
     } finally {

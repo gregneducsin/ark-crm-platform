@@ -1,3 +1,4 @@
+import { createIntakeLink } from "./intake-links.service.js";
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable } from "@luma/db";
@@ -58,6 +59,18 @@ function okResult(overrides: Partial<Extract<AlexisTurnResult, { ok: true }>> = 
 }
 
 describe("processInboundEmail", () => {
+  it.each([true, false])("records an intake link only after successful email sending: %s", async (success) => {
+    runAlexisTurnMock.mockReset(); sendEmailMock.mockReset();
+    const personId = await seedCustomer();
+    process.env.INTAKE_LINK_BASE_URL = "https://intake.example.com";
+    const { url } = await createIntakeLink(personId);
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ action: "send_form", reply: url, nextQuestion: null, link: url, linkProvided: true }));
+    if (success) sendEmailMock.mockResolvedValueOnce({ messageId: "<synthetic-" + crypto.randomUUID() + "@example.com>" });
+    else sendEmailMock.mockRejectedValueOnce(new Error("Synthetic transport failure"));
+    await processInboundEmail(personId, "Form", "Please send the form", "<synthetic-inbound-" + crypto.randomUUID() + "@example.com>");
+    expect((await getOrCreateEmailConversation(personId)).linkProvided).toBe(success);
+  });
+
   it("persists the inbound email, sends a combined reply+nextQuestion email threaded to it, and logs it", async () => {
     runAlexisTurnMock.mockClear();
     sendEmailMock.mockClear();

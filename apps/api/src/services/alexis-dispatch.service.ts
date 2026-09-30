@@ -1,4 +1,5 @@
 import { isSmsReplyReady } from "../lib/messaging/reply-pacing.js";
+import { hasConfirmedIntakeLink } from "./intake-link-delivery.service.js";
 import { recordSmsInbound, getSmsReplyWork, finishSmsReplyWork, holdSmsReplyForStaff, hasPendingSmsDelivery, sendTrackedSms, type SmsInboundMetadata } from "./sms-delivery.service.js";
 import { selectRepeatQuestionAnswer } from "../lib/messaging/repeat-question-answer.js";
 import { interactivePreCheck } from "../lib/messaging/safety.js";
@@ -151,7 +152,8 @@ async function processInboundMessageLocked(personId: string, generation: string)
   // a real name, so it resolves to null the same as no firstName at all.
   const customerFirstName = customer && customer.firstName && customer.firstName !== "Unknown" ? customer.firstName : null;
 
-  const body = toBotPreviewBody(conversation, messages, customerFirstName);
+  const linkProvided = await hasConfirmedIntakeLink(personId, messages);
+  const body = toBotPreviewBody({ ...conversation, linkProvided }, messages, customerFirstName);
   let result: AlexisTurnResult;
   try {
     result = await runAlexisTurn(personId, body);
@@ -234,7 +236,7 @@ async function processInboundMessageLocked(personId: string, generation: string)
     lastDraft: isStuckRepeating ? (result.reply ?? conversation.lastDraft) : result.reply,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    linkProvided: result.linkProvided,
+    linkProvided: await hasConfirmedIntakeLink(personId, await listMessages(conversation.id)),
     promoOffered: result.promoOffered,
     ...(!isStuckRepeating && result.requiresStaff
         ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }

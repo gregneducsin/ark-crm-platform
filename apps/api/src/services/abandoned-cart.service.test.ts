@@ -225,7 +225,7 @@ describe("sweepAbandonedCartTriggers", () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
 
     const [trigger] = await db.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.personId, personId));
-    expect(trigger.cancelledReason).toBe("no_longer_abandoned");
+    expect(trigger.cancelledReason).toBe("intake_submitted");
   });
 
   it("cancels the $40 opener but still arms the 6-day check-in when the person already clicked their intake link (e.g. via the parallel email sequence)", async () => {

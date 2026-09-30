@@ -1,5 +1,6 @@
 // Flow tests isolate pacing; real delays are covered in sms-reply-pacing.service.test.ts.
 vi.mock("../lib/messaging/reply-pacing.js", () => ({ isSmsReplyReady: () => true }));
+import { createIntakeLink } from "./intake-links.service.js";
 import { recordSmsDeliveryReceipt, getSmsReplyWork } from "./sms-delivery.service.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
@@ -61,6 +62,35 @@ function okResult(overrides: Partial<Extract<AlexisTurnResult, { ok: true }>> = 
 beforeEach(() => { runAlexisTurnMock.mockReset(); sendMessageMock.mockReset(); });
 
 describe("processInboundMessage", () => {
+  it.each(["queued", "failed", "sent"] as const)("uses actual link send evidence: %s", async (outcome) => {
+    const personId = await seedCustomer();
+    process.env.INTAKE_LINK_BASE_URL = "https://intake.example.com";
+    const { url } = await createIntakeLink(personId);
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ action: "send_form", reply: url, nextQuestion: null, link: url, linkProvided: true }));
+    const providerMessageId = crypto.randomUUID();
+    if (outcome === "failed") sendMessageMock.mockRejectedValueOnce(new Error("Synthetic transport failure"));
+    else sendMessageMock.mockImplementationOnce(async () => {
+      if (outcome === "sent") await recordSmsDeliveryReceipt(providerMessageId, "sent", new Date());
+      return { providerMessageId };
+    });
+    await processInboundMessage(personId, "Yes, send the form.");
+    expect((await getOrCreateConversation(personId)).linkProvided).toBe(outcome === "sent");
+  });
+
+  it("reconciles a late link receipt before the next turn, ignoring stale flags", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    process.env.INTAKE_LINK_BASE_URL = "https://intake.example.com";
+    const { url } = await createIntakeLink(personId);
+    const providerMessageId = crypto.randomUUID();
+    await appendMessage(conversation.id, "outbound", url, { deliveryStatus: "queued", providerMessageId });
+    await recordSmsDeliveryReceipt(providerMessageId, "sent", new Date());
+    runAlexisTurnMock.mockResolvedValueOnce(okResult());
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: crypto.randomUUID() });
+    await processInboundMessage(personId, "Thanks");
+    expect(runAlexisTurnMock.mock.calls[0][1].linkProvided).toBe(true);
+  });
+
   it("continues after financing interest rather than flagging different plan questions", async () => {
     const personId = await seedCustomer();
     const conversation = await getOrCreateConversation(personId);
@@ -223,7 +253,7 @@ describe("processInboundMessage", () => {
     const conversation = await getOrCreateConversation(personId);
     expect(conversation.selectedProduct).toBe("tirzepatide");
     expect(conversation.objectionStage).toBe(1);
-    expect(conversation.linkProvided).toBe(true);
+    expect(conversation.linkProvided).toBe(false);
     expect(conversation.promoOffered).toBe(true);
     expect(conversation.lastQuestion).toBe("Which plan are you considering?");
   });
