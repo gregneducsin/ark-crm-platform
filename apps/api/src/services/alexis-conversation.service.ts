@@ -205,7 +205,9 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     const checks = batch.map(m => interactivePreCheck(m.body, body.lastQuestion));
     const urgent = checks.find(p => p.blocked && p.code === "OPT_OUT")
       ?? checks.find(p => p.blocked && p.code === "EMERGENCY_CONTENT")
-      ?? checks.find(p => p.blocked && !["MEDICAL_CONTENT", "SUITABILITY_QUESTION"].includes(p.code));
+      ?? checks.find(p => p.blocked && !["MEDICAL_CONTENT", "SUITABILITY_QUESTION"].includes(p.code))
+      ?? checks.find((p, index) => p.blocked && p.code === "SUITABILITY_QUESTION"
+        && !isProviderChoiceRequest({ messages: [batch[index]], lastQuestion: body.lastQuestion }));
     // A quick follow-up must not hide STOP, emergencies or active side effects.
     const clinicalPriority = urgent?.blocked ? urgent : pre;
     if (!urgent?.blocked && dosing && (!pre.blocked || ["MEDICAL_CONTENT", "SUITABILITY_QUESTION"].includes(pre.code))) return dosingResponse(dosing === "review");

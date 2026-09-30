@@ -97,9 +97,9 @@ describe("runAlexisTurn", () => {
     expect(result).toMatchObject({ ok: true, action: "reply", validatedSlotUpdates: { dosagePreference: null } });
     expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
   });
-  it("retains a clinical flag when a side-effect report is followed by a choice question", async () => {
+  it.each(["I am having nausea", "Is this safe with my medical condition?"])("retains clinical review before a rapid choice question: %s", async concern => {
     callClaudeInteractiveMock.mockClear();
-    const result = await runAlexisTurn(await seedCustomer(), baseBody({ messages: [{ direction: "inbound", body: "I am having nausea" }, { direction: "inbound", body: "Which one should I take?" }] }));
+    const result = await runAlexisTurn(await seedCustomer(), baseBody({ messages: [{ direction: "inbound", body: concern }, { direction: "inbound", body: "Which one should I take?" }] }));
     expect(result).toMatchObject({ ok: true, action: "staff_review", requiresStaff: true });
     expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
   });
