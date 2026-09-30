@@ -242,6 +242,14 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     }
   }
 
+  const request = lastInbound?.body ?? "";
+  const asksForLink = (
+    /\b(?:resend|send|share|text|email)\b[^.!?\n]{0,45}\b(?:link|form|questionnaire)\b/i.test(request) ||
+    /\b(?:where(?:'s| is)|lost|missing|need|never received|didn.t (?:get|receive)|haven.t (?:got|received))\b[^.!?\n]{0,35}\b(?:link|form|questionnaire)\b/i.test(request) ||
+    /\b(?:link|form|questionnaire)\b[^.!?\n]{0,25}\b(?:expired|not working|doesn.t work|won.t open|is missing)\b/i.test(request) ||
+    /^(?:please )?(?:resend it|send it again|send that again)[.! ]*$/i.test(request.trim())
+  ) && !/\b(?:don.t|do not|no need|stop)\b/i.test(request);
+
   const enabledTopics = getPreviewEnabledTopics();
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
@@ -285,7 +293,14 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     if (hasDosingDetails(raw.reply) || hasDosingDetails(raw.nextQuestion)) return dosingResponse(true);
     raw = { ...raw, slotUpdates: { ...raw.slotUpdates, dosagePreference: null } };
     post = interactivePostCheck(raw, body.lastDraft, permittedTopicKeys);
-    if (post.ok) break;
+    if (post.ok) {
+      if (body.linkProvided && post.result.action === "send_form" && !asksForLink) {
+        if (attempt >= MAX_ATTEMPTS) return { ok: false, code: "DUPLICATE_INTAKE_LINK" };
+        retryNote = "An intake link was already provided. Answer the actual message without send_form or promising another link unless the customer requests a replacement.";
+        continue;
+      }
+      break;
+    }
 
     const codeMaxAttempts = post.code === "PROHIBITED_CLINICAL" ? CLINICAL_MAX_ATTEMPTS : MAX_ATTEMPTS;
     const canRetry = attempt < codeMaxAttempts && RETRYABLE_POST_CHECK_CODES.has(post.code);
@@ -323,7 +338,10 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
   if (!post?.ok) {
     throw new Error("unreachable: post-check loop exited without an ok result");
   }
-  const result = post.result;
+  let result = post.result;
+  if (body.linkProvided && result.action === "send_form" && !asksForLink) {
+    return { ok: false, code: "DUPLICATE_INTAKE_LINK" };
+  }
   let link: string | null = null;
   let finalReply = result.reply;
   let linkMintFailed = false;
@@ -341,16 +359,10 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
       // duration/tier the patient ends up choosing at checkout.
       finalReply = `${finalReply} If a bigger package works better for you, you can use Affirm at checkout to split it into payments.`;
     } catch (err) {
-      // Same fail-soft posture as every other trigger/send path in this
-      // codebase — a config or DB problem minting the link must not silence
-      // the whole turn (the customer texted in ready to sign up; going
-      // completely quiet here is worse than every other failure mode this
-      // pipeline already guards against). The customer still gets Claude's
-      // approved reply text, just without the link, and requiresStaff below
-      // flags the conversation for a human to follow up with it manually —
-      // same mechanism the caller already uses for needsAttention.
+      // Never promise a link that could not be created; flag a clear handoff.
       logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "send_form: failed to mint intake link");
-      finalReply = result.reply ?? "Someone from our team will follow up with your signup link shortly.";
+      finalReply = "I couldn't create your signup link. I've flagged this for our team to help.";
+      result = { ...result, nextQuestion: null };
       linkMintFailed = true;
     }
   }
@@ -363,8 +375,8 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     link,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    // Preserve the previously recorded link state when a later model response reports false.
-    linkProvided: link !== null ? true : (result.linkProvided || body.linkProvided),
+    // Only transport-confirmed history supplied by the caller can set this flag.
+    linkProvided: body.linkProvided,
     promoOffered: result.promoOffered,
     inboundSentiment: result.inboundSentiment,
     requiresStaff: result.requiresStaff || linkMintFailed,

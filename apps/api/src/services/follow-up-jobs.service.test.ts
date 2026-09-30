@@ -181,16 +181,12 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     expect(job.status).toBe("cancelled");
   });
 
-  it("ignores a purchase whose row was actually created before the click, even if its purchaseDate is the same calendar day", async () => {
+  it("cancels when a purchase predates the click, including the same calendar day", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_same_day` });
     const personId = await seedCustomer();
     const clickedAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
-    // Recorded well before the click, but purchaseDate (a date-only, no
-    // time-of-day column) happens to fall on the same calendar day as
-    // clickedAt — a date-only comparison would wrongly treat this as
-    // "completed since click".
+    // A later click cannot restart acquisition reminders after purchase.
     await db.insert(purchasesTable).values({
       customerId: personId,
       purchaseDate: new Date().toISOString().slice(0, 10),
@@ -206,12 +202,12 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     await sweepFollowUpJobs();
 
     const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
-    expect(job.status).toBe("sent");
+    expect(job.status).toBe("cancelled");
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it("ignores a questionnaire submission that happened before the link was clicked", async () => {
+  it("cancels when a questionnaire submission predates the link click", async () => {
     sendMessageMock.mockClear();
-    sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_789` });
     const personId = await seedCustomer();
     const clickedAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
 
@@ -227,7 +223,8 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     await sweepFollowUpJobs();
 
     const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
-    expect(job.status).toBe("sent");
+    expect(job.status).toBe("cancelled");
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it("cancels a due job when the person is do-not-disturb by the time it's due, instead of texting an opted-out customer", async () => {

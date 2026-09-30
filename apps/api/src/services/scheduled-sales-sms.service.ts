@@ -1,8 +1,9 @@
+import { intakeCompletionReason } from "./intake-completion.service.js";
 import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import {
   db, customersTable, conversationsTable, conversationMessagesTable, supportConversationsTable,
   supportConversationMessagesTable, emailConversationsTable, supportEmailConversationsTable, smsReplyWorkTable,
-  followUpJobsTable, intakeLinkTokensTable, questionnaireEventsTable, purchasesTable,
+  followUpJobsTable, intakeLinkTokensTable, questionnaireEventsTable,
   abandonedCartTriggersTable, leadCheckinTriggersTable, objectionReengagementTriggersTable,
 } from "@luma/db";
 import { withPersonLock } from "../lib/db-lock.js";
@@ -43,22 +44,14 @@ async function armCheckin(tx: Tx, personId: string) {
 async function prepare(tx: Tx, kind: ScheduledSalesSmsKind, id: string, customer: Customer): Promise<Plan> {
   const personId = customer.id;
   if (customer.dnd) return { cancel: "opted_out" };
+  const completed = await intakeCompletionReason(personId, tx);
+  if (completed) return { cancel: kind === "follow_up" ? "completed_before_followup" : completed };
   if (kind === "follow_up") {
     const [job] = await tx.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, id));
     const [token] = await tx.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.id, job.intakeLinkTokenId));
     if (!token) return { cancel: "intake_link_removed" };
-    if (token.clickedAt) {
-      const [submitted] = await tx.select({ id: questionnaireEventsTable.id }).from(questionnaireEventsTable)
-        .where(and(eq(questionnaireEventsTable.personId, personId), eq(questionnaireEventsTable.status, "submitted"), sql`${questionnaireEventsTable.lastEventAt} >= ${token.clickedAt}`)).limit(1);
-      const [purchased] = await tx.select({ id: purchasesTable.id }).from(purchasesTable)
-        .where(and(eq(purchasesTable.customerId, personId), eq(purchasesTable.status, "completed"), sql`${purchasesTable.createdAt} >= ${token.clickedAt}`)).limit(1);
-      if (submitted || purchased) return { cancel: "completed_before_followup" };
-    }
     return { body: renderFollowUpMessage(job.messageStep, customer.firstName), leadSource: token.leadSource };
   }
-  const [purchase] = await tx.select({ id: purchasesTable.id }).from(purchasesTable)
-    .where(and(eq(purchasesTable.customerId, personId), eq(purchasesTable.status, "completed"))).limit(1);
-  if (purchase) return { cancel: "already_purchased" };
   const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
   if (kind === "abandoned_cart") {
     const [trigger] = await tx.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.id, id));

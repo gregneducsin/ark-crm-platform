@@ -71,6 +71,25 @@ afterEach(async () => {
 });
 
 describe("scheduled sales SMS send-time protections", () => {
+  it.each(kinds)("%s stops after submission even when completion predates a link click", async (kind) => {
+    const item = await seed(kind);
+    await db.insert(questionnaireEventsTable).values({ personId: item.personId,
+      questionnaireId: crypto.randomUUID(), status: "submitted", lastEventAt: new Date(Date.now() - 86_400_000) });
+    await sweepScheduledSalesSms(kind);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect((await jobFor(item)).status).toBe("cancelled");
+  });
+
+  it.each(kinds)("%s stops after an earlier completed purchase", async (kind) => {
+    const item = await seed(kind);
+    await db.insert(purchasesTable).values({ customerId: item.personId, purchaseDate: "2026-09-20",
+      orderNumber: crypto.randomUUID(), productName: "Synthetic", amountPaid: "1.00", status: "completed",
+      createdAt: new Date(Date.now() - 86_400_000) });
+    await sweepScheduledSalesSms(kind);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect((await jobFor(item)).status).toBe("cancelled");
+  });
+
   it.each(kinds)("%s preserves Ark's default sales pause and resumes without duplicate sends", async (kind) => {
     const item = await seed(kind);
     const original = process.env.SALES_SMS_ENABLED;
@@ -103,7 +122,7 @@ describe("scheduled sales SMS send-time protections", () => {
     expect((await jobFor(item)).status).toBe("sent");
   });
 
-  it.each(["stop", "cancel", "purchase", "staff", "inbound", "reschedule"] as const)("rechecks %s committed while waiting for a live turn's lock", async (change) => {
+  it.each(["stop", "cancel", "purchase", "submission", "staff", "inbound", "reschedule"] as const)("rechecks %s committed while waiting for a live turn's lock", async (change) => {
     const item = await seed();
     const thread = await conversation(item.personId);
     const acquired = deferred(); const release = deferred();
@@ -119,12 +138,13 @@ describe("scheduled sales SMS send-time protections", () => {
       if (change === "stop") await db.update(customersTable).set({ dnd: true }).where(eq(customersTable.id, item.personId));
       if (change === "cancel") await db.update(leadCheckinTriggersTable).set({ status: "cancelled", cancelledReason: "staff_cancelled" }).where(eq(leadCheckinTriggersTable.id, item.id));
       if (change === "purchase") await db.insert(purchasesTable).values({ customerId: item.personId, purchaseDate: "2026-09-23", orderNumber: crypto.randomUUID(), productName: "Synthetic", amountPaid: "1.00", status: "completed" });
+      if (change === "submission") await db.insert(questionnaireEventsTable).values({ personId: item.personId, questionnaireId: crypto.randomUUID(), status: "submitted", lastEventAt: new Date() });
       if (change === "staff") await db.update(conversationsTable).set({ needsAttention: true }).where(eq(conversationsTable.id, thread.id));
       if (change === "inbound") await recordSmsInbound(item.personId, "sales", thread.id, "One more question");
       if (change === "reschedule") await db.update(leadCheckinTriggersTable).set({ dueAt: new Date(Date.now() + 86_400_000) }).where(eq(leadCheckinTriggersTable.id, item.id));
     } finally { release.resolve(); await holder; await sweeping; }
     expect(mocks.send).not.toHaveBeenCalled();
-    expect((await jobFor(item)).status).toBe(["stop", "cancel", "purchase"].includes(change) ? "cancelled" : "pending");
+    expect((await jobFor(item)).status).toBe(["stop", "cancel", "purchase", "submission"].includes(change) ? "cancelled" : "pending");
     const [job] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.id, item.id));
     expect(job.attemptCount).toBe(0);
   });

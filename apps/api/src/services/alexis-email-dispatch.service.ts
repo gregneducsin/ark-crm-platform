@@ -1,3 +1,4 @@
+import { hasConfirmedIntakeLink } from "./intake-link-delivery.service.js";
 import { eq } from "drizzle-orm";
 import { db, customersTable } from "@luma/db";
 import { runAlexisTurn, type AlexisTurnResult } from "./alexis-conversation.service.js";
@@ -131,7 +132,8 @@ async function processInboundEmailLocked(
   const emailCustomer = await getCustomerContact(personId);
   const customerFirstName = emailCustomer && emailCustomer.firstName && emailCustomer.firstName !== "Unknown" ? emailCustomer.firstName : null;
 
-  const body = toEmailPreviewBody(conversation, [...priorMessages, inboundMessage], customerFirstName);
+  const linkProvided = await hasConfirmedIntakeLink(personId, priorMessages.map(m => ({ ...m, deliveryStatus: m.messageId ? "sent" : null })));
+  const body = toEmailPreviewBody({ ...conversation, linkProvided }, [...priorMessages, inboundMessage], customerFirstName);
   let result: AlexisTurnResult;
   try {
     result = await runAlexisTurn(personId, body);
@@ -184,7 +186,7 @@ async function processInboundEmailLocked(
     lastDraft: result.reply,
     objectionStage: result.objectionStage,
     objectionKey: result.objectionKey,
-    linkProvided: result.linkProvided,
+    linkProvided: await hasConfirmedIntakeLink(personId, (await listEmailMessages(conversation.id)).map(m => ({ ...m, deliveryStatus: m.messageId ? "sent" : null }))),
     promoOffered: result.promoOffered,
     ...(result.requiresStaff
       ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }

@@ -1,3 +1,4 @@
+import { intakeCompletionReason } from "./intake-completion.service.js";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, intakeLinkTokensTable, followUpJobsTable, type IntakeLinkToken } from "@luma/db";
 import { generateRawToken, hashToken } from "../lib/crypto.js";
@@ -88,6 +89,13 @@ export async function handleIntakeLinkClick(rawToken: string): Promise<{ redirec
 
     if (!alreadyClicked && !expired) {
       await tx.update(intakeLinkTokensTable).set({ clickedAt: sql`now()` }).where(eq(intakeLinkTokensTable.id, token.id));
+
+      if (await intakeCompletionReason(token.personId, tx)) {
+        await tx.update(followUpJobsTable).set({ status: "cancelled", cancelledReason: "completed_before_followup" })
+          .where(and(eq(followUpJobsTable.personId, token.personId),
+            or(eq(followUpJobsTable.status, "pending"), eq(followUpJobsTable.status, "processing"))));
+        return { redirectUrl };
+      }
 
       // A person can have more than one intake link minted for them over
       // time (a new one goes out every time an abandoned-cart/meta-lead
