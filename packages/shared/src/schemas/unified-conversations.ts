@@ -117,3 +117,21 @@ export const sendUnifiedConversationReplyResponseSchema = z.object({
   reason: z.enum(["not_found", "no_phone", "send_failed", "sales_paused"]).optional(),
 });
 export type SendUnifiedConversationReplyResponse = z.infer<typeof sendUnifiedConversationReplyResponseSchema>;
+
+export interface UnifiedConversationListOptions {
+  search?: string;
+  leadSource?: "all" | "abandoned_cart" | "meta_form";
+  onlyNeedsAttention?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+export interface UnifiedConversationPage {
+  conversations: UnifiedConversationSummary[];
+  nextCursor: string | null;
+  version: string;
+}
+export type UnifiedConversationPageResponse = UnifiedConversationPage | { unchanged: true; version: string };
+export interface UnifiedConversationStats {
+  salesStats: SalesResponseStats;
+  attentionCount: number;
+}

@@ -97,18 +97,19 @@ export interface SalesResponseStats {
  * separate "contacted" people instead of one.
  */
 export async function getSalesResponseStats(): Promise<SalesResponseStats> {
-  const rows = await db.execute<{ has_outbound: boolean; has_inbound: boolean }>(sql`
-    select bool_or(direction = 'outbound') as has_outbound, bool_or(direction = 'inbound') as has_inbound
+  const result = await db.execute<{ totalContacted: number; totalResponded: number }>(sql`
+    select count(*) filter (where has_outbound)::int as "totalContacted",
+      count(*) filter (where has_outbound and has_inbound)::int as "totalResponded"
     from (
-      select c.person_id, m.direction from conversation_messages m join conversations c on c.id = m.conversation_id
-      union all
-      select c.person_id, m.direction from email_conversation_messages m join email_conversations c on c.id = m.conversation_id
-    ) x
-    group by person_id
+      select person_id, bool_or(direction = 'outbound') as has_outbound, bool_or(direction = 'inbound') as has_inbound
+      from (
+        select c.person_id, m.direction from conversation_messages m join conversations c on c.id = m.conversation_id
+        union all
+        select c.person_id, m.direction from email_conversation_messages m join email_conversations c on c.id = m.conversation_id
+      ) messages group by person_id
+    ) people
   `);
-
-  const totalContacted = rows.rows.filter((r) => r.has_outbound).length;
-  const totalResponded = rows.rows.filter((r) => r.has_outbound && r.has_inbound).length;
+  const { totalContacted, totalResponded } = result.rows[0];
   return { totalContacted, totalResponded, responseRate: totalContacted > 0 ? totalResponded / totalContacted : 0 };
 }
 
@@ -365,4 +366,3 @@ export async function sendUnifiedStaffReply(
   if (!row) return { sent: false, reason: "not_found" };
   return sendSophieEmailStaffReply(row.id, body, staffEmail);
 }
-

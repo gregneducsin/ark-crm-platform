@@ -107,6 +107,29 @@ describe("GET /api/app/conversations/:personId", () => {
   });
 });
 
+describe("paged inbox routes", () => {
+  it("requires authorization, validates pagination and skips unchanged payloads", async () => {
+    const app = createApp();
+    expect((await request(app).get("/api/app/conversations/pages")).status).toBe(401);
+    expect((await request(app).get("/api/app/conversations/stats")).status).toBe(401);
+    const email = "paged-" + crypto.randomUUID() + "@example.com";
+    await seedUser(email, "admin");
+    const { agent } = await loginAgent(app, email);
+    await seedSalesThread();
+    for (const query of ["limit=0", "limit=101", "cursor=bad", "leadSource=bad"]) {
+      expect((await agent.get("/api/app/conversations/pages?" + query)).status).toBe(400);
+    }
+    const first = await agent.get("/api/app/conversations/pages?limit=1");
+    expect(first.status).toBe(200);
+    expect(first.body.conversations).toHaveLength(1);
+    const unchanged = await agent.get("/api/app/conversations/pages").query({ limit: 1, version: first.body.version });
+    expect(unchanged.body).toEqual({ unchanged: true, version: first.body.version });
+    expect(unchanged.headers["cache-control"]).toContain("no-store");
+    const stats = await agent.get("/api/app/conversations/stats");
+    expect(stats.body).toMatchObject({ attentionCount: expect.any(Number), salesStats: { totalContacted: expect.any(Number) } });
+  });
+});
+
 describe("POST /api/app/conversations/:personId/clear-attention", () => {
   let app: ReturnType<typeof createApp>;
 

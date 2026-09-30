@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import type { ConversationPersona, UnifiedConversationChannel, UnifiedMessage } from "@luma/shared";
-import { useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply } from "../hooks/useUnifiedConversations";
+import { useUnifiedConversationStats, useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply } from "../hooks/useUnifiedConversations";
 import { Badge, Card, Button, Input } from "../components/ui";
 import { UpcomingTriggerBanner } from "../components/UpcomingTriggerBanner";
 import { CollapsibleCustomerNotes } from "../components/CustomerNotesCard";
@@ -71,7 +71,7 @@ const LEAD_SOURCE_FILTER_LABELS: Record<LeadSourceFilter, string> = {
 
 /** Sales-only — support was never covered by this stat on the old Conversations tab either. */
 function SalesResponseSummary() {
-  const { data } = useUnifiedConversationsList();
+  const { data } = useUnifiedConversationStats();
   const stats = data?.salesStats;
   const ratePct = stats ? Math.round(stats.responseRate * 100) : null;
 
@@ -97,22 +97,28 @@ function SalesResponseSummary() {
 }
 
 function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: string | null; onSelect: (personId: string, firstName: string, lastName: string) => void }) {
-  const { data, isLoading } = useUnifiedConversationsList();
   const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
   const [leadSourceFilter, setLeadSourceFilter] = useState<LeadSourceFilter>("all");
   const [search, setSearch] = useState("");
 
-  const attentionCount = data?.conversations.filter((c) => c.needsAttention).length ?? 0;
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const { data, isLoading, isError, isFetching, hasNextPage, fetchNextPage, refetch } = useUnifiedConversationsList({
+    search: debouncedSearch, leadSource: leadSourceFilter, onlyNeedsAttention,
+  });
+  const { data: counts } = useUnifiedConversationStats();
+  const attentionCount = counts?.attentionCount ?? 0;
   const visible = useMemo(() => {
-    if (!data) return [];
-    const term = search.trim().toLowerCase();
-    return data.conversations.filter((c) => {
-      if (onlyNeedsAttention && !c.needsAttention) return false;
-      if (leadSourceFilter !== "all" && c.leadSource !== leadSourceFilter) return false;
-      if (term && !`${c.firstName} ${c.lastName}`.toLowerCase().includes(term)) return false;
-      return true;
-    });
-  }, [data, onlyNeedsAttention, leadSourceFilter, search]);
+    // Deduplicate a row that moves between pages while a refresh is in flight.
+    const rows = new Map<string, NonNullable<typeof data>["pages"][number]["conversations"][number]>();
+    for (const page of data?.pages ?? []) {
+      for (const row of page.conversations) if (!rows.has(row.personId)) rows.set(row.personId, row);
+    }
+    return [...rows.values()];
+  }, [data]);
 
   return (
     <Card className="flex h-[calc(100vh-268px)] flex-col overflow-hidden p-0">
@@ -146,9 +152,10 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
             </button>
           ))}
         </div>
-        <Input className="mt-2" placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input className="mt-2" placeholder="Search by name…" maxLength={200} value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <div className="flex-1 overflow-y-auto">
+        {isError && <div role="alert" className="p-4 text-sm text-red-600">Could not refresh conversations. <button onClick={() => void refetch()} className="underline">Retry</button></div>}
         {isLoading && <p className="p-4 text-sm text-gray-400">Loading…</p>}
         {data && visible.length === 0 && <p className="p-4 text-sm text-gray-400">Nothing matches these filters.</p>}
         {visible.map((c) => (
@@ -175,6 +182,7 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
             </div>
           </button>
         ))}
+        {hasNextPage && <div className="p-3"><Button disabled={isFetching} onClick={() => void fetchNextPage()}>{isFetching ? "Loading…" : "Load more conversations"}</Button></div>}
       </div>
     </Card>
   );
@@ -440,15 +448,15 @@ export function ConversationsPage() {
   const [selected, setSelected] = useState<SelectedContact | null>(null);
   const deepLinkResolved = useRef(false);
 
-  const { data: listData } = useUnifiedConversationsList();
+  const { data: linkedDetail } = useUnifiedConversationDetail(
+    !deepLinkResolved.current && selected === null ? deepLinkPersonId : null,
+  );
   useEffect(() => {
-    if (!deepLinkPersonId || deepLinkResolved.current || selected !== null || !listData) return;
-    const match = listData.conversations.find((c) => c.personId === deepLinkPersonId);
-    if (match) {
-      setSelected({ personId: match.personId, firstName: match.firstName, lastName: match.lastName });
-      deepLinkResolved.current = true;
-    }
-  }, [deepLinkPersonId, listData, selected]);
+    if (!deepLinkPersonId || deepLinkResolved.current || selected !== null || !linkedDetail) return;
+    const customer = linkedDetail.customer;
+    setSelected({ personId: customer.id, firstName: customer.firstName, lastName: customer.lastName });
+    deepLinkResolved.current = true;
+  }, [deepLinkPersonId, linkedDetail, selected]);
 
   function handleSelect(personId: string, firstName: string, lastName: string) {
     deepLinkResolved.current = true;
