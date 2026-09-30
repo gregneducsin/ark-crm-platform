@@ -1,3 +1,4 @@
+import { withScheduledJobLock } from "./scheduled-job-recovery.service.js";
 import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { db, customersTable, reviewRequestTriggersTable } from "@luma/db";
 import { getOrCreateSupportConversation, appendSupportMessage, updateSupportConversationState, hasAnyOutboundSupportMessage } from "./support-conversations.service.js";
@@ -301,6 +302,10 @@ export interface ReviewRequestSweepResult {
  * happens, so two sweeps racing on the same due trigger can't both send it.
  */
 export async function sweepReviewRequestTriggers(): Promise<ReviewRequestSweepResult> {
+  return (await withScheduledJobLock("review_request_sms", sweepReviewRequestTriggersLocked)) ?? { sentCount: 0, failedCount: 0, cancelledCount: 0 };
+}
+
+async function sweepReviewRequestTriggersLocked(): Promise<ReviewRequestSweepResult> {
   if (!isScheduledSmsTime()) return { sentCount: 0, failedCount: 0, cancelledCount: 0 };
   const retryEligibleBefore = new Date(Date.now() - RETRY_COOLDOWN_MS);
   const claimed = await db

@@ -1,3 +1,4 @@
+import { withScheduledJobLock } from "./scheduled-job-recovery.service.js";
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db, abandonedCartEmailTriggersTable, metaLeadEmailTriggersTable, customersTable, purchasesTable, questionnaireEventsTable } from "@luma/db";
 import { getOrCreateEmailConversation, updateEmailConversationState } from "./email-conversations.service.js";
@@ -131,6 +132,10 @@ export interface AbandonedCartEmailSweepResult {
  * atomic pending->processing claim pattern as every other sweep here.
  */
 export async function sweepAbandonedCartEmailTriggers(): Promise<AbandonedCartEmailSweepResult> {
+  return (await withScheduledJobLock("abandoned_cart_email", sweepAbandonedCartEmailTriggersLocked)) ?? { sentCount: 0, failedCount: 0, cancelledCount: 0 };
+}
+
+async function sweepAbandonedCartEmailTriggersLocked(): Promise<AbandonedCartEmailSweepResult> {
   const claimed = await db
     .update(abandonedCartEmailTriggersTable)
     .set({ status: "processing" })
