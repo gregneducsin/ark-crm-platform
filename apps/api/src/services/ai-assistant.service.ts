@@ -1,3 +1,4 @@
+import { getIncompleteOnboardingCount } from "./incomplete-onboarding-count.service.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod/v4";
@@ -9,6 +10,8 @@ import {
   questionnairesQuerySchema,
   type AiAssistantMessage,
 } from "@luma/shared";
+import { getFilteredLeadCount } from "./filtered-lead-count.service.js";
+import { getDtcLeadCount } from "./dtc-lead-count.service.js";
 import * as customersService from "./customers.service.js";
 import * as purchasesService from "./purchases.service.js";
 import * as questionnairesService from "./questionnaires.service.js";
@@ -50,6 +53,34 @@ const dateRangeFields = {
 // dashboard itself uses, so its answers can't diverge from what's on screen.
 const tools = [
   betaZodTool({
+    name: "get_incomplete_onboarding_count",
+    description: "Count current unmatched SMS texters who have not become linked saved leads, separately from saved lead totals. One sender thread with inbound texts counts once. Excludes linked contacts, phone matches to saved customers, dismissed and spam threads. Dates filter first recorded inbound SMS date, not last activity. All SMS sources, not verified DTC. Also returns needsReview and held counts, which may overlap.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async (input) => JSON.stringify(await getIncompleteOnboardingCount(customersSummaryQuerySchema.parse(input))),
+  }),
+  betaZodTool({
+    name: "get_filtered_lead_count",
+    description: "Exact saved-lead count by segment. Meta form-fill and questionnaire use the dashboard's mutually exclusive first-touch sources; SMS Inquiry uses its saved leadType. For another exact saved lead-type label use lead_type and supply leadType. Does not count unmatched texters. Date bounds filter lead-received date. No pagination is needed.",
+    inputSchema: z.object({
+      segment: z.enum(["meta_form_fill", "questionnaire", "sms_inquiry", "lead_type"]),
+      leadType: z.string().optional().describe("Required for lead_type: exact saved label. Use list_lead_types if unknown."),
+      period: periodSchema, ...dateRangeFields,
+    }),
+    run: async ({ segment, leadType, ...input }) => JSON.stringify(await getFilteredLeadCount(customersSummaryQuerySchema.parse(input), segment, leadType)),
+  }),
+  betaZodTool({
+    name: "list_lead_types",
+    description: "List exact saved lead-type labels. Use before counting a label you do not recognize; never guess its spelling.",
+    inputSchema: z.object({}),
+    run: async () => JSON.stringify(await customersService.listDistinctLeadTypes()),
+  }),
+  betaZodTool({
+    name: "get_dtc_lead_count",
+    description: "Exact count and conversion summary of saved DTC (direct-to-consumer / text-us-directly ad) leads, filtered by lead-received date. Returns total, purchased, notPurchased and conversionRate (percentage rounded to one decimal, null when no leads). Purchased means a completed first_order, counted once per customer regardless of purchase date. Use for DTC purchase counts and conversion rates as well as lead counts. Use for how many DTC leads, not get_leads_summary or paginated rows. Excludes unmatched texting contacts not yet saved as leads; their count is unavailable from this tool, not zero.",
+    inputSchema: z.object({ period: periodSchema, ...dateRangeFields }),
+    run: async (input) => JSON.stringify(await getDtcLeadCount(customersSummaryQuerySchema.parse(input))),
+  }),
+  betaZodTool({
     name: "get_leads_summary",
     description:
       "Get lead/customer summary totals for a time period: total leads, leads sourced from Meta form fill vs questionnaire (first-touch, no double-counting), purchased vs not purchased, and conversion rate. A lead only counts as 'purchased' if it has a completed first-order purchase. For an exact calendar range (e.g. \"last Friday to today\"), pass dateFrom/dateTo instead of period.",
@@ -62,7 +93,7 @@ const tools = [
   betaZodTool({
     name: "list_leads",
     description:
-      "List individual leads/customers with optional filters. Use this to answer questions about specific leads, or to see example rows, not for aggregate counts (use get_leads_summary for those). Returns `total` alongside the returned rows — if total exceeds the rows returned, pass a larger offset to page through the rest.",
+      "List individual leads/customers with optional filters. Use this for specific leads or example rows, not aggregate counts. Use get_dtc_lead_count for DTC, get_filtered_lead_count for segments, get_incomplete_onboarding_count for unmatched texters, and get_leads_summary for overall totals. Returns total alongside rows; page with offset only when individual records are needed.",
     inputSchema: z.object({
       search: z.string().optional().describe("Search by name, email, or phone."),
       leadType: z.string().optional(),
@@ -169,6 +200,14 @@ function systemPrompt(): string {
 Answer questions about leads, orders, questionnaires, marketing CPA, and payroll using the tools available. Never guess, round, or estimate a number you could look up — call a tool and cite the exact figure it returns.
 
 Key domain rules to keep in mind when interpreting tool results:
+- For incomplete onboarding or people who texted but are not saved leads, use get_incomplete_onboarding_count. Report "unmatched texters" separately from saved leads; count sender threads, not verified unique people. Date bounds refer to first inbound SMS date (UTC), and counts reflect current unresolved status. Do not label these all DTC, add them to saved DTC totals, or claim they are historical drop-offs. needsReview and held are overlapping subsets, not additional leads. State the selected period; use period "all" for all current incomplete onboarding.
+- When asked for saved DTC leads plus incomplete onboarding, call both tools and present separate labeled counts. The incomplete-onboarding tool provides all-source unmatched counts, not DTC attribution.
+- For SMS Inquiry counts use get_filtered_lead_count with sms_inquiry. For Meta form-fill counts use meta_form_fill; for questionnaire-source lead counts use questionnaire. Both source counts match dashboard first-touch attribution, not saved lead-type labels. Say "Meta form-fill leads" or "questionnaire-source leads" in the answer. DTC is a separate text-ad segment; do not present Meta form-fill counts as all Meta advertising leads or add source and lead-type counts together.
+- If "Meta leads" is ambiguous between form fills and all Meta advertising including DTC, give the Meta form-fill count with that explicit label; offer DTC separately rather than inventing a combined count.
+- For an explicitly named saved lead-type label use lead_type and its exact stored label (discover with list_lead_types if needed). For people who completed questionnaires regardless of source, use get_questionnaires_performance instead.
+- Filtered counts return the actual dateFrom/dateTo: use those bounds verbatim, do not recalculate them. Null dateTo means no upper date filter. Unmatched contacts are excluded, not zero.
+- DTC means direct-to-consumer, the text-us-directly advertising leads stored with leadType "DTC". For DTC counts always use get_dtc_lead_count. Report its exact total as "saved DTC leads". Use the returned dateFrom/dateTo verbatim for calendar bounds; never infer a different start date from period. A null dateTo means no upper date filter. These exclude unmatched texting contacts still awaiting onboarding/name/email; do not claim their count is zero or combine them with the saved count. If asked for all initial DTC texters, explain that this tool only counts saved leads; the incomplete-onboarding tool can separately count all-source unmatched texters but cannot establish their DTC attribution.
+- For DTC purchases and conversion rates use get_dtc_lead_count, never overall order totals or list rows. Report purchased out of total saved DTC leads and the returned percentage. Date filters select when leads arrived; purchases can occur later. Label this as conversion of leads received in that range, not purchases made in the range. A null conversionRate means no leads and must be reported as N/A, not 0%. Failed, pending, refunded, cancelled, recurring-only and unclassified orders do not qualify.\n- For a count, a tool's total is authoritative; never count returned sample rows or paginate merely to count.
 - "Purchased" only means a completed, first-order purchase — a recurring-only purchase does not count as a lead having converted.
 - Marketing CPA weeks run Friday through Thursday. A closed deal in a given week is a lead that was *received* that week and later converted — not a lead that merely purchased that week.
 - Lead source (Meta Form Fill vs Questionnaire) is first-touch attributed — a lead is never double-counted across sources.
@@ -176,7 +215,7 @@ Key domain rules to keep in mind when interpreting tool results:
 - Whenever a question names or implies specific dates ("last Friday to today," "since the 18th," "in August") rather than a rolling window ("last 30 days," "this week"), compute the exact YYYY-MM-DD dateFrom/dateTo yourself from today's date above and pass those instead of period — period is only a trailing-day count and can't express a fixed calendar range exactly.
 - The list tools (list_leads, list_orders) return a "total" field alongside the rows. If total is larger than the rows you got back, call again with a larger offset to see the rest rather than reporting only the first batch as the complete answer.
 
-This is an internal staff tool with full access to the business's own operational data — there is nothing here to refuse or hedge on. If a question is about leads, orders, CPA, or payroll and a tool can answer it, answer it directly and exactly, with no disclaimers or caveats. If a question genuinely falls outside what these tools cover, say so in one sentence rather than guessing.
+This is an internal staff tool. Answer business reporting questions directly using the available tools. State a brief limitation when the returned data does not cover the requested scope; unavailable data is not zero. If a question falls outside what these tools cover, say so in one sentence rather than guessing.
 
 Keep every answer short by default: the number(s) asked for, in one or two sentences or a short list, in plain business language (not JSON or code) — no extra background, methodology, or unsolicited context. The user will ask a follow-up if they want more detail, so don't front-load it. If a time period isn't specified, default to the last 30 days and say so in that same short answer.`;
 }
