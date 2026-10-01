@@ -440,11 +440,17 @@ export async function handleBaskPrescriptionWrittenWebhook(payload: BaskPrescrip
 }
 
 export async function handleBaskOrderShippedWebhook(payload: BaskOrderShippedWebhookRequest): Promise<{ duplicate: boolean }> {
-  // Bask's real shipping event doesn't include an eventId — synthesize a
-  // stable one from externalPersonId + trackingNumber so redelivery of the
-  // same shipment notice still dedupes, while a different tracking number
-  // for the same person (a separate refill shipment) is treated as new.
-  const eventId = payload.eventId ?? `${payload.externalPersonId}:${payload.trackingNumber}`;
+  // Native and forwarded shipment notifications can carry different event IDs
+  // for the same package. Identity must describe the shipment, not its delivery.
+  const trackingNumber = payload.trackingNumber.trim().toUpperCase();
+  const eventId = `${payload.externalPersonId}:${trackingNumber}`;
+  // Preserve deduplication for shipments processed before this change under a
+  // supplied event ID. Keep the original payload for audit; do not replay it.
+  const [legacy] = await db.select({ id: webhookEventsTable.id }).from(webhookEventsTable)
+    .where(and(eq(webhookEventsTable.source, "bask_order_shipped"), eq(webhookEventsTable.status, "processed"),
+      sql`${webhookEventsTable.rawPayload}->>'externalPersonId' = ${payload.externalPersonId}`,
+      sql`upper(btrim(${webhookEventsTable.rawPayload}->>'trackingNumber')) = ${trackingNumber}`)).limit(1);
+  if (legacy) return { duplicate: true };
   const recorded = await recordWebhookEventIfNew("bask_order_shipped", eventId, payload);
   if (!recorded) return { duplicate: true };
 
@@ -459,7 +465,7 @@ export async function handleBaskOrderShippedWebhook(payload: BaskOrderShippedWeb
       throw new Error(`bask_order_shipped: no existing customer found for externalPersonId ${payload.externalPersonId}`);
     }
 
-    await handleOrderShipped(customerId, payload.trackingNumber);
+    await handleOrderShipped(customerId, trackingNumber);
 
     await markWebhookEventProcessed(recorded.id, customerId);
   } catch (err) {
