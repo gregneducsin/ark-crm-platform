@@ -147,7 +147,7 @@ function ThreadRow({
   onToggleSelect: (() => void) | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState(thread.suggestedReply ?? "");
+  const [draft, setDraft] = useState(thread.status === "needs_review" ? thread.suggestedReply ?? "" : "");
 
   // Both channels' mutation hooks are called unconditionally (rules of
   // hooks) — which one actually gets used is decided per-click below, not
@@ -162,7 +162,11 @@ function ThreadRow({
   function handleSend() {
     const body = draft.trim();
     if (!body || sendReply.isPending) return;
-    sendReply.mutate({ id: thread.id, body });
+    sendReply.mutate({ id: thread.id, body }, {
+      onSuccess: (result) => {
+        if (result.sent) setDraft("");
+      },
+    });
   }
 
   return (
@@ -231,14 +235,15 @@ function ThreadRow({
             </div>
           )}
 
-          {thread.status === "needs_review" && (
-            <div className="px-4 pb-3">
+          <div className="px-4 pb-3">
               <p className="mb-1 text-xs font-medium text-gray-400">
-                {thread.suggestedReply ? "Claude's suggested reply — review and edit before sending:" : "No suggested reply — write one, or dismiss:"}
+                {thread.status === "needs_review" && thread.suggestedReply ? "Claude's suggested reply — review and edit before sending:" : "Write a reply:"}
               </p>
               <textarea
                 className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-ark-blue-500 focus:outline-none focus:ring-1 focus:ring-ark-blue-500"
                 rows={4}
+                aria-label="Reply message"
+                placeholder="Type your reply…"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 disabled={sendReply.isPending}
@@ -247,14 +252,13 @@ function ThreadRow({
                 <Button onClick={handleSend} disabled={sendReply.isPending || !draft.trim()}>
                   {sendReply.isPending ? "Sending…" : "Send reply"}
                 </Button>
-                <Button variant="secondary" onClick={() => dismiss.mutate(thread.id)} disabled={dismiss.isPending}>
+                {thread.status === "needs_review" && <Button variant="secondary" onClick={() => dismiss.mutate(thread.id)} disabled={dismiss.isPending}>
                   {dismiss.isPending ? "Dismissing…" : "Dismiss"}
-                </Button>
+                </Button>}
               </div>
               {sendReply.isSuccess && sendReply.data.sent === false && <p className="mt-1 text-xs text-red-600">Send failed — nothing went out. Try again.</p>}
               {sendReply.isError && <p className="mt-1 text-xs text-red-600">{sendReply.error instanceof ApiError ? sendReply.error.message : "Something went wrong."}</p>}
             </div>
-          )}
           {thread.status === "replied" && thread.repliedAt && <p className="px-4 pb-3 text-xs text-gray-400">Replied {formatDateTime(thread.repliedAt)}.</p>}
         </div>
       )}
