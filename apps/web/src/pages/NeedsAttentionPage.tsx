@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EmailBody } from "../components/EmailBody";
 import { AI_DIDNT_UNDERSTAND_REASON, type NeedsAttentionItem, type NeedsAttentionChannel, type NeedsAttentionPersona } from "@luma/shared";
 import { useNeedsAttentionList, useNeedsAttentionMessages, useClearNeedsAttentionItem } from "../hooks/useNeedsAttention";
 import { Badge, Card, Button } from "../components/ui";
@@ -41,7 +42,7 @@ function ItemMessages({ item }: { item: NeedsAttentionItem }) {
         <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
           <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {m.subject && <p className="mb-0.5 font-semibold">{m.subject}</p>}
-            <p className="whitespace-pre-wrap">{m.body}</p>
+            {item.channel === "email" ? <EmailBody body={m.body} /> : <p className="whitespace-pre-wrap">{m.body}</p>}
           </div>
           {m.direction === "outbound" && <p className="mt-1 text-xs font-medium text-gray-600">
             {m.sentByStaffEmail || m.sentBy === "staff" ? `Staff · ${m.sentByStaffName || m.sentByStaffEmail || "name not recorded"}` : m.sentBy === "ai" ? PERSONA_LABEL[item.persona] : "Sender not recorded"}
