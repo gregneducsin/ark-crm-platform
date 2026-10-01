@@ -18,6 +18,17 @@ function relativeTime(iso: string | null): string {
 const CHANNEL_LABEL: Record<NeedsAttentionChannel, string> = { sms: "SMS", email: "Email" };
 const PERSONA_LABEL: Record<NeedsAttentionPersona, string> = { alexis: "Alexis", sophie: "Sophie" };
 
+function deliveryLabel(status: string | null | undefined, channel: NeedsAttentionChannel): string {
+  switch (status) {
+    case "queued": return "Queued — send not confirmed";
+    case "sent": return channel === "email" ? "Accepted by mail server — delivery not confirmed" : "Sent — delivery not confirmed";
+    case "delivered": return "Delivered";
+    case "read": return "Read";
+    case "failed": return "Failed";
+    default: return "Delivery unknown — check provider before retrying";
+  }
+}
+
 function ItemMessages({ item }: { item: NeedsAttentionItem }) {
   const { data, isLoading } = useNeedsAttentionMessages(item.channel, item.persona, item.conversationId);
 
@@ -32,7 +43,14 @@ function ItemMessages({ item }: { item: NeedsAttentionItem }) {
             {m.subject && <p className="mb-0.5 font-semibold">{m.subject}</p>}
             <p className="whitespace-pre-wrap">{m.body}</p>
           </div>
-          <p className="mt-0.5 text-[11px] text-gray-400">{formatDateTime(m.createdAt)}</p>
+          {m.direction === "outbound" && <p className="mt-1 text-xs font-medium text-gray-600">
+            {m.sentByStaffEmail || m.sentBy === "staff" ? `Staff · ${m.sentByStaffName || m.sentByStaffEmail || "name not recorded"}` : m.sentBy === "ai" ? PERSONA_LABEL[item.persona] : "Sender not recorded"}
+          </p>}
+          <p className="mt-0.5 text-[11px] text-gray-400">
+            Recorded {formatDateTime(m.createdAt)}
+            {m.direction === "outbound" && m.sentAt && <> · {item.channel === "email" ? "Accepted" : "Sent"} {formatDateTime(m.sentAt)}</>}
+          </p>
+          {m.direction === "outbound" && <p className="text-xs text-gray-600">{deliveryLabel(m.deliveryStatus, item.channel)}</p>}
         </div>
       ))}
     </div>
@@ -61,6 +79,11 @@ function NeedsAttentionRow({ item }: { item: NeedsAttentionItem }) {
       {expanded && (
         <div className="border-t border-gray-100">
           <ItemMessages item={item} />
+          <p className="px-4 pb-3 text-xs text-gray-600">
+            {item.channel === "sms"
+              ? "Mark reviewed clears this flag and releases this conversation's SMS staff-review hold. It does not resend messages or turn off the overall sales pause. Future automated replies still follow safety and delivery checks."
+              : "Mark reviewed clears this email review flag. It does not send or retry an email."}
+          </p>
           <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2">
             <a href={`/conversations?personId=${item.personId}`} className="text-xs font-medium text-ark-blue-600 hover:underline">
               Open full thread to reply →
@@ -70,7 +93,7 @@ function NeedsAttentionRow({ item }: { item: NeedsAttentionItem }) {
               onClick={() => clearItem.mutate({ channel: item.channel, persona: item.persona, conversationId: item.conversationId })}
               disabled={clearItem.isPending}
             >
-              {clearItem.isPending ? "Marking…" : "Mark reviewed"}
+              {clearItem.isPending ? "Marking…" : item.channel === "sms" ? "Mark reviewed & release SMS hold" : "Mark reviewed"}
             </Button>
           </div>
         </div>

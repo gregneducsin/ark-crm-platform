@@ -89,9 +89,13 @@ function fromSms(t: UnmatchedSmsThreadSummary): CombinedThread {
  * delivered it. Email has no equivalent field, hence the "deliveryStatus"
  * in m check rather than relying on `channel`.
  */
-function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "sent" | "failed" | null | undefined }) {
-  if (deliveryStatus !== "failed") return null;
-  return <Badge color="red">Not delivered</Badge>;
+function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "queued" | "sent" | "delivered" | "read" | "failed" | "unknown" | null | undefined }) {
+  const labels = { queued: "Queued", sent: "Sent", delivered: "Delivered", read: "Read", failed: "Failed", unknown: "Delivery unconfirmed" };
+  return <Badge color={deliveryStatus === "failed" || deliveryStatus === "unknown" ? "red" : deliveryStatus === "queued" ? "yellow" : "gray"}>{deliveryStatus ? labels[deliveryStatus] : "Status unavailable"}</Badge>;
+}
+
+function messageTime(m: { createdAt: string; sentAt?: string | null; deliveredAt?: string | null; readAt?: string | null }) {
+  return m.sentAt ?? m.deliveredAt ?? m.readAt ?? m.createdAt;
 }
 
 function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threadId: string }) {
@@ -103,7 +107,7 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
 
   return (
     <div className="space-y-2 px-4 pb-3">
-      {data.messages.map((m) => (
+      {[...data.messages].sort((a, b) => messageTime(a).localeCompare(messageTime(b))).map((m) => (
         <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
           <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {"subject" in m && <p className="mb-0.5 font-semibold">{m.subject}</p>}
@@ -119,8 +123,11 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
             )}
           </div>
           <div className={"mt-0.5 flex items-center gap-1.5 " + (m.direction === "inbound" ? "justify-start" : "justify-end")}>
+            {m.direction === "outbound" && "sentBy" in m && <span className="text-[11px] font-medium">
+              {m.sentBy === "staff" || m.sentByStaffEmail ? `Staff · ${m.sentByStaffName || m.sentByStaffEmail || "name not recorded"}` : m.sentBy === "ai" ? "Alexis" : "Sender not recorded"}
+            </span>}
             {m.direction === "outbound" && "deliveryStatus" in m && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}
-            <p className="text-[11px] text-gray-400">{formatDateTime(m.createdAt)}</p>
+            <p className="text-[11px] text-gray-400">{m.direction === "outbound" ? "sentAt" in m && m.sentAt ? "Sent " : "deliveredAt" in m && m.deliveredAt ? "Delivered " : "readAt" in m && m.readAt ? "Read " : "Recorded " : "Received "}{formatDateTime(messageTime(m))}</p>
           </div>
         </div>
       ))}

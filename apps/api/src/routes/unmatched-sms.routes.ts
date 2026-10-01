@@ -1,3 +1,4 @@
+import { withStaffNames } from "../services/message-authorship.service.js";
 import { Router, type Router as RouterType } from "express";
 import { sendUnmatchedSmsReplyRequestSchema } from "@luma/shared";
 import * as unmatchedSmsService from "../services/unmatched-inbound-sms.service.js";
@@ -23,7 +24,7 @@ export function createUnmatchedSmsRouter(): RouterType {
         res.status(404).json({ error: "Not found." });
         return;
       }
-      res.json({ ...detail.thread, messages: detail.messages });
+      res.json({ ...detail.thread, messages: await withStaffNames(detail.messages) });
     } catch (err) {
       next(err);
     }
@@ -36,7 +37,7 @@ export function createUnmatchedSmsRouter(): RouterType {
         res.status(400).json({ error: "Invalid payload.", details: parsed.error.issues });
         return;
       }
-      const result = await unmatchedSmsService.sendUnmatchedInboundSmsReply(req.params.id as string, parsed.data.body);
+      const result = await unmatchedSmsService.sendUnmatchedInboundSmsReply(req.params.id as string, parsed.data.body, req.user!.email);
       if (!result.sent && result.reason === "not_found") {
         res.status(404).json({ error: "Not found." });
         return;

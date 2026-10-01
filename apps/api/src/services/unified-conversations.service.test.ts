@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, purchasesTable, conversationsTable, supportConversationsTable } from "@luma/db";
+import { db, appUsersTable, customersTable, purchasesTable, conversationsTable, supportConversationsTable } from "@luma/db";
 import { createIntakeLink, handleIntakeLinkClick } from "./intake-links.service.js";
 
 beforeAll(() => {
@@ -278,5 +278,34 @@ describe("getSalesResponseStats", () => {
     const after = await getSalesResponseStats();
 
     expect(after.totalContacted).toBe(before.totalContacted + 1);
+  });
+});
+
+describe("staff attribution and actual SMS timing", () => {
+  it("resolves the authenticated staff account name across sales and support", async () => {
+    const email = `staff-${crypto.randomUUID()}@example.com`;
+    await db.insert(appUsersTable).values({ email, normalizedEmail: email, firstName: "Synthetic", lastName: "Agent" });
+    const personId = await seedCustomer();
+    const sms = await getOrCreateConversation(personId);
+    const support = await getOrCreateSupportConversation(personId);
+    await appendMessage(sms.id, "outbound", "Staff sales reply", { sentBy: "staff", sentByStaffEmail: email, deliveryStatus: "queued" });
+    await appendSupportMessage(support.id, "outbound", "Staff support reply", { sentBy: "staff", sentByStaffEmail: email, deliveryStatus: "sent" });
+    const detail = await getUnifiedConversationDetail(personId);
+    expect(detail?.messages.filter((m) => m.direction === "outbound")).toHaveLength(2);
+    for (const message of detail!.messages) expect(message).toMatchObject({ sentBy: "staff", sentByStaffEmail: email, sentByStaffName: "Synthetic Agent" });
+  });
+
+  it("orders by actual send time and retains queued status without a fabricated sent time", async () => {
+    const personId = await seedCustomer();
+    const conversation = await getOrCreateConversation(personId);
+    const before = new Date("2026-09-20T10:00:00Z");
+    const middle = new Date("2026-09-20T10:01:00Z");
+    const after = new Date("2026-09-20T10:02:00Z");
+    await appendMessage(conversation.id, "outbound", "Delayed reply", { createdAt: before, sentAt: after, deliveryStatus: "sent" });
+    await appendMessage(conversation.id, "inbound", "Customer follow-up", { createdAt: middle });
+    await appendMessage(conversation.id, "outbound", "Still queued", { createdAt: new Date("2026-09-20T10:03:00Z"), deliveryStatus: "queued", sentBy: "staff", sentByStaffEmail: "missing-account@example.com" });
+    const detail = await getUnifiedConversationDetail(personId);
+    expect(detail?.messages.map((m) => m.body)).toEqual(["Customer follow-up", "Delayed reply", "Still queued"]);
+    expect(detail?.messages.at(-1)).toMatchObject({ deliveryStatus: "queued", sentAt: null, sentBy: "staff", sentByStaffName: null });
   });
 });
