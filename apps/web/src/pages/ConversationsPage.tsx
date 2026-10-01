@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
+import { EmailBody } from "../components/EmailBody";
 import type { ConversationPersona, UnifiedConversationChannel, UnifiedMessage } from "@luma/shared";
 import { useUnifiedConversationStats, useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply } from "../hooks/useUnifiedConversations";
 import { Badge, Card, Button, Input } from "../components/ui";
@@ -396,16 +397,16 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                 <div className={"inline-flex max-w-[75%] flex-col gap-1 " + (m.direction === "inbound" ? "items-start" : "items-end")}>
                   <ThreadBadge persona={m.persona} channel={m.channel} />
                   {m.subject && <span className="px-1 text-[11px] font-medium text-gray-500">{m.subject}</span>}
-                  <span
+                  <div
                     className={
                       m.direction === "inbound"
-                        ? "inline-block whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
-                        : "inline-block whitespace-pre-wrap rounded-lg px-3 py-2 text-left text-sm text-white " +
+                        ? "inline-block max-w-full break-words whitespace-pre-wrap rounded-lg bg-gray-100 px-3 py-2 text-left text-sm text-gray-800"
+                        : "inline-block max-w-full break-words whitespace-pre-wrap rounded-lg px-3 py-2 text-left text-sm text-white " +
                           (m.persona === "sales" ? "bg-ark-blue-600" : "bg-purple-600")
                     }
                   >
-                    {m.body}
-                  </span>
+                    {m.channel === "email" ? <EmailBody body={m.body} /> : m.body}
+                  </div>
                   {m.mediaUrls && m.mediaUrls.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {m.mediaUrls.map((url) => (

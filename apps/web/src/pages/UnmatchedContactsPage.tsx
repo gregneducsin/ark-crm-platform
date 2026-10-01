@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EmailBody } from "../components/EmailBody";
 import type { UnmatchedEmailThreadSummary, UnmatchedSmsThreadSummary } from "@luma/shared";
 import { useUnmatchedEmailsList, useUnmatchedEmailThread, useSendUnmatchedEmailReply, useDismissUnmatchedEmail } from "../hooks/useUnmatchedEmails";
 import { useUnmatchedSmsList, useUnmatchedSmsThread, useSendUnmatchedSmsReply, useDismissUnmatchedSms } from "../hooks/useUnmatchedSms";
@@ -111,7 +112,7 @@ function ThreadMessages({ channel, threadId }: { channel: "email" | "sms"; threa
         <div key={m.id} className={m.direction === "inbound" ? "text-left" : "text-right"}>
           <div className={"inline-block max-w-[85%] rounded-lg px-3 py-2 text-left text-xs " + (m.direction === "inbound" ? "bg-gray-100 text-gray-800" : "bg-ark-blue-600 text-white")}>
             {"subject" in m && <p className="mb-0.5 font-semibold">{m.subject}</p>}
-            <p className="whitespace-pre-wrap">{m.body}</p>
+            {channel === "email" ? <EmailBody body={m.body} /> : <p className="whitespace-pre-wrap">{m.body}</p>}
             {"mediaUrls" in m && m.mediaUrls && m.mediaUrls.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {m.mediaUrls.map((url) => (
