@@ -643,6 +643,7 @@ async function transferToAlexis(tx: OnboardingTx, thread: UnmatchedSmsThread, me
   const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
   const inserted = await tx.insert(conversationMessagesTable).values(messages.map((m) => ({
     id: m.id, conversationId: conversation.id, direction: m.direction, body: m.body,
+    sentBy: m.sentBy, sentByStaffEmail: m.sentByStaffEmail,
     mediaUrls: m.mediaUrls, providerMessageId: m.providerMessageId, createdAt: m.createdAt,
     // A staff-reviewed old acceptance must not reopen Alexis's delivery gate;
     // preserve uncertainty without falsely claiming it was sent.
@@ -765,7 +766,7 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
     }).where(eq(unmatchedSmsThreadsTable.id, thread.id)).returning();
     if (leadResult) await transferToAlexis(tx, updated, messages);
     const [outbound] = reply ? await tx.insert(unmatchedSmsMessagesTable).values({
-      threadId: thread.id, direction: "outbound", body: reply, deliveryStatus: "queued",
+      threadId: thread.id, direction: "outbound", body: reply, sentBy: "ai", deliveryStatus: "queued",
     }).returning() : [];
     return { outbound, personId: leadResult?.customerId };
   });
@@ -876,13 +877,13 @@ export async function dismissUnmatchedSmsThread(id: string): Promise<boolean> {
 export type UnmatchedSmsReplyResult = { readonly sent: true } | { readonly sent: false; readonly reason: "not_found" | "send_failed" };
 
 /** A staff-approved reply to an unmatched sender — the only other path (besides the auto-ack) by which this pipeline ever sends anything. */
-export async function sendUnmatchedInboundSmsReply(id: string, body: string): Promise<UnmatchedSmsReplyResult> {
+export async function sendUnmatchedInboundSmsReply(id: string, body: string, staffEmail?: string): Promise<UnmatchedSmsReplyResult> {
   const initial = await getUnmatchedSmsThread(id);
   if (!initial) return { sent: false, reason: "not_found" };
-  return withPersonLock(`onboarding:${initial.fromPhone}`, () => sendUnmatchedStaffReplyLocked(id, body));
+  return withPersonLock(`onboarding:${initial.fromPhone}`, () => sendUnmatchedStaffReplyLocked(id, body, staffEmail));
 }
 
-async function sendUnmatchedStaffReplyLocked(id: string, body: string): Promise<UnmatchedSmsReplyResult> {
+async function sendUnmatchedStaffReplyLocked(id: string, body: string, staffEmail?: string): Promise<UnmatchedSmsReplyResult> {
   const thread = (await getUnmatchedSmsThread(id))!;
   const reviewedAt = new Date();
 
@@ -896,7 +897,8 @@ async function sendUnmatchedStaffReplyLocked(id: string, body: string): Promise<
     return { sent: false, reason: "send_failed" };
   }
 
-  await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "outbound", body, providerMessageId });
+  await db.insert(unmatchedSmsMessagesTable).values({ threadId: thread.id, direction: "outbound", body, providerMessageId, sentBy: "staff", sentByStaffEmail: staffEmail ?? null, deliveryStatus: "queued" });
+  if (providerMessageId) await reconcileSmsDelivery(providerMessageId);
   await db.update(unmatchedSmsThreadsTable).set({
     status: "replied", repliedAt: new Date(), onboardingHeld: false, deliveryReviewedAt: reviewedAt,
     // Preserve input received while the staff send was in flight.

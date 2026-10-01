@@ -1,3 +1,4 @@
+import { withStaffNames } from "./message-authorship.service.js";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
@@ -232,7 +233,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         body: m.body,
         mediaUrls: m.mediaUrls ?? undefined,
         sentiment: m.sentiment,
-        sentBy: m.sentBy,
+        sentBy: m.sentByStaffEmail ? "staff" : m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
         sentAt: m.sentAt?.toISOString() ?? null,
@@ -250,7 +251,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         subject: m.subject,
         body: m.body,
         sentiment: m.sentiment,
-        sentBy: m.sentBy,
+        sentBy: m.sentByStaffEmail ? "staff" : m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
         sentAt: m.sentAt?.toISOString() ?? null,
@@ -266,7 +267,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         body: m.body,
         mediaUrls: m.mediaUrls ?? undefined,
         sentiment: m.sentiment,
-        sentBy: m.sentBy,
+        sentBy: m.sentByStaffEmail ? "staff" : m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
         sentAt: m.sentAt?.toISOString() ?? null,
@@ -284,14 +285,16 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
         subject: m.subject,
         body: m.body,
         sentiment: m.sentiment,
-        sentBy: m.sentBy,
+        sentBy: m.sentByStaffEmail ? "staff" : m.sentBy,
         sentByStaffEmail: m.sentByStaffEmail,
         deliveryStatus: m.deliveryStatus,
         sentAt: m.sentAt?.toISOString() ?? null,
         createdAt: m.createdAt.toISOString(),
       }),
     ),
-  ].sort((a, b) => (a.sentAt ?? a.createdAt).localeCompare(b.sentAt ?? b.createdAt));
+  ].sort((a, b) => (a.sentAt ?? a.deliveredAt ?? a.readAt ?? a.createdAt).localeCompare(b.sentAt ?? b.deliveredAt ?? b.readAt ?? b.createdAt));
+
+  const attributedMessages = await withStaffNames(messages);
 
   const availableReplyTargets: { persona: ConversationPersona; channel: "sms" | "email" }[] = [
     ...(salesSmsRow ? [{ persona: "sales" as const, channel: "sms" as const }] : []),
@@ -311,7 +314,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
     },
     sales: mergeSalesThreadInfo(salesSmsRow, salesEmailRow, intakeLinkClicked),
     support: mergeSupportThreadInfo(supportSmsRow, supportEmailRow),
-    messages,
+    messages: attributedMessages,
     availableReplyTargets,
   };
 }

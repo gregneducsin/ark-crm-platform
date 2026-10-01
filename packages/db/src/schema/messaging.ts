@@ -404,6 +404,8 @@ export const unmatchedSmsMessagesTable = pgTable(
       .references(() => unmatchedSmsThreadsTable.id, { onDelete: "cascade" }),
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
     body: text("body").notNull(),
+    sentBy: text("sent_by", { enum: ["ai", "staff"] }),
+    sentByStaffEmail: text("sent_by_staff_email"),
     providerMessageId: text("provider_message_id"),
     /** Same convention as conversation_messages.mediaUrls — set on inbound only, when the sender's text included MMS attachments. */
     mediaUrls: jsonb("media_urls").$type<string[]>(),

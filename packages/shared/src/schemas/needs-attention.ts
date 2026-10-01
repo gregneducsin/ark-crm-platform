@@ -43,6 +43,11 @@ export const needsAttentionMessageSchema = z.object({
   subject: z.string().nullable(),
   body: z.string(),
   createdAt: z.string(),
+  sentBy: z.enum(["ai", "staff"]).nullable().optional(),
+  sentByStaffEmail: z.string().nullable().optional(),
+  sentByStaffName: z.string().nullable().optional(),
+  deliveryStatus: z.string().nullable().optional(),
+  sentAt: z.string().nullable().optional(),
 });
 export type NeedsAttentionMessage = z.infer<typeof needsAttentionMessageSchema>;
 

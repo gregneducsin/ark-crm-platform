@@ -315,3 +315,22 @@ vi.mock("../lib/send-window.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/send-window.js")>();
   return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
 });
+
+
+describe("unmatched staff attribution", () => {
+  it("records the staff author and carries it into the sales conversation", async () => {
+    const number = phone();
+    const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: number }).returning();
+    mocks.send.mockResolvedValueOnce({ providerMessageId: `staff-${number}` });
+    expect(await sendUnmatchedInboundSmsReply(thread.id, "Synthetic staff reply", "agent@example.com")).toEqual({ sent: true });
+    let detail = await getUnmatchedSmsThreadDetail(thread.id);
+    expect(detail?.messages[0]).toMatchObject({ sentBy: "staff", sentByStaffEmail: "agent@example.com", deliveryStatus: "queued", sentAt: null });
+    await recordSmsDeliveryReceipt(`staff-${number}`, "sent", new Date());
+    mocks.classify.mockResolvedValueOnce(result({ senderEmail: `author-${crypto.randomUUID()}@example.com` }));
+    await recordAndClassifyUnmatchedSms(number, "My name is Synthetic");
+    const linked = await threadFor(number);
+    const [conversation] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, linked.linkedCustomerId!));
+    const copied = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.conversationId, conversation.id));
+    expect(copied.find((m) => m.body === "Synthetic staff reply")).toMatchObject({ sentBy: "staff", sentByStaffEmail: "agent@example.com", deliveryStatus: "sent" });
+  });
+});

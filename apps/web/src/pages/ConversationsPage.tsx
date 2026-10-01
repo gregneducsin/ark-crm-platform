@@ -25,15 +25,14 @@ function SentimentBadge({ sentiment }: { sentiment: "positive" | "neutral" | "ne
 
 /** Flags an outbound SMS that never actually reached the customer (the provider call itself failed) — distinct from providerMessageId being absent, which can also happen on a message that did send. */
 function DeliveryStatusBadge({ deliveryStatus }: { deliveryStatus: "queued" | "sent" | "delivered" | "read" | "failed" | "unknown" | null | undefined }) {
-  if (!deliveryStatus) return null;
+  if (!deliveryStatus) return <Badge color="gray">Status unavailable</Badge>;
   const label = { queued: "Queued", sent: "Sent", delivered: "Delivered", read: "Read", failed: "Failed", unknown: "Delivery unconfirmed" }[deliveryStatus];
   return <Badge color={deliveryStatus === "failed" || deliveryStatus === "unknown" ? "red" : deliveryStatus === "queued" ? "yellow" : "gray"}>{label}</Badge>;
 }
 
 /** Marks who actually wrote an outbound message — the bot vs a staff member typing into the reply box — so the timeline reads as one continuous conversation but staff can still tell AI from human, and which human, at a glance. */
-function SenderBadge({ sentBy, staffEmail, botName }: { sentBy: "ai" | "staff" | null | undefined; staffEmail: string | null | undefined; botName: string }) {
-  if (!sentBy) return null;
-  const label = sentBy === "ai" ? botName : (staffEmail?.split("@")[0] ?? "Staff");
+function SenderBadge({ sentBy, staffEmail, staffName, botName }: { sentBy: "ai" | "staff" | null | undefined; staffEmail: string | null | undefined; staffName?: string | null; botName: string }) {
+  const label = staffEmail || sentBy === "staff" ? `Staff · ${staffName || staffEmail || "name not recorded"}` : sentBy === "ai" ? botName : "Sender not recorded";
   return (
     <span className="text-[11px] font-medium text-gray-400" title={sentBy === "staff" && staffEmail ? staffEmail : undefined}>
       {label}
@@ -346,9 +345,12 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
         {needsAttention && (
           <div className="mt-2 rounded-md bg-red-50 px-3 py-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs text-red-700">{needsAttentionReason || "This conversation needs staff attention."}</p>
+              <div>
+                <p className="text-xs text-red-700">{needsAttentionReason || "This conversation needs staff attention."}</p>
+                <p className="mt-1 text-xs text-gray-600">Clears this customer's review flags and releases the flagged SMS conversations' staff-review holds. Does not resend messages or turn off the overall sales pause.</p>
+              </div>
               <Button variant="secondary" onClick={() => clearAttention.mutate(personId)} disabled={clearAttention.isPending}>
-                {clearAttention.isPending ? "Marking…" : "Mark reviewed"}
+                {clearAttention.isPending ? "Marking…" : "Mark reviewed & release flagged SMS holds"}
               </Button>
             </div>
           </div>
@@ -382,12 +384,12 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
           // the next message came 20 minutes or 6 days later — this divider
           // makes the actual gap between sends visible without staff having
           // to hover/click each timestamp to check.
-          const showDateDivider = i === 0 || formatDate(m.sentAt ?? m.createdAt) !== formatDate(visibleMessages[i - 1].sentAt ?? visibleMessages[i - 1].createdAt);
+          const showDateDivider = i === 0 || formatDate(m.sentAt ?? m.deliveredAt ?? m.readAt ?? m.createdAt) !== formatDate(visibleMessages[i - 1].sentAt ?? visibleMessages[i - 1].deliveredAt ?? visibleMessages[i - 1].readAt ?? visibleMessages[i - 1].createdAt);
           return (
             <div key={`${m.persona}-${m.channel}-${m.id}`}>
               {showDateDivider && (
                 <div className="my-3 flex items-center justify-center">
-                  <span className="rounded-full bg-luma-surface-alt px-2.5 py-0.5 text-[11px] font-medium text-luma-ink-secondary">{formatDate(m.sentAt ?? m.createdAt)}</span>
+                  <span className="rounded-full bg-luma-surface-alt px-2.5 py-0.5 text-[11px] font-medium text-luma-ink-secondary">{formatDate(m.sentAt ?? m.deliveredAt ?? m.readAt ?? m.createdAt)}</span>
                 </div>
               )}
               <div className={m.direction === "inbound" ? "text-left" : "text-right"}>
@@ -414,8 +416,13 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
                     </div>
                   )}
                   <div className="flex items-center gap-2 px-1">
-                    {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} botName={BOT_NAME[m.persona]} />}
-                    <span className="text-[11px] text-luma-ink-muted">{formatTime(m.sentAt ?? m.createdAt)}</span>
+                    {m.direction === "outbound" && <SenderBadge sentBy={m.sentBy} staffEmail={m.sentByStaffEmail} staffName={m.sentByStaffName} botName={BOT_NAME[m.persona]} />}
+                    <span className="text-[11px] text-luma-ink-muted" title={[
+                      ["Recorded", m.createdAt], ["Sent", m.sentAt], ["Delivered", m.deliveredAt], ["Read", m.readAt],
+                    ].filter((entry) => entry[1]).map(([label, time]) => `${label}: ${formatDate(time!)} ${formatTime(time!)}`).join("\n")}>
+                      {m.direction === "outbound" ? m.sentAt ? "Sent " : m.deliveredAt ? "Delivered " : m.readAt ? "Read " : "Recorded " : "Received "}
+                      {formatTime(m.sentAt ?? m.deliveredAt ?? m.readAt ?? m.createdAt)}
+                    </span>
                     <SentimentBadge sentiment={m.sentiment} />
                     {m.direction === "outbound" && <DeliveryStatusBadge deliveryStatus={m.deliveryStatus} />}
                   </div>

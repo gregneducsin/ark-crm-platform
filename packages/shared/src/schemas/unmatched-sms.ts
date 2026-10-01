@@ -34,7 +34,13 @@ export const unmatchedSmsMessageSchema = z.object({
   // Null until iBluSend's async message.failed webhook retroactively flags
   // it — see unmatched_sms_messages.deliveryStatus's comment in
   // schema/messaging.ts. Only meaningful on an outbound message.
-  deliveryStatus: z.enum(["sent", "failed"]).nullable(),
+  sentBy: z.enum(["ai", "staff"]).nullable().optional(),
+  sentByStaffName: z.string().nullable().optional(),
+  sentByStaffEmail: z.string().nullable().optional(),
+  sentAt: z.string().nullable().optional(),
+  deliveredAt: z.string().nullable().optional(),
+  readAt: z.string().nullable().optional(),
+  deliveryStatus: z.enum(["queued", "sent", "delivered", "read", "failed", "unknown"]).nullable(),
   createdAt: z.string(),
 });
 export type UnmatchedSmsMessageDto = z.infer<typeof unmatchedSmsMessageSchema>;

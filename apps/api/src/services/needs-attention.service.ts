@@ -1,3 +1,4 @@
+import { withStaffNames } from "./message-authorship.service.js";
 import { desc, eq, sql } from "drizzle-orm";
 import {
   db,
@@ -122,13 +123,18 @@ export interface NeedsAttentionMessage {
   readonly subject: string | null;
   readonly body: string;
   readonly createdAt: string;
+  readonly sentBy: "ai" | "staff" | null;
+  readonly sentByStaffEmail: string | null;
+  readonly sentByStaffName: string | null;
+  readonly deliveryStatus: string | null;
+  readonly sentAt: string | null;
 }
 
 /** Read-only recent history for a flagged item, for inline preview in the triage view — reuses the same tables the per-channel pages already read from. */
 export async function getNeedsAttentionMessages(channel: NeedsAttentionChannel, persona: NeedsAttentionPersona, conversationId: string): Promise<NeedsAttentionMessage[]> {
   if (channel === "sms" && persona === "alexis") {
     const rows = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.conversationId, conversationId)).orderBy(desc(conversationMessagesTable.createdAt)).limit(10);
-    return rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: null, body: r.body, createdAt: r.createdAt.toISOString() }));
+    return withStaffNames(rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: null, body: r.body, createdAt: r.createdAt.toISOString(), deliveryStatus: r.deliveryStatus, sentAt: r.sentAt?.toISOString() ?? null, sentBy: r.sentByStaffEmail ? "staff" as const : r.sentBy, sentByStaffEmail: r.sentByStaffEmail })));
   }
   if (channel === "sms" && persona === "sophie") {
     const rows = await db
@@ -137,7 +143,7 @@ export async function getNeedsAttentionMessages(channel: NeedsAttentionChannel, 
       .where(eq(supportConversationMessagesTable.conversationId, conversationId))
       .orderBy(desc(supportConversationMessagesTable.createdAt))
       .limit(10);
-    return rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: null, body: r.body, createdAt: r.createdAt.toISOString() }));
+    return withStaffNames(rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: null, body: r.body, createdAt: r.createdAt.toISOString(), deliveryStatus: r.deliveryStatus, sentAt: r.sentAt?.toISOString() ?? null, sentBy: r.sentByStaffEmail ? "staff" as const : r.sentBy, sentByStaffEmail: r.sentByStaffEmail })));
   }
   if (channel === "email" && persona === "alexis") {
     const rows = await db
@@ -146,7 +152,7 @@ export async function getNeedsAttentionMessages(channel: NeedsAttentionChannel, 
       .where(eq(emailConversationMessagesTable.conversationId, conversationId))
       .orderBy(desc(emailConversationMessagesTable.createdAt))
       .limit(10);
-    return rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: r.subject, body: r.body, createdAt: r.createdAt.toISOString() }));
+    return withStaffNames(rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: r.subject, body: r.body, createdAt: r.createdAt.toISOString(), deliveryStatus: r.deliveryStatus, sentAt: r.sentAt?.toISOString() ?? null, sentBy: r.sentByStaffEmail ? "staff" as const : r.sentBy, sentByStaffEmail: r.sentByStaffEmail })));
   }
   const rows = await db
     .select()
@@ -154,7 +160,7 @@ export async function getNeedsAttentionMessages(channel: NeedsAttentionChannel, 
     .where(eq(supportEmailConversationMessagesTable.conversationId, conversationId))
     .orderBy(desc(supportEmailConversationMessagesTable.createdAt))
     .limit(10);
-  return rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: r.subject, body: r.body, createdAt: r.createdAt.toISOString() }));
+  return withStaffNames(rows.reverse().map((r) => ({ id: r.id, direction: r.direction, subject: r.subject, body: r.body, createdAt: r.createdAt.toISOString(), deliveryStatus: r.deliveryStatus, sentAt: r.sentAt?.toISOString() ?? null, sentBy: r.sentByStaffEmail ? "staff" as const : r.sentBy, sentByStaffEmail: r.sentByStaffEmail })));
 }
 
 /** Dispatches to the right channel/persona's own clear-attention logic — same 4 underlying flags, just one entry point for the unified triage view. */
