@@ -11,6 +11,7 @@ vi.mock("../lib/support/provider.js", async () => {
   };
 });
 
+const { SophieProviderError } = await import("../lib/support/provider.js");
 const { runSophieTurn } = await import("./sophie-conversation.service.js");
 
 function baseBody(overrides: Partial<SophiePreviewRequestBody> = {}): SophiePreviewRequestBody {
@@ -194,5 +195,34 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
       expect(result.action).toBe("staff_review");
       expect(result.requiresStaff).toBe(true);
     }
+  });
+});
+
+describe("Sophie malformed provider recovery", () => {
+  it.each(["SCHEMA_VALIDATION_ERROR", "EMPTY_RESPONSE", "NO_JSON_OBJECT", "JSON_PARSE_ERROR"])("repairs %s and validates the result", async (code) => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValueOnce(new SophieProviderError(code)).mockResolvedValueOnce(modelResult());
+    expect(await runSophieTurn(baseBody())).toMatchObject({ ok: true });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(2);
+    expect(callSophieInteractiveMock.mock.calls[1][2]).toBe(true);
+  });
+  it("stops after three invalid responses for staff escalation", async () => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValue(new SophieProviderError("SCHEMA_VALIDATION_ERROR"));
+    expect(await runSophieTurn(baseBody())).toEqual({ ok: false, code: "SCHEMA_VALIDATION_ERROR" });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(3);
+  });
+  it("blocks unsafe content returned during repair", async () => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValueOnce(new SophieProviderError("SCHEMA_VALIDATION_ERROR"))
+      .mockResolvedValueOnce(modelResult({ reply: "Your semaglutide dose is being increased." }));
+    expect(await runSophieTurn(baseBody())).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(2);
+  });
+  it.each(["PROVIDER_NOT_CONFIGURED", "PROVIDER_TIMEOUT", "PROVIDER_HTTP_ERROR"])("does not retry %s", async code => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValue(new SophieProviderError(code));
+    expect(await runSophieTurn(baseBody())).toEqual({ ok: false, code });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(1);
   });
 });

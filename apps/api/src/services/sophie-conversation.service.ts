@@ -80,6 +80,7 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
  */
 const RETRYABLE_POST_CHECK_CODES = new Set(["MISSING_NEXT_QUESTION", "INVALID_NEXT_QUESTION", "UNEXPECTED_NEXT_QUESTION", "QUESTION_MARK_IN_REPLY", "REPEATED_DRAFT"]);
 const MAX_ATTEMPTS = 3;
+const RETRYABLE_PROVIDER_CODES = new Set(["SCHEMA_VALIDATION_ERROR", "EMPTY_RESPONSE", "NO_JSON_OBJECT", "JSON_PARSE_ERROR"]);
 
 export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<SophieTurnResult> {
   const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
@@ -112,14 +113,20 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
   const enabledTopics = getSophieEnabledTopics();
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
+  let repair = false;
   let post: ReturnType<typeof supportPostCheck> | undefined;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let raw: SophieInteractiveResult;
     try {
-      raw = await callSophieInteractive(body, enabledTopics);
+      raw = await callSophieInteractive(body, enabledTopics, repair);
     } catch (err) {
       if (err instanceof SophieProviderError) {
-        logger.error({ category: err.category }, "Sophie provider call failed");
+        const canRetry = attempt < MAX_ATTEMPTS && RETRYABLE_PROVIDER_CODES.has(err.category);
+        logger.error({ category: err.category, attempt, retrying: canRetry }, "Sophie provider call failed");
+        if (canRetry) {
+          repair = true;
+          continue;
+        }
         return { ok: false, code: err.category };
       }
       throw err;
