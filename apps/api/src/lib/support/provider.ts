@@ -182,6 +182,7 @@ YOU MUST NOT:
    is the write-a-review link's own query-string "?", per REVIEW CHECK-IN and TWO-MESSAGE FORMAT above
 
 RESPONSE FORMAT — always use the sophie_reply tool.
+Schema rules: reply is required (use null for staff_review/no_reply); reply must be at most 600 characters. nextQuestion must be at most 300 characters. For staff_review set requiresStaff:true and reply:null.
 nextQuestion rules:
  - action=reply: REQUIRED, must end with "?", exactly one "?"
  - action=pause, staff_review, no_reply: null`;
@@ -194,16 +195,16 @@ const SOPHIE_REPLY_TOOL = {
     type: "object" as const,
     properties: {
       action: { type: "string", enum: ["reply", "pause", "staff_review", "no_reply"] },
-      reply: { type: ["string", "null"] },
+      reply: { type: ["string", "null"], maxLength: 600 },
       confidence: { type: "number", minimum: 0, maximum: 1 },
       detectedIntents: { type: "array", items: { type: "string" } },
       knowledgeTopicsUsed: { type: "array", items: { type: "string" } },
       requiresStaff: { type: "boolean" },
       safetyCodes: { type: "array", items: { type: "string" } },
-      nextQuestion: { type: ["string", "null"] },
+      nextQuestion: { type: ["string", "null"], maxLength: 300 },
       inboundSentiment: { type: ["string", "null"], enum: ["positive", "neutral", "negative", null] },
     },
-    required: ["action", "confidence", "detectedIntents", "knowledgeTopicsUsed", "requiresStaff", "safetyCodes", "inboundSentiment"],
+    required: ["reply", "action", "confidence", "detectedIntents", "knowledgeTopicsUsed", "requiresStaff", "safetyCodes", "inboundSentiment"],
   },
 };
 
@@ -215,6 +216,7 @@ const SOPHIE_REPLY_TOOL = {
 export async function callSophieInteractive(
   body: SophiePreviewRequestBody,
   knowledgeCatalog: readonly KnowledgeTopic[] = [],
+  repair = false,
 ): Promise<SophieInteractiveResult> {
   const client = getClient();
 
@@ -230,7 +232,7 @@ export async function callSophieInteractive(
     messages: [
       {
         role: "user",
-        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the sophie_reply tool.`,
+        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the sophie_reply tool.${repair ? "\nYour previous response did not match the schema. Return a complete tool object. Use reply:null for staff_review/no_reply; otherwise use a nonempty reply of at most 600 characters. Follow the action-specific nextQuestion rules. Do not relax safety rules or invent facts." : ""}`,
       },
     ],
   });
