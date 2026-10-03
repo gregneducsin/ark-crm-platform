@@ -37,7 +37,7 @@ import {
   handleRefund,
 } from "./order-fulfillment.service.js";
 import { setCustomerSmsDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone } from "./dnd.service.js";
-import { normalizePhone } from "../lib/phone.js";
+import { normalizePhone, phoneMatchKey } from "../lib/phone.js";
 import { logger } from "../lib/logger.js";
 import { notifySlack } from "../lib/slack.js";
 
@@ -115,9 +115,22 @@ export async function markWebhookEventFailed(id: string, errorMessage: string): 
 
 /**
  * Matches an existing customer by (system, externalId) first, falling back
- * to a case-insensitive email match, and creates a new customer if neither
- * matches. Links the external identity either way (idempotent) so future
- * webhooks for the same external contact resolve directly.
+ * to a case-insensitive email match, then an exact phone match, and creates
+ * a new customer only if none of the three hit. Links the external identity
+ * either way (idempotent) so future webhooks for the same external contact
+ * resolve directly.
+ *
+ * The phone fallback exists because email alone misses a real case: a Meta
+ * lead fills the GHL form with one email, then buys on Bask with a
+ * different one — no identity or email match, so without this they'd get a
+ * second, duplicate customer record with its own fresh "bask" identity,
+ * silently misattributing that sale away from Meta in the CPA report (see
+ * firstTouchSystemSql in customers.service.ts). Phone is not unique the way
+ * email effectively is here, though — two different, never-converted leads
+ * can legitimately share a number (see silenceOtherLeadsSharingPhone) — so
+ * a phone match is only trusted when it resolves to exactly one existing
+ * customer; two or more candidates is treated as no match at all rather
+ * than guessing which one is right.
  *
  * On a match, backfills phone/firstName/lastName if the existing record is
  * missing them and this payload has them — never overwrites a value the
@@ -203,22 +216,39 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
       await backfillContactInfo(byEmail.id);
     }
 
+    let byPhone: { id: string } | undefined;
+    if (!byEmail && params.phone) {
+      const key = phoneMatchKey(params.phone);
+      if (key.length === 10) {
+        const matches = await tx
+          .select({ id: customersTable.id })
+          .from(customersTable)
+          .where(sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`);
+        if (matches.length === 1) byPhone = matches[0];
+      }
+    }
+    if (byPhone) {
+      await backfillContactInfo(byPhone.id);
+    }
+
     const customerId = byEmail
       ? byEmail.id
-      : (
-          await tx
-            .insert(customersTable)
-            .values({
-              firstName: params.firstName ?? "Unknown",
-              lastName: params.lastName ?? "Unknown",
-              email: params.email,
-              phone: params.phone ? normalizePhone(params.phone) : params.phone,
-              leadReceivedDate: params.leadReceivedDate,
-              leadType: params.leadType ?? "Other / Unknown",
-              leadCreatedAt: new Date(),
-            })
-            .returning({ id: customersTable.id })
-        )[0]!.id;
+      : byPhone
+        ? byPhone.id
+        : (
+            await tx
+              .insert(customersTable)
+              .values({
+                firstName: params.firstName ?? "Unknown",
+                lastName: params.lastName ?? "Unknown",
+                email: params.email,
+                phone: params.phone ? normalizePhone(params.phone) : params.phone,
+                leadReceivedDate: params.leadReceivedDate,
+                leadType: params.leadType ?? "Other / Unknown",
+                leadCreatedAt: new Date(),
+              })
+              .returning({ id: customersTable.id })
+          )[0]!.id;
 
     await tx
       .insert(externalIdentitiesTable)

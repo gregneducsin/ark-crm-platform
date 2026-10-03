@@ -471,6 +471,80 @@ describe("Webhooks", () => {
       expect(customer.phone).toBe("+15551110002");
     });
 
+    it("matches an existing GHL lead by phone when the Bask order uses a different email, instead of creating a duplicate", async () => {
+      const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      await request(app)
+        .post("/api/webhooks/ghl-lead")
+        .set("x-webhook-secret", GHL_SECRET)
+        .send({
+          eventId: "ghl-evt-phonematch",
+          contactId: "ghl-contact-phonematch",
+          firstName: "Phone",
+          lastName: "Match",
+          email: "formfill-email@example.com",
+          phone: "+15551230099",
+          occurredAt: "2026-02-01T00:00:00.000Z",
+        });
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          eventId: "bask-order-evt-phonematch",
+          externalPersonId: "bask-person-phonematch",
+          email: "checkout-email@example.com",
+          phone: "+15551230099",
+          orderId: "BASK-PHONEMATCH",
+          productName: "Program",
+          amountPaid: 199,
+          purchasedAt: "2026-02-10T10:00:00.000Z",
+        });
+      expect(res.status).toBe(200);
+
+      const matching = await db.select().from(customersTable).where(eq(customersTable.phone, "+15551230099"));
+      expect(matching).toHaveLength(1);
+      const customer = matching[0]!;
+      expect(customer.email).toBe("formfill-email@example.com");
+
+      const purchases = await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, customer.id));
+      expect(purchases).toHaveLength(1);
+
+      const identities = await db.select().from(externalIdentitiesTable).where(eq(externalIdentitiesTable.personId, customer.id));
+      expect(identities.map((i) => i.system).sort()).toEqual(["bask", "ghl"]);
+    });
+
+    it("does not guess between two existing customers who happen to share a phone number — creates a new customer instead", async () => {
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+
+      await db.insert(customersTable).values([
+        { firstName: "Shared", lastName: "One", email: "shared-one@example.com", phone: "+15559998888", leadReceivedDate: "2026-01-01" },
+        { firstName: "Shared", lastName: "Two", email: "shared-two@example.com", phone: "+15559998888", leadReceivedDate: "2026-01-02" },
+      ]);
+
+      const res = await request(app)
+        .post("/api/webhooks/bask-order")
+        .set("x-webhook-secret", ORDER_SECRET)
+        .send({
+          eventId: "bask-order-evt-ambiguous-phone",
+          externalPersonId: "bask-person-ambiguous-phone",
+          email: "shared-three@example.com",
+          phone: "+15559998888",
+          orderId: "BASK-AMBIGUOUS",
+          productName: "Program",
+          amountPaid: 199,
+          purchasedAt: "2026-02-10T10:00:00.000Z",
+        });
+      expect(res.status).toBe(200);
+
+      const all = await db.select().from(customersTable).where(eq(customersTable.phone, "+15559998888"));
+      expect(all).toHaveLength(3);
+      const created = all.find((c) => c.email === "shared-three@example.com");
+      expect(created).toBeTruthy();
+    });
+
     it("accepts a formatted-string amountPaid and uses transactionId as ecommerceOrderId when set", async () => {
       const res = await request(app)
         .post("/api/webhooks/bask-order")
@@ -1335,7 +1409,7 @@ describe("Webhooks", () => {
         email: "abandoned-direct@example.com",
         firstName: "Abandoned",
         lastName: "Direct",
-        phone: "+15559876543",
+        phone: "+15559876545",
         questionnaireId: "QUEST-ABANDONED-DIRECT-1",
         occurredAt: new Date().toISOString(),
       };
