@@ -153,6 +153,39 @@ describe("POST /api/app/conversations/:personId/clear-attention", () => {
   });
 });
 
+describe("POST /api/app/conversations/:personId/ai-paused", () => {
+  let app: ReturnType<typeof createApp>;
+
+  beforeAll(() => {
+    app = createApp();
+  });
+
+  it("sets and clears the kill-switch, reflected in the conversation detail", async () => {
+    await seedUser("unifiedconvo-admin9@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "unifiedconvo-admin9@example.com");
+    const personId = await seedSalesThread();
+
+    const res = await agent.post(`/api/app/conversations/${personId}/ai-paused`).set("x-csrf-token", csrf).send({ paused: true });
+    expect(res.status).toBe(200);
+    const detail = await agent.get(`/api/app/conversations/${personId}`);
+    expect(detail.body.customer.aiPaused).toBe(true);
+
+    const cleared = await agent.post(`/api/app/conversations/${personId}/ai-paused`).set("x-csrf-token", csrf).send({ paused: false });
+    expect(cleared.status).toBe(200);
+    const detailAfter = await agent.get(`/api/app/conversations/${personId}`);
+    expect(detailAfter.body.customer.aiPaused).toBe(false);
+  });
+
+  it("rejects a non-boolean payload", async () => {
+    await seedUser("unifiedconvo-admin10@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "unifiedconvo-admin10@example.com");
+    const personId = await seedSalesThread();
+
+    const res = await agent.post(`/api/app/conversations/${personId}/ai-paused`).set("x-csrf-token", csrf).send({ paused: "yes" });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("POST /api/app/conversations/:personId/reply", () => {
   let app: ReturnType<typeof createApp>;
 

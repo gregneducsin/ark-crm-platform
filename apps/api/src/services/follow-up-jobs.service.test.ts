@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, intakeLinkTokensTable, followUpJobsTable, questionnaireEventsTable, purchasesTable, conversationsTable, conversationMessagesTable } from "@luma/db";
 import { hashToken } from "../lib/crypto.js";
-import { setCustomerSmsDnd } from "./dnd.service.js";
+import { setCustomerSmsDnd, setAiPaused } from "./dnd.service.js";
 
 let receiptPrefix = "";
 beforeEach(async () => {
@@ -240,6 +240,21 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
     expect(job.status).toBe("cancelled");
     expect(job.cancelledReason).toBe("opted_out");
+  });
+
+  it("cancels a due job when staff has paused AI for this person by the time it's due", async () => {
+    sendMessageMock.mockClear();
+    const personId = await seedCustomer();
+    const { jobId } = await seedPendingJob(personId, new Date(Date.now() - 3 * 60 * 60 * 1000), new Date(Date.now() - 60_000));
+    await setAiPaused(personId, true);
+
+    const result = await sweepFollowUpJobs();
+
+    expect(result.cancelledCount).toBe(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, jobId));
+    expect(job.status).toBe("cancelled");
+    expect(job.cancelledReason).toBe("ai_paused");
   });
 
   it("marks a job failed with NO_PHONE_NUMBER when the customer has no phone on file", async () => {

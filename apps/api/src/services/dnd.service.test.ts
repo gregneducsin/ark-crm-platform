@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, purchasesTable } from "@luma/db";
-import { isCustomerSmsDnd, setCustomerSmsDnd, isCustomerEmailDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone } from "./dnd.service.js";
+import { isCustomerSmsDnd, setCustomerSmsDnd, isCustomerEmailDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone, setAiPaused } from "./dnd.service.js";
 
 async function seedCustomer(overrides: Partial<{ phone: string }> = {}): Promise<string> {
   const [row] = await db
@@ -87,6 +87,47 @@ describe("SMS and email DND are independent", () => {
 
     expect(await isCustomerEmailDnd(personId)).toBe(true);
     expect(await isCustomerSmsDnd(personId)).toBe(false);
+  });
+});
+
+describe("setAiPaused", () => {
+  it("defaults to not paused for a new customer", async () => {
+    const personId = await seedCustomer();
+    expect(await isCustomerSmsDnd(personId)).toBe(false);
+    expect(await isCustomerEmailDnd(personId)).toBe(false);
+  });
+
+  it("setAiPaused(true) withholds both SMS and email, independent of dnd/emailDnd", async () => {
+    const personId = await seedCustomer();
+    await setAiPaused(personId, true);
+
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
+    expect(await isCustomerEmailDnd(personId)).toBe(true);
+    const [row] = await db.select({ dnd: customersTable.dnd, emailDnd: customersTable.emailDnd, aiPausedAt: customersTable.aiPausedAt }).from(customersTable).where(eq(customersTable.id, personId));
+    expect(row.dnd).toBe(false);
+    expect(row.emailDnd).toBe(false);
+    expect(row.aiPausedAt).not.toBeNull();
+  });
+
+  it("setAiPaused(false) clears the pause and stamps aiPausedAt null", async () => {
+    const personId = await seedCustomer();
+    await setAiPaused(personId, true);
+    await setAiPaused(personId, false);
+
+    expect(await isCustomerSmsDnd(personId)).toBe(false);
+    expect(await isCustomerEmailDnd(personId)).toBe(false);
+    const [row] = await db.select({ aiPausedAt: customersTable.aiPausedAt }).from(customersTable).where(eq(customersTable.id, personId));
+    expect(row.aiPausedAt).toBeNull();
+  });
+
+  it("is never cleared by setCustomerSmsDnd/setCustomerEmailDnd — only an explicit unpause clears it", async () => {
+    const personId = await seedCustomer();
+    await setAiPaused(personId, true);
+    await setCustomerSmsDnd(personId, false);
+    await setCustomerEmailDnd(personId, false);
+
+    expect(await isCustomerSmsDnd(personId)).toBe(true);
+    expect(await isCustomerEmailDnd(personId)).toBe(true);
   });
 });
 

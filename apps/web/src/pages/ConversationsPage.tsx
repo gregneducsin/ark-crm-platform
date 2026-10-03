@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { EmailBody } from "../components/EmailBody";
 import type { ConversationPersona, UnifiedConversationChannel, UnifiedMessage } from "@luma/shared";
-import { useUnifiedConversationStats, useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply } from "../hooks/useUnifiedConversations";
+import { useUnifiedConversationStats, useUnifiedConversationsList, useUnifiedConversationDetail, useClearAllNeedsAttention, useSendUnifiedStaffReply, useSetAiPaused } from "../hooks/useUnifiedConversations";
 import { Badge, Card, Button, Input } from "../components/ui";
 import { UpcomingTriggerBanner } from "../components/UpcomingTriggerBanner";
 import { CollapsibleCustomerNotes } from "../components/CustomerNotesCard";
@@ -179,6 +179,7 @@ function ConversationList({ selectedPersonId, onSelect }: { selectedPersonId: st
             <div className="mt-1 flex gap-1">
               {c.hasSalesThread && <Badge color="blue">Sales</Badge>}
               {c.hasSupportThread && <Badge color="gray">Support</Badge>}
+              {c.aiPaused && <Badge color="yellow">AI paused</Badge>}
             </div>
           </button>
         ))}
@@ -266,6 +267,7 @@ const CHANNEL_FILTER_LABELS: Record<ChannelFilter, string> = { all: "All", sms: 
 function ConversationDetailPanel({ personId, firstName, lastName }: { personId: string; firstName: string; lastName: string }) {
   const { data, isLoading } = useUnifiedConversationDetail(personId);
   const clearAttention = useClearAllNeedsAttention();
+  const setAiPaused = useSetAiPaused();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
 
@@ -324,6 +326,7 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
               {customer.firstName} {customer.lastName}
               {customer.hasQualifyingPurchase && <Badge color="green">Purchased</Badge>}
               {needsAttention && <Badge color="red">Needs attention</Badge>}
+              {customer.aiPaused && <Badge color="yellow">AI paused</Badge>}
             </p>
             <p className="text-xs text-gray-400">
               {[customer.phone, customer.email].filter(Boolean).join(" · ") || "No contact info on file"}
@@ -358,6 +361,19 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
         )}
       </div>
 
+      <div className="border-b border-gray-200 px-4 py-2">
+        <div className="flex items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
+          <p className="text-xs text-gray-700">
+            {customer.aiPaused
+              ? "AI is paused for this customer. Automated SMS and email, including notifications and reminders, are blocked. Staff can still reply."
+              : "AI is not paused for this customer. Other holds, opt-outs, and the overall sales pause still apply."}
+          </p>
+          <Button variant="secondary" onClick={() => setAiPaused.mutate({ personId, paused: !customer.aiPaused })} disabled={setAiPaused.isPending}>
+            {setAiPaused.isPending ? "Updating…" : customer.aiPaused ? "Resume AI" : "Pause AI"}
+          </Button>
+        </div>
+        {setAiPaused.isError && <p role="alert" className="mt-1 text-xs text-red-700">Could not update the AI pause. Please try again.</p>}
+      </div>
       <div className="border-b border-gray-200 px-4 py-2">
         <CollapsibleCustomerNotes customerId={personId} />
       </div>

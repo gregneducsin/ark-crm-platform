@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ConversationsPage } from "./ConversationsPage";
-import { useUnifiedConversationDetail } from "../hooks/useUnifiedConversations";
+import { useUnifiedConversationDetail, useSetAiPaused } from "../hooks/useUnifiedConversations";
 
 vi.mock("wouter", () => ({ useSearch: () => "personId=outside-loaded-page" }));
 vi.mock("../components/UpcomingTriggerBanner", () => ({ UpcomingTriggerBanner: () => null }));
@@ -9,10 +9,11 @@ vi.mock("../components/CustomerNotesCard", () => ({ CollapsibleCustomerNotes: ()
 vi.mock("../hooks/useUnifiedConversations", () => ({
   useUnifiedConversationsList: () => ({ data: { pages: [{ conversations: [], nextCursor: null }] }, isLoading: false }),
   useUnifiedConversationStats: () => ({ data: { attentionCount: 0, salesStats: { totalContacted: 0, totalResponded: 0, responseRate: 0 } } }),
+  useSetAiPaused: vi.fn(() => ({ mutate: vi.fn(), isPending: false, isError: false })),
   useClearAllNeedsAttention: () => ({ mutate: vi.fn(), isPending: false }),
   useSendUnifiedStaffReply: () => ({ mutate: vi.fn(), isPending: false }),
   useUnifiedConversationDetail: vi.fn((id: string | null) => ({ isLoading: false, data: id ? {
-    customer: { id, firstName: "Synthetic", lastName: "DeepLink", phone: null, email: null, leadType: null, hasQualifyingPurchase: false },
+    customer: { id, firstName: "Synthetic", lastName: "DeepLink", phone: null, email: null, leadType: null, hasQualifyingPurchase: false, aiPaused: false },
     sales: null, support: null, messages: [], availableReplyTargets: [{ persona: "sales", channel: "sms" }],
   } : undefined })),
 }));
@@ -22,6 +23,8 @@ describe("inbox deep links", () => {
     HTMLElement.prototype.scrollTo = vi.fn();
     render(<ConversationsPage />);
     await waitFor(() => expect(screen.getByText("Synthetic DeepLink")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Pause AI" }));
+    expect(vi.mocked(useSetAiPaused).mock.results.at(-1)?.value.mutate).toHaveBeenCalledWith({ personId: "outside-loaded-page", paused: true });
     expect(useUnifiedConversationDetail).toHaveBeenCalledWith("outside-loaded-page");
     expect(screen.queryByText("Select a conversation to view it.")).not.toBeInTheDocument();
   });

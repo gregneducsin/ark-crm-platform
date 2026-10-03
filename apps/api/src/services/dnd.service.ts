@@ -1,5 +1,6 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db, customersTable, purchasesTable } from "@luma/db";
+import { withPersonLock } from "../lib/db-lock.js";
 import { phoneMatchKey } from "../lib/phone.js";
 import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
 
@@ -7,13 +8,16 @@ import { isPhoneSmsOptedOut } from "../lib/sms-opt-out.js";
  * SMS/iMessage and email opt-out are tracked independently (customers.dnd
  * vs customers.emailDnd) — a STOP reply on one channel must not silently
  * suppress the other. Every SMS send path must check isCustomerSmsDnd;
- * every email send path must check isCustomerEmailDnd.
+ * every email send path must check isCustomerEmailDnd. Both also honor
+ * aiPaused — a staff kill-switch, not a customer opt-out — so every one of
+ * those same call sites withholds automated messages on either channel
+ * without needing its own separate check (see setAiPaused below).
  */
 
-/** Account DND plus any phone-level STOP received before account creation. */
+/** Account DND, aiPaused, or any phone-level STOP received before account creation. */
 export async function isCustomerSmsDnd(personId: string): Promise<boolean> {
-  const [row] = await db.select({ dnd: customersTable.dnd, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
-  return Boolean(row?.dnd) || Boolean(row?.phone && await isPhoneSmsOptedOut(row.phone));
+  const [row] = await db.select({ dnd: customersTable.dnd, aiPaused: customersTable.aiPaused, phone: customersTable.phone }).from(customersTable).where(eq(customersTable.id, personId));
+  return Boolean(row?.aiPaused) || Boolean(row?.dnd) || Boolean(row?.phone && await isPhoneSmsOptedOut(row.phone));
 }
 
 /**
@@ -33,10 +37,10 @@ export async function setCustomerSmsDnd(personId: string, dnd: boolean): Promise
     .where(eq(customersTable.id, personId));
 }
 
-/** True once a customer has opted out of email (STOP-equivalent reply, or the unsubscribe link) and hasn't purchased since. */
+/** True once a customer has opted out of email (STOP-equivalent reply, or the unsubscribe link) and hasn't purchased since, or aiPaused is set. */
 export async function isCustomerEmailDnd(personId: string): Promise<boolean> {
-  const [row] = await db.select({ emailDnd: customersTable.emailDnd }).from(customersTable).where(eq(customersTable.id, personId));
-  return row?.emailDnd ?? false;
+  const [row] = await db.select({ emailDnd: customersTable.emailDnd, aiPaused: customersTable.aiPaused }).from(customersTable).where(eq(customersTable.id, personId));
+  return Boolean(row?.aiPaused) || (row?.emailDnd ?? false);
 }
 
 /**
@@ -51,6 +55,22 @@ export async function setCustomerEmailDnd(personId: string, dnd: boolean): Promi
     .update(customersTable)
     .set({ emailDnd: dnd, emailDndAt: dnd ? new Date() : null })
     .where(eq(customersTable.id, personId));
+}
+
+/**
+ * Staff kill-switch for a specific customer: while set, every automated
+ * message is withheld on both channels and both personas (see
+ * isCustomerSmsDnd/isCustomerEmailDnd above) — a human has chosen to handle
+ * this conversation directly. Deliberately separate from
+ * setCustomerSmsDnd/setCustomerEmailDnd: this is never auto-cleared on
+ * purchase, since it reflects a staff decision, not customer consent.
+ */
+export async function setAiPaused(personId: string, paused: boolean): Promise<void> {
+  await withPersonLock(personId, async () => {
+    await db.update(customersTable)
+      .set({ aiPaused: paused, aiPausedAt: paused ? new Date() : null })
+      .where(eq(customersTable.id, personId));
+  });
 }
 
 /**

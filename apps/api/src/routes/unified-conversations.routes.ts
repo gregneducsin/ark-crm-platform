@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { listUnifiedConversationPage, countUnifiedAttention, InvalidConversationCursor } from "../services/conversation-pages.service.js";
 import { Router, type Router as RouterType } from "express";
-import { sendUnifiedConversationReplyRequestSchema } from "@luma/shared";
+import { sendUnifiedConversationReplyRequestSchema, setAiPausedRequestSchema } from "@luma/shared";
 import * as unifiedConversationsService from "../services/unified-conversations.service.js";
 import { requireRole } from "../middleware/requireAuth.js";
 import { requireCsrf } from "../middleware/csrf.js";
@@ -77,6 +77,20 @@ export function createUnifiedConversationsRouter(): RouterType {
     try {
       await unifiedConversationsService.clearAllNeedsAttention(req.params.personId as string);
       stats = undefined;
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/:personId/ai-paused", requireRole("admin", "customer_service"), requireCsrf, async (req, res, next) => {
+    try {
+      const parsed = setAiPausedRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid payload.", details: parsed.error.issues });
+        return;
+      }
+      await unifiedConversationsService.setAiPaused(req.params.personId as string, parsed.data.paused);
       res.json({ ok: true });
     } catch (err) {
       next(err);

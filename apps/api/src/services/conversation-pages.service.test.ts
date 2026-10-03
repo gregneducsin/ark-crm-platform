@@ -96,6 +96,19 @@ describe("paged unified inbox", () => {
     expect((await listUnifiedConversationPage({ search, limit: 1, cursor: refreshed.nextCursor! })).conversations[0].personId).toBe(newer);
   });
 
+  it("surfaces the aiPaused kill-switch in the paginated row", async () => {
+    const search = "AiPaused" + crypto.randomUUID();
+    const id = await seed(search, "Target");
+    await appendMessage((await getOrCreateConversation(id)).id, "inbound", "Test");
+
+    const before = (await listUnifiedConversationPage({ search })).conversations[0];
+    expect(before.aiPaused).toBe(false);
+
+    await db.update(customersTable).set({ aiPaused: true }).where(eq(customersTable.id, id));
+    const after = (await listUnifiedConversationPage({ search })).conversations[0];
+    expect(after.aiPaused).toBe(true);
+  });
+
   it("rejects malformed or filter-mismatched cursors and treats search punctuation literally", async () => {
     await expect(listUnifiedConversationPage({ cursor: "bad" })).rejects.toThrow("Invalid conversation cursor");
     const search = "Cursor" + crypto.randomUUID();

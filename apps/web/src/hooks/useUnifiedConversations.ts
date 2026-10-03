@@ -64,6 +64,16 @@ export function useClearAllNeedsAttention() {
   });
 }
 
+/** Staff kill-switch for this person — pauses/resumes every automated message (both personas, both channels). */
+export function useSetAiPaused() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ personId, paused }: { personId: string; paused: boolean }) =>
+      api.post<{ ok: true }>(`/api/app/conversations/${personId}/ai-paused`, { paused }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+}
+
 /** A staff-authored reply, sent through whichever of the four pipelines (persona x channel) is chosen. */
 export function useSendUnifiedStaffReply() {
   const queryClient = useQueryClient();

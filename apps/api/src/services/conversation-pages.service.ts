@@ -53,7 +53,7 @@ export async function listUnifiedConversationPage(options: UnifiedConversationLi
       from threads group by person_id
     ),
     page as (
-      select p.*, c.first_name, c.last_name from people p
+      select p.*, c.first_name, c.last_name, c.ai_paused from people p
       join customers c on c.id = p.person_id
       where ${after}
         and (${!options.onlyNeedsAttention} or p.needs_attention)
@@ -66,7 +66,7 @@ export async function listUnifiedConversationPage(options: UnifiedConversationLi
       to_char(p.last_message_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "cursorAt",
       preview.body as "lastMessagePreview", sentiment.sentiment as "lastSentiment",
       p.needs_attention as "needsAttention", p.lead_source as "leadSource",
-      p.has_sales as "hasSalesThread", p.has_support as "hasSupportThread"
+      p.has_sales as "hasSalesThread", p.has_support as "hasSupportThread", p.ai_paused as "aiPaused"
     from page p
     left join lateral (
       select t.* from threads t where t.person_id = p.person_id
