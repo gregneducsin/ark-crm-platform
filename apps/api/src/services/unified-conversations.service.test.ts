@@ -31,6 +31,7 @@ const {
   clearAllNeedsAttention,
   sendUnifiedStaffReply,
   getSalesResponseStats,
+  setAiPaused,
 } = await import("./unified-conversations.service.js");
 
 async function seedCustomer(): Promise<string> {
@@ -235,11 +236,36 @@ describe("clearAllNeedsAttention", () => {
   });
 });
 
+describe("setAiPaused", () => {
+  it("defaults to false and is reflected in both the list and detail views", async () => {
+    const personId = await seedCustomer();
+    const sales = await getOrCreateConversation(personId);
+    await appendMessage(sales.id, "outbound", "hi");
+
+    const summary = (await listUnifiedConversationSummaries()).find((i) => i.personId === personId);
+    expect(summary?.aiPaused).toBe(false);
+    const detail = await getUnifiedConversationDetail(personId);
+    expect(detail?.customer.aiPaused).toBe(false);
+
+    await setAiPaused(personId, true);
+
+    const summaryAfter = (await listUnifiedConversationSummaries()).find((i) => i.personId === personId);
+    expect(summaryAfter?.aiPaused).toBe(true);
+    const detailAfter = await getUnifiedConversationDetail(personId);
+    expect(detailAfter?.customer.aiPaused).toBe(true);
+
+    await setAiPaused(personId, false);
+    const detailCleared = await getUnifiedConversationDetail(personId);
+    expect(detailCleared?.customer.aiPaused).toBe(false);
+  });
+});
+
 describe("sendUnifiedStaffReply", () => {
   it("routes a sales/sms reply through the SMS provider and logs it on the sales SMS thread", async () => {
     sendMessageMock.mockResolvedValueOnce({ providerMessageId: "msg_1" });
     const personId = await seedCustomer();
     await getOrCreateConversation(personId);
+    await setAiPaused(personId, true);
     const result = await sendUnifiedStaffReply(personId, "sales", "sms", "hello", "staff@example.com");
     expect(result).toEqual({ sent: true });
     expect(sendMessageMock).toHaveBeenCalled();
@@ -249,6 +275,7 @@ describe("sendUnifiedStaffReply", () => {
     sendEmailMock.mockResolvedValueOnce({ messageId: "<reply@example.com>" });
     const personId = await seedCustomer();
     await getOrCreateSupportEmailConversation(personId);
+    await setAiPaused(personId, true);
     const result = await sendUnifiedStaffReply(personId, "support", "email", "hello", "staff@example.com");
     expect(result).toEqual({ sent: true });
     expect(sendEmailMock).toHaveBeenCalled();

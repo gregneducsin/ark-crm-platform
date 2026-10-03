@@ -50,6 +50,7 @@ export const unifiedConversationSummarySchema = z.object({
   leadSource: z.enum(["abandoned_cart", "meta_form"]).nullable(),
   hasSalesThread: z.boolean(),
   hasSupportThread: z.boolean(),
+  aiPaused: z.boolean(),
 });
 export type UnifiedConversationSummary = z.infer<typeof unifiedConversationSummarySchema>;
 
@@ -93,6 +94,7 @@ export const unifiedConversationDetailSchema = z.object({
     phone: z.string().nullable(),
     email: z.string().nullable(),
     hasQualifyingPurchase: z.boolean(),
+    aiPaused: z.boolean(),
   }),
   /** null when this person has no sales thread on either channel. */
   sales: salesThreadInfoSchema.nullable(),
@@ -136,3 +138,8 @@ export interface UnifiedConversationStats {
   salesStats: SalesResponseStats;
   attentionCount: number;
 }
+
+export const setAiPausedRequestSchema = z.object({
+  paused: z.boolean(),
+});
+export type SetAiPausedRequest = z.infer<typeof setAiPausedRequestSchema>;

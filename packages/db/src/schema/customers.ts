@@ -42,6 +42,15 @@ export const customersTable = pgTable(
     // automatically on purchase. See isCustomerEmailDnd.
     emailDnd: boolean("email_dnd").notNull().default(false),
     emailDndAt: timestamp("email_dnd_at", { withTimezone: true }),
+    // Staff kill-switch, independent of dnd/emailDnd above: a deliberate
+    // "take this conversation over myself" action, not a customer opt-out,
+    // so (unlike dnd/emailDnd) it is never auto-cleared on purchase. Folded
+    // into isCustomerSmsDnd/isCustomerEmailDnd (dnd.service.ts) so every
+    // existing send-gate check — both personas, both channels, including
+    // every automated order-fulfillment notice — withholds the message
+    // without needing its own separate check.
+    aiPaused: boolean("ai_paused").notNull().default(false),
+    aiPausedAt: timestamp("ai_paused_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

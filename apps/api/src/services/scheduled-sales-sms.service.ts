@@ -44,6 +44,7 @@ async function armCheckin(tx: Tx, personId: string) {
 async function prepare(tx: Tx, kind: ScheduledSalesSmsKind, id: string, customer: Customer): Promise<Plan> {
   const personId = customer.id;
   if (customer.dnd) return { cancel: "opted_out" };
+  if (customer.aiPaused) return { cancel: "ai_paused" };
   const completed = await intakeCompletionReason(personId, tx);
   if (completed) return { cancel: kind === "follow_up" ? "completed_before_followup" : completed };
   if (kind === "follow_up") {

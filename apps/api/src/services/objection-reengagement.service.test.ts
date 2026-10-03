@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, customersTable, purchasesTable, objectionReengagementTriggersTable, conversationsTable } from "@luma/db";
-import { setCustomerSmsDnd } from "./dnd.service.js";
+import { setCustomerSmsDnd, setAiPaused } from "./dnd.service.js";
 
 let receiptPrefix = "";
 beforeEach(async () => {
@@ -169,6 +169,20 @@ describe("sweepObjectionReengagementTriggers", () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
     const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(trigger.cancelledReason).toBe("opted_out");
+  });
+
+  it("cancels when staff has paused AI for this person by the time it's due", async () => {
+    sendMessageMock.mockClear();
+    const personId = await seedCustomer();
+    await scheduleObjectionReengagement(personId);
+    await backdateTrigger(personId);
+    await setAiPaused(personId, true);
+
+    const result = await sweepObjectionReengagementTriggers();
+    expect(result.cancelledCount).toBe(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger.cancelledReason).toBe("ai_paused");
   });
 
   it("marks failed with NO_PHONE_NUMBER and does not call the provider when there's no phone on file", async () => {

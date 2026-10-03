@@ -1,5 +1,5 @@
 import { withStaffNames } from "./message-authorship.service.js";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   customersTable,
@@ -21,6 +21,7 @@ import * as supportConversationsService from "./support-conversations.service.js
 import * as supportEmailConversationsService from "./support-email-conversations.service.js";
 import { sendEmailStaffReply as sendAlexisEmailStaffReply } from "./alexis-email-dispatch.service.js";
 import { sendEmailStaffReply as sendSophieEmailStaffReply } from "./sophie-email-dispatch.service.js";
+import * as dndService from "./dnd.service.js";
 
 /**
  * Reads across all four conversation table-pairs (sales x {sms, email},
@@ -57,6 +58,7 @@ function mergeSummaryRows(target: Map<string, UnifiedConversationSummary>, rows:
       leadSource: thread === "sales" ? (r.leadSource ?? existing?.leadSource ?? null) : (existing?.leadSource ?? null),
       hasSalesThread: Boolean(existing?.hasSalesThread) || thread === "sales",
       hasSupportThread: Boolean(existing?.hasSupportThread) || thread === "support",
+      aiPaused: existing?.aiPaused ?? false,
     });
   }
 }
@@ -76,6 +78,14 @@ export async function listUnifiedConversationSummaries(): Promise<UnifiedConvers
   mergeSummaryRows(merged, supportSms, "support");
   mergeSummaryRows(merged, supportEmail, "support");
 
+  const personIds = Array.from(merged.keys());
+  if (personIds.length) {
+    const customers = await db.select({ id: customersTable.id, aiPaused: customersTable.aiPaused }).from(customersTable).where(inArray(customersTable.id, personIds));
+    for (const customer of customers) {
+      const existing = merged.get(customer.id);
+      if (existing) merged.set(customer.id, { ...existing, aiPaused: customer.aiPaused });
+    }
+  }
   return Array.from(merged.values()).sort((a, b) => {
     if (!a.lastMessageAt && !b.lastMessageAt) return 0;
     if (!a.lastMessageAt) return 1;
@@ -179,7 +189,7 @@ async function findSupportEmailRow(personId: string): Promise<SupportEmailConver
 }
 
 export async function getUnifiedConversationDetail(personId: string): Promise<{
-  customer: { id: string; firstName: string; lastName: string; phone: string | null; email: string | null; hasQualifyingPurchase: boolean };
+  customer: { id: string; firstName: string; lastName: string; phone: string | null; email: string | null; hasQualifyingPurchase: boolean; aiPaused: boolean };
   sales: SalesThreadInfo | null;
   support: SupportThreadInfo | null;
   messages: UnifiedMessage[];
@@ -192,6 +202,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
       lastName: customersTable.lastName,
       phone: customersTable.phone,
       email: customersTable.email,
+      aiPaused: customersTable.aiPaused,
     })
     .from(customersTable)
     .where(eq(customersTable.id, personId));
@@ -311,6 +322,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
       phone: customer.phone,
       email: customer.email,
       hasQualifyingPurchase: Boolean(purchased),
+      aiPaused: customer.aiPaused,
     },
     sales: mergeSalesThreadInfo(salesSmsRow, salesEmailRow, intakeLinkClicked),
     support: mergeSupportThreadInfo(supportSmsRow, supportEmailRow),
@@ -368,4 +380,9 @@ export async function sendUnifiedStaffReply(
   const row = await findSupportEmailRow(personId);
   if (!row) return { sent: false, reason: "not_found" };
   return sendSophieEmailStaffReply(row.id, body, staffEmail);
+}
+
+/** Staff kill-switch for the Conversations tab — see setAiPaused in dnd.service.ts for what this actually gates. */
+export async function setAiPaused(personId: string, paused: boolean): Promise<void> {
+  await dndService.setAiPaused(personId, paused);
 }

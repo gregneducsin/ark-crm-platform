@@ -288,6 +288,13 @@
       "when": 1790821348540,
       "tag": "0040_unmatched_sms_authorship",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790996400000,
+      "tag": "0041_ai_pause_switch",
+      "breakpoints": true
     }
   ]
 }
