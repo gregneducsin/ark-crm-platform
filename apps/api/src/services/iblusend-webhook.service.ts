@@ -173,14 +173,10 @@ export async function handleIbluSendWebhook(envelope: IbluSendWebhookEnvelope): 
         // failure must fail the webhook so the provider can retry it.
         const pre = interactivePreCheck(body);
         if (pre.blocked && pre.code === "OPT_OUT") await recordPhoneSmsOptOut(data.phone_number);
-        try {
-          await recordAndClassifyUnmatchedSms(data.phone_number, body, mediaUrls, { providerMessageId: data.message_id, createdAt: new Date(envelope.timestamp) });
-        } catch (err) {
-          logger.warn(
-            { phoneLastFour: data.phone_number.slice(-4), reason: err instanceof Error ? err.message : String(err) },
-            "recordAndClassifyUnmatchedSms failed",
-          );
-        }
+        // This function already catches resumption errors AFTER durable input
+        // storage. Errors reaching here mean recording/required handling failed:
+        // retain a failed webhook and allow the provider's normal retry.
+        await recordAndClassifyUnmatchedSms(data.phone_number, body, mediaUrls, { providerMessageId: data.message_id, createdAt: new Date(envelope.timestamp) });
       }
     } else if (["message.sent", "message.delivered", "message.read", "message.failed"].includes(envelope.event)) {
       const parsed = ibluSendMessageFailedDataSchema.safeParse(envelope.data);

@@ -199,6 +199,20 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
 });
 
 describe("Sophie malformed provider recovery", () => {
+  it("passes field-specific feedback into the next attempt", async () => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValueOnce(new SophieProviderError("SCHEMA_VALIDATION_ERROR", "", undefined, ["reply: too_big"]))
+      .mockResolvedValueOnce(modelResult());
+    expect(await runSophieTurn(baseBody())).toMatchObject({ ok: true });
+    expect(callSophieInteractiveMock.mock.calls[1][2]).toBe("reply: too_big");
+  });
+  it("retries truncated output within the same bounded attempt budget", async () => {
+    callSophieInteractiveMock.mockReset();
+    callSophieInteractiveMock.mockRejectedValue(new SophieProviderError("TRUNCATED_RESPONSE"));
+    expect(await runSophieTurn(baseBody())).toEqual({ ok: false, code: "TRUNCATED_RESPONSE" });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(3);
+  });
+
   it.each(["SCHEMA_VALIDATION_ERROR", "EMPTY_RESPONSE", "NO_JSON_OBJECT", "JSON_PARSE_ERROR"])("repairs %s and validates the result", async (code) => {
     callSophieInteractiveMock.mockReset();
     callSophieInteractiveMock.mockRejectedValueOnce(new SophieProviderError(code)).mockResolvedValueOnce(modelResult());

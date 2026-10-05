@@ -104,7 +104,7 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it("sends the provider_check_in message and schedules intake_questions_check_in 1 hour later on success, clamped to the 9am-8pm Eastern send window", async () => {
+  it("sends the provider_check_in message and schedules intake_questions_check_in 24 hours later on success, clamped to the 9am-8pm Eastern send window", async () => {
     const { clampToSendWindow } = await import("../lib/send-window.js");
     sendMessageMock.mockClear();
     sendMessageMock.mockResolvedValueOnce({ providerMessageId: `${receiptPrefix}-msg_123` });
@@ -131,10 +131,10 @@ it("does not schedule a third message after intake_questions_check_in sends", as
     const step2 = nextJobs.find((j) => j.messageStep === "intake_questions_check_in");
     expect(step2).toBeDefined();
     expect(step2!.status).toBe("pending");
-    // See send-window.ts — a naive "sent + 1 hour" can land in the overnight
+    // See send-window.ts — a naive "sent + 24 hours" can land in the overnight
     // quiet-hours window and get pushed to 9am Eastern instead, so this
     // computes the same expected value rather than asserting a fixed delta.
-    const expectedDueAt = clampToSendWindow(new Date(beforeSweep + 60 * 60 * 1000));
+    const expectedDueAt = clampToSendWindow(new Date(beforeSweep + 24 * 60 * 60 * 1000));
     expect(Math.abs(new Date(step2!.dueAt).getTime() - expectedDueAt.getTime())).toBeLessThan(5000);
   });
 

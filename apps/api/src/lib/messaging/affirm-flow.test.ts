@@ -43,6 +43,35 @@ describe("Affirm concern-aware fallback", () => {
 });
 
 describe("intake readiness without a checkout commitment", () => {
+  function transcript(texts: string[], history: { direction: "inbound" | "outbound"; body: string }[] = []) {
+    const body = { messages: [...history, { direction: "outbound", body: AFFIRM_APPROVAL }, ...texts.map(body => ({ direction: "inbound", body }))],
+      currentSlots: { selectedProduct: "semaglutide", planLength: "6_month" }, promoOffered: false, linkProvided: false } as unknown as BotPreviewRequestBody;
+    const raw = { action: "send_form", reply: "Here's the form.", confidence: 1, requiresStaff: false,
+      slotUpdates: {}, knowledgeTopicsUsed: [], nextQuestion: null } as unknown as ClaudeInteractiveResult;
+    return { body, raw };
+  }
+  it("keeps intake approval across an immediate additional text", () => {
+    const { body, raw } = transcript(["Sure", "I'm willing to try the application"]);
+    expect(applyAffirmFlow(body, raw)).toMatchObject({ action: "send_form", nextQuestion: null });
+  });
+  it.each([["Sure", "No"], ["Sure", "Only if I'm approved"], ["Sure", "What do I owe if they deny me?"]])("does not ignore a later reversal or question: %s", (...texts) => {
+    const { body, raw } = transcript(texts);
+    expect(applyAffirmFlow(body, raw).action).not.toBe("send_form");
+  });
+  it("remembers unfamiliarity after an intervening question", () => {
+    const { body, raw } = transcript(["I would like to apply for Affirm"], [
+      { direction: "outbound", body: AFFIRM_QUESTION }, { direction: "inbound", body: "No" },
+    ]);
+    const result = applyAffirmFlow({ ...body, messages: body.messages.map((message, i) =>
+      i === 2 ? { direction: "outbound", body: "You can review your options at checkout." } : message) }, raw);
+    expect(result.nextQuestion).toBe(AFFIRM_APPROVAL);
+    expect(result.nextQuestion).not.toBe(AFFIRM_QUESTION);
+  });
+  it("does not interpret choosing the cheaper option as rejecting its cost", () => {
+    const result = run("I would go with the cheaper one. How do I apply for Affirm?", "Which medication would you like?");
+    expect(result.reply).toContain("checkout");
+    expect(result.reply).not.toContain("total cost is a concern");
+  });
   it.each(["I really want start now", "I want to get started", "Send me the form"])("advances %s rather than repeating the price question", text => {
     expect(run(text, AFFIRM_APPROVAL)).toMatchObject({ action: "send_form", nextQuestion: null });
   });

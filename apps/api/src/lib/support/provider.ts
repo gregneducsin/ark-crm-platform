@@ -29,6 +29,7 @@ export class SophieProviderError extends Error {
     public readonly category: string,
     public readonly rawOutput: string = "",
     cause?: unknown,
+    public readonly issues: readonly string[] = [],
   ) {
     super(category);
     this.name = "SophieProviderError";
@@ -216,7 +217,7 @@ const SOPHIE_REPLY_TOOL = {
 export async function callSophieInteractive(
   body: SophiePreviewRequestBody,
   knowledgeCatalog: readonly KnowledgeTopic[] = [],
-  repair = false,
+  repair: boolean | string = false,
 ): Promise<SophieInteractiveResult> {
   const client = getClient();
 
@@ -225,14 +226,14 @@ export async function callSophieInteractive(
 
   const createPromise = client.messages.create({
     model: MODEL,
-    max_tokens: 500,
+    max_tokens: 1000,
     system: systemPrompt,
     tools: [SOPHIE_REPLY_TOOL],
     tool_choice: { type: "tool", name: "sophie_reply" },
     messages: [
       {
         role: "user",
-        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the sophie_reply tool.${repair ? "\nYour previous response did not match the schema. Return a complete tool object. Use reply:null for staff_review/no_reply; otherwise use a nonempty reply of at most 600 characters. Follow the action-specific nextQuestion rules. Do not relax safety rules or invent facts." : ""}`,
+        content: `Conversation so far:\n${transcript}\n\nProvide your reply using the sophie_reply tool.${repair ? "\nYour previous response did not match the schema. Return a complete tool object. Use reply:null for staff_review/no_reply; otherwise use a nonempty reply of at most 600 characters. Follow the action-specific nextQuestion rules. Do not relax safety rules or invent facts." : ""}${typeof repair === "string" ? `\nCorrect these schema fields: ${repair}` : ""}`,
       },
     ],
   });
@@ -249,6 +250,7 @@ export async function callSophieInteractive(
     throw new SophieProviderError("PROVIDER_HTTP_ERROR", "", err);
   }
 
+  if (response.stop_reason === "max_tokens") throw new SophieProviderError("TRUNCATED_RESPONSE");
   const toolBlock = response.content.find((b) => b.type === "tool_use" && b.name === "sophie_reply");
   const textBlock = response.content.find((b) => b.type === "text");
   const rawText = textBlock && textBlock.type === "text" ? textBlock.text : "";
@@ -268,13 +270,29 @@ export async function callSophieInteractive(
     throw new SophieProviderError("EMPTY_RESPONSE", "");
   }
 
-  let validated: ReturnType<typeof SophieInteractiveSchema.parse>;
-  try {
-    validated = SophieInteractiveSchema.parse(parsed);
-  } catch {
-    const rawForRepair = toolBlock && toolBlock.type === "tool_use" ? JSON.stringify(toolBlock.input) : rawText;
-    throw new SophieProviderError("SCHEMA_VALIDATION_ERROR", rawForRepair);
+  return parseSophieOutput(parsed);
+}
+
+/** Handoff/quiet actions never transmit a model draft. Keep other validation strict. */
+export function parseSophieOutput(parsed: unknown): SophieInteractiveResult {
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const value = parsed as Record<string, unknown>;
+    if (value.action === "staff_review" || value.action === "no_reply") {
+      parsed = { ...value, reply: null, nextQuestion: null,
+        ...(value.action === "staff_review" ? { requiresStaff: true } : {}) };
+    }
   }
+  const result = SophieInteractiveSchema.safeParse(parsed);
+  if (!result.success) {
+    // Only fixed field names and schema codes: never values, Zod messages, or arbitrary keys.
+    const fields = new Set(["action", "reply", "confidence", "detectedIntents", "knowledgeTopicsUsed", "requiresStaff", "safetyCodes", "nextQuestion", "inboundSentiment"]);
+    const issues = [...new Set(result.error.issues.map(issue => {
+      const field = String(issue.path[0] ?? "object");
+      return `${fields.has(field) ? field : "object"}: ${issue.code}`;
+    }))].slice(0, 10);
+    throw new SophieProviderError("SCHEMA_VALIDATION_ERROR", "", undefined, issues);
+  }
+  const validated = result.data;
 
   return {
     action: validated.action,

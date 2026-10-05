@@ -28,6 +28,7 @@ type Outcome = "sent" | "cancelled" | "failed" | "deferred";
 export interface ScheduledSalesSmsSweepResult { sentCount: number; cancelledCount: number; failedCount: number }
 const DELIVERY_TIMEOUT_MS = 5 * 60 * 1000;
 const CHECKIN_DELAY_MS = 6 * 24 * 60 * 60 * 1000;
+const SALES_NUDGE_GAP_MS = 24 * 60 * 60 * 1000;
 const retryTables = { lead_checkin: leadCheckinTriggersTable, objection_reengagement: objectionReengagementTriggersTable };
 type Plan = { cancel: string } | {
   body: string; leadSource?: "abandoned_cart" | "meta_form"; promoOffered?: boolean;
@@ -99,7 +100,7 @@ async function finishConfirmed(tx: Tx, kind: ScheduledSalesSmsKind, id: string, 
   const [job] = await tx.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, id));
   const next = job.messageStep === "provider_check_in" ? "intake_questions_check_in" : null;
   if (!next) return;
-  const delay = 60 * 60 * 1000;
+  const delay = SALES_NUDGE_GAP_MS;
   await tx.insert(followUpJobsTable).values({ personId: customer.id, intakeLinkTokenId: job.intakeLinkTokenId,
     messageStep: next, dueAt: clampToSendWindow(new Date(sentAt.getTime() + delay)) }).onConflictDoNothing();
 }
@@ -154,6 +155,21 @@ async function processJob(kind: ScheduledSalesSmsKind, id: string, personId: str
         // Leave dueAt and the template untouched; rotate the scan position
         // so held conversations cannot starve other customers in the batch.
         await tx.update(table).set({ updatedAt: new Date() }).where(eq(table.id, id));
+        return { outcome: "deferred" as const };
+      }
+      // One shared cadence across campaigns, including a provider-confirmed
+      // attempt whose owning job has not yet been finalized by its sweep.
+      let lastNudgeAt = 0;
+      for (const source of Object.values(tables)) {
+        const [recent] = await tx.select({
+          sentAt: sql<Date | null>`max(coalesce(${conversationMessagesTable.sentAt}, ${conversationMessagesTable.deliveredAt}, ${conversationMessagesTable.readAt}, ${source.sentAt}))`,
+        }).from(source).leftJoin(conversationMessagesTable, eq(conversationMessagesTable.id, source.id))
+          .where(eq(source.personId, personId));
+        if (recent?.sentAt) lastNudgeAt = Math.max(lastNudgeAt, new Date(recent.sentAt).getTime());
+      }
+      if (lastNudgeAt && lastNudgeAt + SALES_NUDGE_GAP_MS > Date.now()) {
+        await tx.update(table).set({ dueAt: clampToSendWindow(new Date(lastNudgeAt + SALES_NUDGE_GAP_MS)), updatedAt: new Date() })
+          .where(eq(table.id, id));
         return { outcome: "deferred" as const };
       }
       const retryTable = kind in retryTables ? retryTables[kind as keyof typeof retryTables] : null;
