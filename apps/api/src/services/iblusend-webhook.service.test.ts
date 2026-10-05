@@ -25,7 +25,10 @@ const recordAndClassifyUnmatchedSmsMock = vi.fn().mockResolvedValue(undefined);
 vi.mock("./unmatched-inbound-sms.service.js", () => ({ recordAndClassifyUnmatchedSms: recordAndClassifyUnmatchedSmsMock }));
 
 const notifySmsSlackMock = vi.fn().mockResolvedValue(undefined);
-vi.mock("../lib/slack.js", () => ({ notifySmsSlack: (...args: unknown[]) => notifySmsSlackMock(...args) }));
+vi.mock("../lib/slack.js", () => ({
+  notifySmsSlack: (...args: unknown[]) => notifySmsSlackMock(...args),
+  notifySlack: vi.fn().mockResolvedValue(undefined),
+}));
 
 const { handleIbluSendWebhook } = await import("./iblusend-webhook.service.js");
 
@@ -78,8 +81,9 @@ describe("handleIbluSendWebhook", () => {
     const phone = uniquePhone();
     const input = envelope({ data: { phone_number: phone, content: "STOP" } });
     recordAndClassifyUnmatchedSmsMock.mockRejectedValueOnce(new Error("Synthetic onboarding failure"));
-    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: false });
+    await expect(handleIbluSendWebhook(input)).rejects.toThrow("Synthetic onboarding failure");
     expect(await isPhoneSmsOptedOut(phone)).toBe(true);
+    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: false });
     expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: true });
   });
   it("routes to Sophie when a support conversation already exists for the customer", async () => {
@@ -174,15 +178,21 @@ describe("handleIbluSendWebhook", () => {
     expect(recordAndClassifyUnmatchedSmsMock).toHaveBeenCalledWith(phone, "hi there", undefined, expect.objectContaining({ providerMessageId: expect.any(String), createdAt: new Date("2026-08-17T12:00:00.000Z") }));
   });
 
-  it("still marks the webhook event processed even when the unmatched-SMS pipeline itself throws", async () => {
+  it("retains recording failures for retry and deduplicates only after successful handling", async () => {
     processInboundMessageMock.mockClear();
     processInboundSupportMessageMock.mockClear();
     recordAndClassifyUnmatchedSmsMock.mockClear();
     recordAndClassifyUnmatchedSmsMock.mockRejectedValueOnce(new Error("boom"));
 
-    const result = await handleIbluSendWebhook(envelope({ data: { phone_number: uniquePhone(), content: "hi" } }));
-
-    expect(result).toEqual({ duplicate: false });
+    const input = envelope({ data: { phone_number: uniquePhone(), content: "hi" } });
+    await expect(handleIbluSendWebhook(input)).rejects.toThrow("boom");
+    const [failed] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, input.event_id));
+    expect(failed.status).toBe("failed");
+    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: false });
+    expect(await handleIbluSendWebhook(input)).toEqual({ duplicate: true });
+    expect(recordAndClassifyUnmatchedSmsMock).toHaveBeenCalledTimes(2);
+    const [processed] = await db.select().from(webhookEventsTable).where(eq(webhookEventsTable.externalEventId, input.event_id));
+    expect(processed.status).toBe("processed");
   });
 
   it("routes to Alexis for a known customer's first-ever text, with no prior Alexis or Sophie conversation", async () => {

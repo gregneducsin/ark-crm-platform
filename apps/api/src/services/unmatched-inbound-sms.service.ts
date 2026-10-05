@@ -715,7 +715,17 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
   // DTC signals override an unsupported existing-customer classification and its review flag; database matches and other review reasons remain enforced.
   const misreadAsExistingCustomer = isDtcLead && classification?.intent === "existing_customer_support" && !matchCandidate && !emailLookup.ambiguous;
 
+  // A spam label must not silently close an established sales inquiry.
+  // Use inbound evidence and the previously stored intent, not the model's
+  // new summary. Conflicts go to staff; they never authorize an automatic reply.
+  const inboundText = messages.filter((message) => message.direction === "inbound").map((message) => message.body).join(" ");
+  const salesEvidence = thread.aiIntent === "new_lead_interest" || DTC_CODE_RE.test(inboundText) ||
+    (/\b(?:glp[ -]?1|semaglutide|tirzepatide|zepbound|mounjaro|ozempic|wegovy|weight loss)\b/i.test(inboundText) &&
+      /\b(?:price|pricing|cost|cheaper|afford|discount|how much)\b/i.test(inboundText));
+  const spamConflictsWithSales = classification?.intent === "spam_or_irrelevant" && salesEvidence;
+
   const needsHumanReview = Boolean(
+    spamConflictsWithSales ||
     (classification?.needsHumanReview && !misreadAsExistingCustomer) ||
       matchCandidate ||
       emailLookup.ambiguous ||
@@ -744,8 +754,9 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
     const reply = identityReviewRequired || needsHumanReview || leadResult || classification?.intent === "spam_or_irrelevant" ? null
       : isFirstMessage && !firstNameKnown ? pickVariant(ACK_VARIANTS)
       : classification && !needsHumanReview ? classification.suggestedReply : null;
-    const humanReplyRequired = !reply && !leadResult && (identityReviewRequired || classification?.intent !== "spam_or_irrelevant");
-    const reviewReason = !classification ? "Automatic classification failed."
+    const humanReplyRequired = !reply && !leadResult && (identityReviewRequired || spamConflictsWithSales || classification?.intent !== "spam_or_irrelevant");
+    const reviewReason = spamConflictsWithSales ? "The spam classification conflicts with sales interest in this conversation. Verify the inquiry before dismissing it."
+      : !classification ? "Automatic classification failed."
       : offScopeReply ? "The drafted reply failed the service-scope safety check."
       : classification.needsHumanReview ? "The automated safety review requested staff assistance."
       : "No usable automatic reply was produced.";
@@ -753,13 +764,13 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
       fromName: contactValue(current.fromName) ?? classification?.senderName ?? null,
       collectedEmail: contactEmail(current.collectedEmail) ?? classification?.senderEmail ?? null,
       onboardingHeld: humanReplyRequired,
-      aiIntent: classification?.intent ?? current.aiIntent,
+      aiIntent: spamConflictsWithSales ? "other" : classification?.intent ?? current.aiIntent,
       aiSummary: identityReviewRequired ? "Identity verification required. An unknown sender may match an existing account. Staff must verify ownership before linking or changing contact details." : humanReplyRequired ? `Human reply required. ${reviewReason} No automatic reply was sent; review this thread and respond.` : classification?.summary ?? current.aiSummary,
-      suggestedReply: identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
+      suggestedReply: spamConflictsWithSales || identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
       suggestedMatchCustomerId: matchCandidate?.id ?? current.suggestedMatchCustomerId,
       suggestedMatchConfidence: emailMatch ? "high" : matchCandidate ? classification?.matchConfidence ?? null : current.suggestedMatchConfidence,
       linkedCustomerId: leadResult?.customerId ?? current.linkedCustomerId,
-      status: identityReviewRequired ? "needs_review" : leadResult || (reply && !isFirstMessage) ? "replied"
+      status: identityReviewRequired || humanReplyRequired ? "needs_review" : leadResult || (reply && !isFirstMessage) ? "replied"
         : classification?.intent === "spam_or_irrelevant" ? "dismissed" : "needs_review",
       repliedAt: leadResult || reply ? new Date() : current.repliedAt,
       pendingInboundId: null,

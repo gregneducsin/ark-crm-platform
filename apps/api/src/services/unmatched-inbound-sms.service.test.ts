@@ -101,6 +101,42 @@ beforeEach(() => {
 });
 
 describe("recordAndClassifyUnmatchedSms", () => {
+  it("holds a contradictory spam classification after sales interest and preserves the hold on later texts", async () => {
+    const phone = uniquePhone();
+    createMock.mockResolvedValueOnce(toolResponse(classification({ intent: "new_lead_interest" })));
+    await recordAndClassifyUnmatchedSms(phone, "I am interested in your program");
+    sendMessageMock.mockClear();
+    createMock.mockResolvedValueOnce(toolResponse(classification({ intent: "spam_or_irrelevant", suggestedReply: "Discard this inquiry", needsHumanReview: false })));
+    const thread = await recordAndClassifyUnmatchedSms(phone, "Can you offer something cheaper?");
+    expect(thread.status).toBe("needs_review");
+    expect(thread.onboardingHeld).toBe(true);
+    expect(thread.aiIntent).toBe("other");
+    expect(thread.aiSummary).toContain("spam classification conflicts with sales interest");
+    expect(thread.suggestedReply).toBeNull();
+    expect(thread.linkedCustomerId).toBeNull();
+    expect((await listUnmatchedSmsThreads()).some((item) => item.id === thread.id)).toBe(true);
+    await recordAndClassifyUnmatchedSms(phone, "Hello again");
+    expect((await getUnmatchedSmsThread(thread.id))?.status).toBe("needs_review");
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(resumeAlexisSmsMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "I'd like to check if I qualify. My priority code: ARKTEST",
+    "I already use Zepbound and want to know if semaglutide is cheaper",
+  ])("surfaces sales evidence even when the first classification is spam: %s", async (body) => {
+    createMock.mockResolvedValueOnce(toolResponse(classification({ intent: "spam_or_irrelevant", senderName: "Synthetic Lead", senderEmail: `${crypto.randomUUID()}@example.com`, suggestedReply: null })));
+    const thread = await recordAndClassifyUnmatchedSms(uniquePhone(), body);
+    expect(thread.status).toBe("needs_review");
+    expect(thread.onboardingHeld).toBe(true);
+    expect(thread.aiSummary).toContain("Human reply required.");
+    expect(thread.linkedCustomerId).toBeNull();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(resumeAlexisSmsMock).not.toHaveBeenCalled();
+  });
+
+
   it("records the text with the classification and drafted reply attached", async () => {
     createMock.mockResolvedValueOnce(
       toolResponse(classification({ intent: "new_lead_interest", summary: "Asking about weight loss programs.", suggestedReply: "Could you share your name?" })),

@@ -71,6 +71,36 @@ afterEach(async () => {
 });
 
 describe("scheduled sales SMS send-time protections", () => {
+  it("spaces different campaigns after a confirmed send, then permits the later nudge", async () => {
+    const item = await seed("lead_checkin");
+    const [other] = await db.insert(objectionReengagementTriggersTable).values({ personId: item.personId, dueAt: item.dueAt }).returning();
+    await sweepScheduledSalesSms(item.kind);
+    await sweepScheduledSalesSms("objection_reengagement");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    const [deferredJob] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.id, other.id));
+    expect(deferredJob.status).toBe("pending");
+    expect(deferredJob.attemptCount).toBe(0);
+    expect(deferredJob.dueAt.getTime()).toBeGreaterThan(Date.now() + 23 * 3_600_000);
+    const old = new Date(Date.now() - 25 * 3_600_000);
+    await db.update(leadCheckinTriggersTable).set({ sentAt: old }).where(eq(leadCheckinTriggersTable.id, item.id));
+    await db.update(conversationMessagesTable).set({ sentAt: old }).where(eq(conversationMessagesTable.id, item.id));
+    await db.update(objectionReengagementTriggersTable).set({ dueAt: item.dueAt }).where(eq(objectionReengagementTriggersTable.id, other.id));
+    await sweepScheduledSalesSms("objection_reengagement");
+    expect(mocks.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a receipt before the first campaign job is finalized", async () => {
+    const item = await seed("lead_checkin");
+    await db.insert(objectionReengagementTriggersTable).values({ personId: item.personId, dueAt: item.dueAt });
+    const providerMessageId = crypto.randomUUID();
+    mocks.send.mockResolvedValue({ providerMessageId });
+    await sweepScheduledSalesSms(item.kind);
+    await recordSmsDeliveryReceipt(providerMessageId, "sent", new Date());
+    expect((await jobFor(item)).status).toBe("processing");
+    await sweepScheduledSalesSms("objection_reengagement");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
   it.each(kinds)("%s stops after submission even when completion predates a link click", async (kind) => {
     const item = await seed(kind);
     await db.insert(questionnaireEventsTable).values({ personId: item.personId,
@@ -213,7 +243,7 @@ describe("scheduled sales SMS send-time protections", () => {
     expect((await jobFor(item)).sentAt).toEqual(actualSentAt);
     const jobs = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, item.personId));
     expect(jobs).toHaveLength(2);
-    expect(jobs.find((job) => job.messageStep === "intake_questions_check_in")?.dueAt).toEqual(clampToSendWindow(new Date(actualSentAt.getTime() + 3_600_000)));
+    expect(jobs.find((job) => job.messageStep === "intake_questions_check_in")?.dueAt).toEqual(clampToSendWindow(new Date(actualSentAt.getTime() + 86_400_000)));
   });
 
   it("does not overwrite cancellation or arm another step when cancellation arrives during transport", async () => {
