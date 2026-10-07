@@ -54,6 +54,26 @@ function okResult(overrides: Partial<Extract<SophieTurnResult, { ok: true }>> = 
 beforeEach(() => { runSophieTurnMock.mockReset(); sendMessageMock.mockReset(); });
 
 describe("processInboundSupportMessage", () => {
+  it("sends the feedback acknowledgment, flags the thread with a specific reason, and holds it for staff on MESSAGING_FEEDBACK", async () => {
+    const personId = await seedCustomer();
+    runSophieTurnMock.mockResolvedValueOnce(okResult({
+      action: "staff_review",
+      reply: "Thanks for the feedback. I'm sorry the replies felt unhelpful. I've flagged this conversation for our team to review.",
+      nextQuestion: null, inboundSentiment: "negative", requiresStaff: true,
+      source: "pre_check_block", preCheckCode: "MESSAGING_FEEDBACK",
+    }));
+    sendMessageMock.mockResolvedValueOnce({ providerMessageId: "support-feedback" });
+
+    await processInboundSupportMessage(personId, "Your chatbot replies too fast and acts like a person.");
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    const [conversation] = await db.select().from(supportConversationsTable).where(eq(supportConversationsTable.personId, personId));
+    expect(conversation.needsAttention).toBe(true);
+    expect(conversation.needsAttentionReason).toContain("feedback about automated replies");
+    const work = await getSmsReplyWork(personId, "support");
+    expect(work?.heldForStaff).toBe(true);
+  });
+
   it("does not carry an old repeat streak past a completed answer", async () => {
     const personId = await seedCustomer();
     const conversation = await getOrCreateSupportConversation(personId);

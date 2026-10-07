@@ -1,4 +1,5 @@
 import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
+import { hasStatedSupportPlan, isMessagingFeedback, omitGenericSupportQuestion } from "../lib/support/conversation-quality.js";
 import { supportPreCheck, supportPostCheck } from "../lib/support/safety.js";
 import { callSophieInteractive, SophieProviderError } from "../lib/support/provider.js";
 import { getSophieEnabledTopics, APPROVED_PORTAL_URL } from "../lib/messaging/knowledge-catalog.js";
@@ -110,6 +111,28 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
     }
   }
 
+  // Feedback about the bot itself (timing, repeating, "acting like a person")
+  // goes straight to staff, and a customer who has already stated their plan
+  // ("we'll give it a go for a few weeks") gets an acknowledgment, not another
+  // engagement question. Both checked after the safety pre-check above so a
+  // clinical or STOP signal always wins. Feedback is scanned across every
+  // inbound since the last outbound, so a coalesced "...anyway, thanks" text
+  // can't bury it.
+  const lastOutboundIndex = body.messages.map((message) => message.direction).lastIndexOf("outbound");
+  const feedback = body.messages.slice(lastOutboundIndex + 1)
+    .some((message) => message.direction === "inbound" && isMessagingFeedback(message.body));
+  if (lastInbound && (feedback || hasStatedSupportPlan(lastInbound.body))) {
+    return {
+      ok: true, action: feedback ? "staff_review" : "pause",
+      reply: feedback
+        ? "Thanks for the feedback. I'm sorry the replies felt unhelpful. I've flagged this conversation for our team to review."
+        : "Thanks for the update. We're here if you need help later.",
+      nextQuestion: null, inboundSentiment: feedback ? "negative" : "neutral",
+      requiresStaff: feedback, knowledgeTopicsUsed: [], source: "pre_check_block",
+      preCheckCode: feedback ? "MESSAGING_FEEDBACK" : null,
+    };
+  }
+
   const enabledTopics = getSophieEnabledTopics();
   const permittedTopicKeys = new Set(enabledTopics.map((t) => t.key));
 
@@ -146,7 +169,7 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
   if (!post?.ok) {
     throw new Error("unreachable: post-check loop exited without an ok result");
   }
-  const result = post.result;
+  const result = omitGenericSupportQuestion(post.result);
 
   return {
     ok: true,

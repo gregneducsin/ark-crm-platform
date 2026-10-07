@@ -356,11 +356,10 @@ export function supportPostCheck(
     }
   }
 
-  if (REPLY_TYPE_ACTIONS.has(raw.action)) {
+  // A complete answer needs no follow-up — nextQuestion is optional for a
+  // reply, and only validated for shape when the model actually sends one.
+  if (REPLY_TYPE_ACTIONS.has(raw.action) && raw.nextQuestion != null) {
     const nq = raw.nextQuestion;
-    if (nq === null || nq === undefined || nq.trim() === "") {
-      return { ok: false, code: "MISSING_NEXT_QUESTION" };
-    }
     const trimmed = nq.trim();
     if (!trimmed.endsWith("?")) {
       return { ok: false, code: "INVALID_NEXT_QUESTION" };

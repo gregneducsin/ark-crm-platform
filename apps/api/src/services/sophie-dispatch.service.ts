@@ -148,7 +148,16 @@ async function processInboundSupportMessageLocked(personId: string, generation: 
     result = { ...result, reply: answer, nextQuestion: null, requiresStaff: true };
   } else {
     const text = [result.reply, result.nextQuestion].filter((t): t is string => Boolean(t?.trim())).join("\n\n");
-    if (text) await sendAndLog(personId, conversation.id, customer?.phone ?? null, text, isCurrent, result.preCheckCode === "OPT_OUT", generation);
+    if (result.preCheckCode === "MESSAGING_FEEDBACK") {
+      // The acknowledgment still goes out, but the thread is then held for a
+      // person — more automated replies are exactly what they objected to.
+      await updateSupportConversationState(conversation.id, {
+        needsAttention: true, needsAttentionReason: "Customer feedback about automated replies or repeated questions. Please review and respond personally.",
+      });
+      try {
+        if (text) await sendAndLog(personId, conversation.id, customer?.phone ?? null, text, isCurrent, false, generation, true);
+      } finally { await holdSmsReplyForStaff(personId, "support"); }
+    } else if (text) await sendAndLog(personId, conversation.id, customer?.phone ?? null, text, isCurrent, result.preCheckCode === "OPT_OUT", generation);
   }
 
   if (!await isCurrent()) return { ok: false, code: "SUPERSEDED" };
@@ -161,7 +170,7 @@ async function processInboundSupportMessageLocked(personId: string, generation: 
   const statePatch: SupportConversationStatePatch = {
     lastQuestion: result.nextQuestion,
     lastDraft: isStuckRepeating ? (result.reply ?? conversation.lastDraft) : result.reply,
-    ...(!isStuckRepeating && result.requiresStaff
+    ...(!isStuckRepeating && result.requiresStaff && result.preCheckCode !== "MESSAGING_FEEDBACK"
         ? { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: result.preCheckCode }) }
         : {}),
     ...(conversation.reviewRequested && result.inboundSentiment !== null ? { reviewSentiment: result.inboundSentiment } : {}),

@@ -42,6 +42,41 @@ function modelResult(overrides: Partial<SophieInteractiveResult> = {}): SophieIn
 }
 
 describe("runSophieTurn", () => {
+  it("acknowledges a stated plan without asking the customer to repeat it", async () => {
+    callSophieInteractiveMock.mockClear();
+    const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "No issues so far. Not as much as I hoped but we'll give it a go for the next couple of weeks." }] }));
+    expect(result).toMatchObject({ ok: true, action: "pause", nextQuestion: null, requiresStaff: false });
+    expect(callSophieInteractiveMock).not.toHaveBeenCalled();
+  });
+  it("acknowledges bot timing feedback and requests human review", async () => {
+    callSophieInteractiveMock.mockClear();
+    const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "A recommendation for whoever reviews this: your AI chat bot replies too fast and acts like a person. As I said, we'll stick with the plan." }] }));
+    expect(result).toMatchObject({ ok: true, action: "staff_review", nextQuestion: null, requiresStaff: true, preCheckCode: "MESSAGING_FEEDBACK" });
+    expect(callSophieInteractiveMock).not.toHaveBeenCalled();
+  });
+  it("keeps medical safety checks ahead of conversational closure", async () => {
+    const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "We'll continue but I am having side effects." }] }));
+    expect(result).toMatchObject({ ok: true, requiresStaff: true, preCheckCode: "PRESCRIPTION_QUESTION" });
+  });
+  it("does not close a stated plan when it also includes an unresolved request", async () => {
+    callSophieInteractiveMock.mockClear();
+    callSophieInteractiveMock.mockResolvedValueOnce(modelResult({ reply: "You can check the tracking in your patient portal.", nextQuestion: null }));
+    await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "We'll continue for a few weeks. I need my tracking number" }] }));
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(1);
+  });
+  it("retains messaging feedback when a second inbound is coalesced with it", async () => {
+    const result = await runSophieTurn(baseBody({ messages: [
+      { direction: "inbound", body: "Your chatbot replies too fast and acts like a person." },
+      { direction: "inbound", body: "Anyway, thanks." },
+    ] }));
+    expect(result).toMatchObject({ ok: true, requiresStaff: true, preCheckCode: "MESSAGING_FEEDBACK", nextQuestion: null });
+  });
+  it("strips a generic 'anything else' follow-up from a model turn", async () => {
+    callSophieInteractiveMock.mockClear();
+    callSophieInteractiveMock.mockResolvedValueOnce(modelResult({ nextQuestion: "Is there anything else I can help with?" }));
+    const result = await runSophieTurn(baseBody());
+    expect(result).toMatchObject({ ok: true, nextQuestion: null });
+  });
 it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thing, what state are you in"])("deduplicates the follow-up before safety validation: %s", async (reply) => {
     callSophieInteractiveMock.mockClear();
     callSophieInteractiveMock.mockResolvedValue(modelResult({ reply, nextQuestion: "What state are you in?" }));
@@ -161,16 +196,16 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
     if (!result.ok) expect(result.code).toBe("PROHIBITED_CLINICAL");
   });
 
-  it("retries once on a format-only rejection (MISSING_NEXT_QUESTION) and succeeds on the second attempt", async () => {
+  it("retries malformed questions but allows the eventual answer without a question", async () => {
     callSophieInteractiveMock.mockClear();
     callSophieInteractiveMock
-      .mockResolvedValueOnce(modelResult({ nextQuestion: null }))
+      .mockResolvedValueOnce(modelResult({ nextQuestion: "Which order" }))
       .mockResolvedValueOnce(modelResult({ nextQuestion: "Anything else I can help with?" }));
     const result = await runSophieTurn(baseBody());
 
     expect(callSophieInteractiveMock).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.nextQuestion).toBe("Anything else I can help with?");
+    if (result.ok) expect(result.nextQuestion).toBeNull();
   });
 
   it("does not retry a safety-relevant rejection", async () => {

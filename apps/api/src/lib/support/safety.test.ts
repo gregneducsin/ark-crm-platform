@@ -239,9 +239,9 @@ describe("supportPostCheck", () => {
     expect(result).toEqual({ ok: false, code: "REPEATED_DRAFT" });
   });
 
-  it("requires nextQuestion for action=reply", () => {
+  it("allows a complete answer without a follow-up question", () => {
     const result = check(reply({ nextQuestion: null }));
-    expect(result).toEqual({ ok: false, code: "MISSING_NEXT_QUESTION" });
+    expect(result.ok).toBe(true);
   });
 
   it("rejects nextQuestion for action=pause", () => {
