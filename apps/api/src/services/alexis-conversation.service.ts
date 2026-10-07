@@ -29,6 +29,7 @@ export type AlexisTurnResult =
       source: "pre_check_block" | "model";
       preCheckCode: string | null;
       learnedFirstName: string | null;
+      preferredReengagementDate: string | null;
     }
   | { ok: false; code: string };
 
@@ -196,7 +197,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     linkProvided: body.linkProvided, promoOffered: body.promoOffered,
     inboundSentiment: null, requiresStaff: review, knowledgeTopicsUsed: [],
     validatedSlotUpdates: { dosagePreference: null }, source: "pre_check_block",
-    preCheckCode: review ? "DOSING_REVIEW" : "DOSE_HISTORY_DEFERRED", learnedFirstName: null,
+    preCheckCode: review ? "DOSING_REVIEW" : "DOSE_HISTORY_DEFERRED", learnedFirstName: null, preferredReengagementDate: null,
   });
   const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
   if (lastInbound) {
@@ -241,6 +242,7 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
         source: "pre_check_block",
         preCheckCode: pre.code,
         learnedFirstName: null,
+        preferredReengagementDate: null,
       };
     }
   }
@@ -392,5 +394,6 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     source: "model",
     preCheckCode: lastResortCode,
     learnedFirstName: result.learnedFirstName,
+    preferredReengagementDate: result.preferredReengagementDate,
   };
 }

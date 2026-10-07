@@ -89,6 +89,15 @@ export interface ClaudeInteractiveResult {
    * patient directly giving their name.
    */
   readonly learnedFirstName: string | null;
+  /**
+   * "YYYY-MM-DD" when the patient just answered a "when's a better time to
+   * follow up" question (see REENGAGEMENT TIMING in provider.ts's system
+   * prompt) with an extractable timeframe — used to reschedule the
+   * objection-reengagement text (see objection-reengagement.service.ts)
+   * instead of leaving it on its default 2-week schedule. Null on every
+   * other turn, including when no timeframe could be extracted.
+   */
+  readonly preferredReengagementDate: string | null;
 }
 
 export interface BotPreviewMessage {

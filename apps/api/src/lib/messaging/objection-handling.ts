@@ -8,14 +8,17 @@
  *   Stage 1 → 2 (secondAttempt): a direct close asking the customer to start
  *                                 the questionnaire now. Still one statement,
  *                                 one question — no re-arguing the same point.
- *   Stage 2 (standDown):         a plain, no-pressure close. No question asked.
- *                                 This is terminal — never a fourth attempt on
- *                                 the same objection in the same session.
+ *   Stage 2 (standDown):         a plain, no-pressure close. This is terminal —
+ *                                 never a fourth attempt on the same objection
+ *                                 in the same session. Two objections
+ *                                 (think_about_it, no_time) ask when a better
+ *                                 time to follow up is instead of a bare close;
+ *                                 every other standDown asks nothing.
  *
  * The reply/nextQuestion split mirrors ClaudeInteractiveResult: reply is the
  * statement, nextQuestion is the separate trailing question (safety.ts
  * validates that a "reply" action always carries exactly one nextQuestion,
- * and that a "pause" action — used for standDown — carries none).
+ * and that a "pause" action — used for a question-less standDown — carries none).
  *
  * requiredTopics lists the knowledge-catalog keys (see knowledge-catalog.ts)
  * that must be declared in knowledgeTopicsUsed for the corresponding text to
@@ -39,7 +42,12 @@ export const OBJECTION_KEYS = ["price", "think_about_it", "not_qualified", "is_l
 export interface ObjectionStageScript {
   readonly reply: string;
   /**
-   * Present for the rebuttal and secondAttempt stages; absent for standDown.
+   * Always present for the rebuttal and secondAttempt stages. Present for
+   * standDown only on the two objections (think_about_it, no_time) whose
+   * stand-down asks when a better time to follow up is instead of just
+   * leaving things open-ended — see REENGAGEMENT_TIME_QUESTIONS below and
+   * REENGAGEMENT TIMING in provider.ts. Absent for every other objection's
+   * standDown, which stays a plain close with no further ask.
    * An array is 2+ approved variants that mean the same thing — the caller
    * (buildObjectionSection in provider.ts) picks one at random per turn, the
    * same reasoning as pickVariant in follow-up-templates.ts: every lead
@@ -108,9 +116,16 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
     // stand-down on this specific objection arms a one-time re-engagement
     // text 2 weeks out (see objection-reengagement.service.ts), the same way
     // "no problem" from a real salesperson doesn't mean "never follow up
-    // again."
+    // again." Asks when a better time is, rather than passively leaving it
+    // open-ended — a real production case (Luma) had a customer stand down
+    // with no way to actually tell us when to come back, so the 2-week
+    // default was the only thing that ever fired. If they do answer with a
+    // time, that reply is used to reschedule the re-engagement text instead
+    // of the default — see REENGAGEMENT_TIME_QUESTIONS and provider.ts's
+    // preferredReengagementDate handling.
     standDown: {
-      reply: "No problem, I'll leave it here for whenever you're ready.",
+      reply: "No problem, no rush at all.",
+      nextQuestion: "Is there a better time for me to check back in with you?",
       requiredTopics: [],
     },
   },
@@ -160,8 +175,11 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
       nextQuestion: "Want to knock it out real quick?",
       requiredTopics: ["how_ark_works"],
     },
+    // Same reasoning as think_about_it's standDown above — asks when a
+    // better time is instead of leaving it open-ended.
     standDown: {
-      reply: "Sounds good, it'll be here when you're ready.",
+      reply: "No worries at all.",
+      nextQuestion: "What's a better time for us to follow up with you?",
       requiredTopics: [],
     },
   },
@@ -205,6 +223,18 @@ export const OBJECTION_LIBRARY: readonly ObjectionScript[] = [
 export function getObjectionScript(key: ObjectionKey): ObjectionScript | undefined {
   return OBJECTION_LIBRARY.find((o) => o.key === key);
 }
+
+/**
+ * The exact standDown nextQuestion text for the two objections that ask
+ * when a better time to follow up is (think_about_it, no_time) — used by
+ * provider.ts to recognize, on the customer's NEXT message, that this is
+ * their answer to that specific question rather than an answer to
+ * something else, so it knows when it's safe to try extracting a
+ * preferredReengagementDate from their reply.
+ */
+export const REENGAGEMENT_TIME_QUESTIONS: readonly string[] = OBJECTION_LIBRARY.filter((o) => o.key === "think_about_it" || o.key === "no_time")
+  .map((o) => o.standDown.nextQuestion)
+  .filter((q): q is string => typeof q === "string");
 
 /**
  * "I want to talk to a person" — always routes to staff_review. No AI-drafted

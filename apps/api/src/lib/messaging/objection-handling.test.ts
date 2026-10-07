@@ -26,6 +26,7 @@ function baseResult(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeInt
     promoOffered: false,
     inboundSentiment: null,
     learnedFirstName: null,
+    preferredReengagementDate: null,
     ...overrides,
   };
 }
@@ -60,11 +61,25 @@ describe("OBJECTION_LIBRARY structure", () => {
         }
       });
 
-      it("standDown has no nextQuestion and contains no question mark at all", () => {
-        expect(objection.standDown.nextQuestion).toBeUndefined();
-        expect(objection.standDown.reply).not.toContain("?");
-        expect(EM_DASH_RE.test(objection.standDown.reply)).toBe(false);
-      });
+      if (objection.key === "think_about_it" || objection.key === "no_time") {
+        it("standDown asks when a better time to follow up is — a single trailing question, no em dashes, reply itself has no question mark", () => {
+          expect(objection.standDown.nextQuestion, `${objection.key} standDown nextQuestion`).toBeDefined();
+          const variants = Array.isArray(objection.standDown.nextQuestion) ? objection.standDown.nextQuestion : [objection.standDown.nextQuestion!];
+          for (const nq of variants) {
+            expect(nq.trim().endsWith("?")).toBe(true);
+            expect((nq.match(/\?/g) ?? []).length).toBe(1);
+            expect(EM_DASH_RE.test(nq)).toBe(false);
+          }
+          expect(objection.standDown.reply).not.toContain("?");
+          expect(EM_DASH_RE.test(objection.standDown.reply)).toBe(false);
+        });
+      } else {
+        it("standDown has no nextQuestion and contains no question mark at all", () => {
+          expect(objection.standDown.nextQuestion).toBeUndefined();
+          expect(objection.standDown.reply).not.toContain("?");
+          expect(EM_DASH_RE.test(objection.standDown.reply)).toBe(false);
+        });
+      }
 
       it("every required topic exists in the knowledge catalog", () => {
         for (const stage of [objection.rebuttal, objection.secondAttempt, objection.standDown]) {
@@ -88,10 +103,18 @@ describe("OBJECTION_LIBRARY structure", () => {
         }
       });
 
-      it("standDown passes interactivePostCheck as a pause action (no question required)", () => {
-        const result = interactivePostCheck(baseResult({ action: "pause", reply: objection.standDown.reply, nextQuestion: null }), null);
-        expect(result.ok, `${objection.key} standDown should pass postCheck: ${!result.ok ? result.code : ""}`).toBe(true);
-      });
+      if (objection.key === "think_about_it" || objection.key === "no_time") {
+        it("standDown passes interactivePostCheck as a reply action asking when a better time is", () => {
+          const nq = objection.standDown.nextQuestion;
+          const result = interactivePostCheck(baseResult({ action: "reply", reply: objection.standDown.reply, nextQuestion: (Array.isArray(nq) ? nq[0] : nq) ?? null }), null);
+          expect(result.ok, `${objection.key} standDown should pass postCheck: ${!result.ok ? result.code : ""}`).toBe(true);
+        });
+      } else {
+        it("standDown passes interactivePostCheck as a pause action (no question required)", () => {
+          const result = interactivePostCheck(baseResult({ action: "pause", reply: objection.standDown.reply, nextQuestion: null }), null);
+          expect(result.ok, `${objection.key} standDown should pass postCheck: ${!result.ok ? result.code : ""}`).toBe(true);
+        });
+      }
 
       it("rebuttal citing its required topics is rejected when those topics aren't in the permitted set for the turn (proves topic gating is real)", () => {
         if (objection.rebuttal.requiredTopics.length === 0) return;

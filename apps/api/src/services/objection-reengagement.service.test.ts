@@ -26,7 +26,7 @@ vi.mock("../lib/sms-provider.js", async () => {
     } }) };
 });
 
-const { scheduleObjectionReengagement, sweepObjectionReengagementTriggers } = await import("./objection-reengagement.service.js");
+const { scheduleObjectionReengagement, rescheduleObjectionReengagementIfPending, sweepObjectionReengagementTriggers } = await import("./objection-reengagement.service.js");
 const { listMessages } = await import("./conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null; firstName?: string } = {}): Promise<string> {
@@ -74,6 +74,44 @@ describe("scheduleObjectionReengagement", () => {
 
     const triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(triggers.length).toBe(1);
+  });
+});
+
+describe("rescheduleObjectionReengagementIfPending", () => {
+  it("updates a pending trigger's dueAt and reports true", async () => {
+    const personId = await seedCustomer();
+    await scheduleObjectionReengagement(personId);
+    const newDueAt = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+
+    const updated = await rescheduleObjectionReengagementIfPending(personId, newDueAt);
+
+    expect(updated).toBe(true);
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger.dueAt.getTime()).toBe(newDueAt.getTime());
+    expect(trigger.status).toBe("pending");
+  });
+
+  it("reports false and changes nothing when no trigger exists for this person", async () => {
+    const personId = await seedCustomer();
+    const updated = await rescheduleObjectionReengagementIfPending(personId, new Date(Date.now() + 20 * 24 * 60 * 60 * 1000));
+
+    expect(updated).toBe(false);
+    const triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(triggers).toHaveLength(0);
+  });
+
+  it("reports false and leaves an already-sent trigger's dueAt untouched", async () => {
+    const personId = await seedCustomer();
+    await scheduleObjectionReengagement(personId);
+    await db.update(objectionReengagementTriggersTable).set({ status: "sent", sentAt: new Date() }).where(eq(objectionReengagementTriggersTable.personId, personId));
+    const [before] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+
+    const updated = await rescheduleObjectionReengagementIfPending(personId, new Date(Date.now() + 20 * 24 * 60 * 60 * 1000));
+
+    expect(updated).toBe(false);
+    const [after] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(after.dueAt.getTime()).toBe(before.dueAt.getTime());
+    expect(after.status).toBe("sent");
   });
 });
 

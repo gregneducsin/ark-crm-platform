@@ -16,8 +16,12 @@ import { renderConversationReplyEmail } from "../lib/email/templates.js";
 import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerEmailDnd, setCustomerEmailDnd } from "./dnd.service.js";
-import { scheduleObjectionReengagement } from "./objection-reengagement.service.js";
+import { scheduleObjectionReengagement, rescheduleObjectionReengagementIfPending } from "./objection-reengagement.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
+import { nineAmEasternOnDate } from "../lib/send-window.js";
+
+/** Never reschedule further out than this — a defensive bound against a hallucinated or misparsed date, not a real product limit. */
+const MAX_REENGAGEMENT_LOOKAHEAD_MS = 180 * 24 * 60 * 60 * 1000;
 
 async function getCustomerContact(personId: string): Promise<{ firstName: string; email: string } | undefined> {
   const [row] = await db.select({ firstName: customersTable.firstName, email: customersTable.email }).from(customersTable).where(eq(customersTable.id, personId));
@@ -183,10 +187,18 @@ async function processInboundEmailLocked(
       : {}),
   });
 
-  // Same follow-through as the SMS side — see the identical comment in
+  // Same follow-through as the SMS side — see the identical comments in
   // alexis-dispatch.service.ts.
-  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price") && result.objectionStage === 2) {
+  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price" || result.objectionKey === "no_time") && result.objectionStage === 2) {
     await scheduleObjectionReengagement(personId, conversation.leadSource);
+  }
+
+  if (result.preferredReengagementDate) {
+    const target = nineAmEasternOnDate(result.preferredReengagementDate);
+    const now = Date.now();
+    if (!Number.isNaN(target.getTime()) && target.getTime() > now && target.getTime() <= now + MAX_REENGAGEMENT_LOOKAHEAD_MS) {
+      await rescheduleObjectionReengagementIfPending(personId, target);
+    }
   }
 
   return result;

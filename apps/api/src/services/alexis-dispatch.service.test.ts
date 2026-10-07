@@ -8,6 +8,11 @@ import { db, customersTable, conversationsTable, conversationMessagesTable, obje
 import type { AlexisTurnResult } from "./alexis-conversation.service.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd, setCustomerEmailDnd } from "./dnd.service.js";
 
+/** "YYYY-MM-DD" in America/New_York — same format provider.ts computes preferredReengagementDate in. */
+function isoDateInEastern(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
 const runAlexisTurnMock = vi.fn();
 vi.mock("./alexis-conversation.service.js", async () => {
   const actual = await vi.importActual<typeof import("./alexis-conversation.service.js")>("./alexis-conversation.service.js");
@@ -55,6 +60,7 @@ function okResult(overrides: Partial<Extract<AlexisTurnResult, { ok: true }>> = 
     source: "model",
     preCheckCode: null,
     learnedFirstName: null,
+    preferredReengagementDate: null,
     ...overrides,
   };
 }
@@ -171,6 +177,84 @@ describe("processInboundMessage", () => {
     const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(trigger).toBeDefined();
     expect(trigger.status).toBe("pending");
+  });
+
+  it("schedules a re-engagement text once no_time reaches stand-down too — real production case (Luma) where this was missing entirely and no follow-up ever got scheduled", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_notime_standdown" });
+    runAlexisTurnMock.mockResolvedValueOnce(
+      okResult({ objectionKey: "no_time", objectionStage: 2, reply: "No worries at all.", nextQuestion: "What's a better time for us to follow up with you?" }),
+    );
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "I really don't have time for this right now");
+
+    const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(trigger).toBeDefined();
+    expect(trigger.status).toBe("pending");
+  });
+
+  it("reschedules an existing pending re-engagement trigger to the date the customer answers with", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_standdown_2" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "no_time", objectionStage: 2, nextQuestion: "What's a better time for us to follow up with you?" }));
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "no time right now");
+    // Confirm the stand-down text delivered so the next inbound isn't held behind a queued send.
+    await recordSmsDeliveryReceipt("msg_standdown_2", "sent", new Date());
+
+    const [beforeAnswer] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    const defaultDueAt = beforeAnswer.dueAt.getTime();
+
+    const answerDate = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+    const isoDate = isoDateInEastern(answerDate);
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_standdown_2_answer" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: null, objectionStage: 0, nextQuestion: null, reply: "Sounds good, I'll follow up then.", preferredReengagementDate: isoDate }));
+    await processInboundMessage(personId, "call me in about 3 weeks");
+
+    const [afterAnswer] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(afterAnswer.status).toBe("pending");
+    expect(afterAnswer.dueAt.getTime()).not.toBe(defaultDueAt);
+    // Should land on the customer's stated date, not the ~14-day default.
+    expect(Math.abs(afterAnswer.dueAt.getTime() - answerDate.getTime())).toBeLessThan(24 * 60 * 60 * 1000);
+  });
+
+  it("does not reschedule anything when preferredReengagementDate is set but no trigger exists for this person", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_stray_date" });
+    const isoDate = isoDateInEastern(new Date(Date.now() + 10 * 24 * 60 * 60 * 1000));
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: null, objectionStage: 0, preferredReengagementDate: isoDate }));
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "how about next week?");
+
+    const triggers = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(triggers).toHaveLength(0);
+  });
+
+  it("ignores a preferredReengagementDate that's in the past or unreasonably far out, leaving the default schedule in place", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_standdown_3" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: "think_about_it", objectionStage: 2, nextQuestion: "Is there a better time for me to check back in with you?" }));
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "not right now");
+    await recordSmsDeliveryReceipt("msg_standdown_3", "sent", new Date());
+
+    const [beforeAnswer] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    const defaultDueAt = beforeAnswer.dueAt.getTime();
+
+    // A year out — past the defensive 180-day bound.
+    const tooFarIso = isoDateInEastern(new Date(Date.now() + 400 * 24 * 60 * 60 * 1000));
+    sendMessageMock.mockResolvedValue({ providerMessageId: "msg_standdown_3_answer" });
+    runAlexisTurnMock.mockResolvedValueOnce(okResult({ objectionKey: null, objectionStage: 0, preferredReengagementDate: tooFarIso }));
+    await processInboundMessage(personId, "next year sometime");
+
+    const [afterTooFar] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
+    expect(afterTooFar.dueAt.getTime()).toBe(defaultDueAt);
   });
 
   it("does NOT schedule a re-engagement text for a different objection reaching stage 2, or think_about_it/price at an earlier stage", async () => {

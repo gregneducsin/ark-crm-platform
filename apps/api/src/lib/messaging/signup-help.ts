@@ -12,7 +12,7 @@ function reply(body: BotPreviewRequestBody, text: string, question: string | nul
     resumeTopic: null, safetyCodes: [], linkProvided: body.linkProvided,
     objectionStage: body.objectionStage, objectionKey: body.objectionKey,
     promoOffered: body.promoOffered, inboundSentiment: null,
-    learnedFirstName: null,
+    learnedFirstName: null, preferredReengagementDate: null,
   };
 }
 

@@ -22,6 +22,7 @@ function reply(overrides: Partial<ClaudeInteractiveResult> = {}): ClaudeInteract
     promoOffered: false,
     inboundSentiment: null,
     learnedFirstName: null,
+    preferredReengagementDate: null,
     ...overrides,
   };
 }

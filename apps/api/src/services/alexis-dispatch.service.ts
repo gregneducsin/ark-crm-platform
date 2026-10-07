@@ -19,9 +19,13 @@ import { logger } from "../lib/logger.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { isCustomerSmsDnd, setCustomerSmsDnd } from "./dnd.service.js";
 import { isSalesSmsPaused } from "../lib/sales-sms.js";
-import { scheduleObjectionReengagement } from "./objection-reengagement.service.js";
+import { scheduleObjectionReengagement, rescheduleObjectionReengagementIfPending } from "./objection-reengagement.service.js";
 import { describeNeedsAttentionReason } from "../lib/messaging/needs-attention-reason.js";
 import { countRepeatQuestionsInHistory } from "../lib/messaging/repeat-question.js";
+import { nineAmEasternOnDate } from "../lib/send-window.js";
+
+/** Never reschedule further out than this — a defensive bound against a hallucinated or misparsed date, not a real product limit. */
+const MAX_REENGAGEMENT_LOOKAHEAD_MS = 180 * 24 * 60 * 60 * 1000;
 
 
 
@@ -243,11 +247,31 @@ async function processInboundMessageLocked(personId: string, generation: string)
         : {}),
   });
 
-  // A stand-down ("I'll leave it here for whenever you're ready" / "we're
-  // here whenever the timing's better") is terminal for THIS conversation,
-  // not the end of outreach — see objection-reengagement.service.ts.
-  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price") && result.objectionStage === 2) {
+  // A stand-down ("no rush at all" / "no worries at all") is terminal for
+  // THIS conversation, not the end of outreach — see
+  // objection-reengagement.service.ts. no_time is included alongside
+  // think_about_it and price: a real production case (Luma) had a customer
+  // stand down on no_time and nothing was ever scheduled to follow up with
+  // them at all, since this condition didn't cover it.
+  if ((result.objectionKey === "think_about_it" || result.objectionKey === "price" || result.objectionKey === "no_time") && result.objectionStage === 2) {
     await scheduleObjectionReengagement(personId, conversation.leadSource);
+  }
+
+  // The customer answering "is there a better time?" / "what's a better
+  // time?" with an actual timeframe reschedules the trigger armed above
+  // (on a PRIOR turn, when stand-down happened) to that specific date,
+  // instead of leaving it on the generic 2-week default. Deliberately not
+  // gated on objectionKey/objectionStage this turn — by the time the
+  // customer answers, the objection conversation has moved on and Claude
+  // correctly reports objectionKey as null for this turn (see REENGAGEMENT
+  // TIMING in provider.ts), so this only ever has preferredReengagementDate
+  // to go on.
+  if (result.preferredReengagementDate) {
+    const target = nineAmEasternOnDate(result.preferredReengagementDate);
+    const now = Date.now();
+    if (!Number.isNaN(target.getTime()) && target.getTime() > now && target.getTime() <= now + MAX_REENGAGEMENT_LOOKAHEAD_MS) {
+      await rescheduleObjectionReengagementIfPending(personId, target);
+    }
   }
 
   return result;

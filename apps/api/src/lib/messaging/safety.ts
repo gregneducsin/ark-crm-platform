@@ -77,6 +77,13 @@ export const ClaudeInteractiveSchema = z
     inboundSentiment: z.enum(["positive", "neutral", "negative"]).nullable().optional().default(null),
     /** The patient's first name, set only on the turn where they state it themselves. */
     learnedFirstName: z.string().trim().min(1).max(60).nullable().optional().default(null),
+    /** "YYYY-MM-DD" only on the turn the patient answers a "when's a better time" reengagement question with an extractable timeframe. See REENGAGEMENT TIMING in provider.ts. */
+    preferredReengagementDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD")
+      .nullable()
+      .optional()
+      .default(null),
   })
   .superRefine((data, ctx) => {
     // Actions that require a non-empty reply
