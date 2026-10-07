@@ -6,6 +6,17 @@ export const smsPhoneOptOutsTable = pgTable("sms_phone_opt_outs", {
   optedOutAt: timestamp("opted_out_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Staff "I've seen this" ledger for the missed-response alert (see
+// missed-response.service.ts). Polymorphic references: persona selects the
+// sales or support SMS message table, so no FK — the service validates the
+// (conversation, inbound) pair itself before inserting.
+export const missedSmsResponseReviewsTable = pgTable("missed_sms_response_reviews", {
+  persona: text("persona", { enum: ["alexis", "sophie"] }).notNull(),
+  conversationId: uuid("conversation_id").notNull(),
+  inboundId: uuid("inbound_id").notNull(),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("missed_sms_response_reviews_key").on(t.persona, t.conversationId, t.inboundId)]);
+
 // Receipts can arrive before the HTTP send request returns its message ID.
 export const smsDeliveryReceiptsTable = pgTable("sms_delivery_receipts", {
   providerMessageId: text("provider_message_id").primaryKey(),

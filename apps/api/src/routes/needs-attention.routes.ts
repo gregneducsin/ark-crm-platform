@@ -1,4 +1,5 @@
 import { Router, type Router as RouterType } from "express";
+import { z } from "zod";
 import * as needsAttentionService from "../services/needs-attention.service.js";
 import { requireRole } from "../middleware/requireAuth.js";
 import { requireCsrf } from "../middleware/csrf.js";
@@ -39,7 +40,12 @@ export function createNeedsAttentionRouter(): RouterType {
         res.status(400).json({ error: "Invalid channel or persona." });
         return;
       }
-      await needsAttentionService.clearNeedsAttentionItem(channel as "sms" | "email", persona as "alexis" | "sophie", id as string);
+      const body = z.object({ missedInboundId: z.string().uuid().optional() }).safeParse(req.body ?? {});
+      if (!body.success || (body.data.missedInboundId && channel !== "sms")) {
+        res.status(400).json({ error: "Invalid review payload." });
+        return;
+      }
+      await needsAttentionService.clearNeedsAttentionItem(channel as "sms" | "email", persona as "alexis" | "sophie", id as string, body.data.missedInboundId);
       res.json({ ok: true });
     } catch (err) {
       next(err);

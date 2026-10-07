@@ -41,6 +41,7 @@ const EXPECTED_TABLES = [
   "sms_delivery_receipts",
   "sms_phone_opt_outs",
   "sms_reply_work",
+  "missed_sms_response_reviews",
   "lead_checkin_triggers",
   "email_conversations",
   "email_conversation_messages",

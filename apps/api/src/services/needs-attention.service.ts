@@ -16,6 +16,7 @@ import { clearNeedsAttention as clearAlexisSmsAttention } from "./conversations.
 import { clearSupportNeedsAttention as clearSophieSmsAttention } from "./support-conversations.service.js";
 import { updateEmailConversationState } from "./email-conversations.service.js";
 import { updateSupportEmailConversationState } from "./support-email-conversations.service.js";
+import { listMissedSmsResponses, reviewMissedSmsResponse } from "./missed-response.service.js";
 
 /**
  * Unifies the 4 independent needsAttention flags (Alexis SMS, Sophie SMS, Alexis
@@ -37,6 +38,8 @@ export interface NeedsAttentionItem {
   readonly lastMessagePreview: string | null;
   readonly lastMessageAt: string | null;
   readonly reason: string | null;
+  /** Set only on a read-derived missed-response alert (see missed-response.service.ts); identifies the exact inbound the reviewer is acknowledging. */
+  readonly missedInboundId?: string;
 }
 
 async function listAlexisSms(): Promise<NeedsAttentionItem[]> {
@@ -110,7 +113,12 @@ async function listSophieEmail(): Promise<NeedsAttentionItem[]> {
 /** Every flagged conversation across all 4 channels, most recently active first (nulls — no messages yet — last). */
 export async function listNeedsAttention(): Promise<NeedsAttentionItem[]> {
   const [alexisSms, sophieSms, alexisEmail, sophieEmail] = await Promise.all([listAlexisSms(), listSophieSms(), listAlexisEmail(), listSophieEmail()]);
-  return [...alexisSms, ...sophieSms, ...alexisEmail, ...sophieEmail].sort((a, b) => {
+  // A real flag on the same thread always wins over the derived alert, so a
+  // conversation never shows up twice.
+  const missed = await listMissedSmsResponses();
+  const flagged = [...alexisSms, ...sophieSms, ...alexisEmail, ...sophieEmail];
+  const keys = new Set(flagged.map((item) => `${item.channel}:${item.persona}:${item.conversationId}`));
+  return [...flagged, ...missed.filter((item) => !keys.has(`${item.channel}:${item.persona}:${item.conversationId}`))].sort((a, b) => {
     if (a.lastMessageAt === null) return 1;
     if (b.lastMessageAt === null) return -1;
     return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
@@ -164,7 +172,8 @@ export async function getNeedsAttentionMessages(channel: NeedsAttentionChannel, 
 }
 
 /** Dispatches to the right channel/persona's own clear-attention logic — same 4 underlying flags, just one entry point for the unified triage view. */
-export async function clearNeedsAttentionItem(channel: NeedsAttentionChannel, persona: NeedsAttentionPersona, conversationId: string): Promise<void> {
+export async function clearNeedsAttentionItem(channel: NeedsAttentionChannel, persona: NeedsAttentionPersona, conversationId: string, missedInboundId?: string): Promise<void> {
+  if (channel === "sms" && missedInboundId) return reviewMissedSmsResponse(persona, conversationId, missedInboundId);
   if (channel === "sms" && persona === "alexis") return clearAlexisSmsAttention(conversationId);
   if (channel === "sms" && persona === "sophie") return clearSophieSmsAttention(conversationId);
   if (channel === "email" && persona === "alexis") return updateEmailConversationState(conversationId, { needsAttention: false, needsAttentionReason: null });

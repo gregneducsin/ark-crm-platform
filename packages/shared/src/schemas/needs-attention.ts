@@ -29,6 +29,8 @@ export const needsAttentionItemSchema = z.object({
   lastMessagePreview: z.string().nullable(),
   lastMessageAt: z.string().nullable(),
   reason: z.string().nullable(),
+  /** Present only on a read-derived missed-response alert; echo it back on clear so only that inbound is acknowledged. */
+  missedInboundId: z.string().uuid().optional(),
 });
 export type NeedsAttentionItem = z.infer<typeof needsAttentionItemSchema>;
 

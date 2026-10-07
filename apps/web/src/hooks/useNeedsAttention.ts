@@ -32,8 +32,8 @@ export function useNeedsAttentionMessages(channel: NeedsAttentionChannel, person
 export function useClearNeedsAttentionItem() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ channel, persona, conversationId }: { channel: NeedsAttentionChannel; persona: NeedsAttentionPersona; conversationId: string }) =>
-      api.post<{ ok: true }>(`/api/app/needs-attention/${channel}/${persona}/${conversationId}/clear`),
+    mutationFn: ({ channel, persona, conversationId, missedInboundId }: { channel: NeedsAttentionChannel; persona: NeedsAttentionPersona; conversationId: string; missedInboundId?: string }) =>
+      api.post<{ ok: true }>(`/api/app/needs-attention/${channel}/${persona}/${conversationId}/clear`, { missedInboundId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["needs-attention"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
