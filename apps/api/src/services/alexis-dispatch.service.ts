@@ -179,7 +179,7 @@ async function processInboundMessageLocked(personId: string, generation: string)
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Alexis turn rejected — no outbound message sent");
     // The customer got silence, not just a routed reply — that's exactly the
     // kind of thing a human should see, not just a log line.
-    await updateConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code }) });
+    await updateConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code, rejectedDraft: result.rejectedDraft }) });
     return result;
   }
 

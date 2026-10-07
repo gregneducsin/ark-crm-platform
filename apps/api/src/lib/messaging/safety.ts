@@ -914,7 +914,12 @@ function normalizeForComparison(text: string): string {
 
 export type InteractivePostCheckResult =
   | { readonly ok: true; readonly result: ClaudeInteractiveResult; readonly validatedSlotUpdates: Record<string, unknown> }
-  | { readonly ok: false; readonly code: string };
+  | {
+      readonly ok: false;
+      readonly code: string;
+      /** Specific, retry-actionable detail (e.g. which dollar figure was unapproved) — fed back to the model on retry. */
+      readonly detail?: string;
+    };
 
 export interface InteractivePostCheckOptions {
   /**
@@ -1059,7 +1064,14 @@ export function interactivePostCheck(
       DOLLAR_AMOUNT_GLOBAL_RE.lastIndex = 0;
       for (const match of reply.matchAll(DOLLAR_AMOUNT_GLOBAL_RE)) {
         if (!APPROVED_DOLLAR_AMOUNTS.has(normalizeDollarAmount(match[1]))) {
-          return { ok: false, code: "UNSUPPORTED_PRICING_CLAIM" };
+          // Name the figure: a generic "use approved amounts" note lets the
+          // model repeat the same arithmetic (e.g. a discounted total divided
+          // into a monthly installment) on every retry.
+          return {
+            ok: false,
+            code: "UNSUPPORTED_PRICING_CLAIM",
+            detail: `The figure $${match[1]} is not an approved amount. Quote only dollar figures that appear verbatim in the cited pricing topic's approved text; never compute a monthly installment by dividing a discounted total, and never round or restate an approved figure.`,
+          };
         }
       }
     }
@@ -1083,7 +1095,11 @@ export function interactivePostCheck(
       // (no product pricing topic declared), any dollar amount must be exactly $40.
       const hasProductPricingTopic = raw.knowledgeTopicsUsed.some((k) => PRODUCT_PRICING_TOPIC_KEYS.has(k));
       if (!hasProductPricingTopic && DOLLAR_AMOUNT_RE.test(reply) && !APPROVED_PROMOTION_AMOUNT_RE.test(reply)) {
-        return { ok: false, code: "UNSUPPORTED_PRICING_CLAIM" };
+        return {
+          ok: false,
+          code: "UNSUPPORTED_PRICING_CLAIM",
+          detail: "With only first_month_offer cited, the only dollar figure allowed is the $40 discount itself. To quote a plan price, also cite the product's pricing topic (semaglutide_pricing or tirzepatide_pricing).",
+        };
       }
     }
 

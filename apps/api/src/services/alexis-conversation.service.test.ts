@@ -350,6 +350,26 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
     if (!result.ok) expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
   });
 
+  it("tells the retry exactly which dollar figure was unapproved, and reports the blocked draft when every attempt fails", async () => {
+    callClaudeInteractiveMock.mockClear();
+    // A correct $230 promo-adjusted 3-month total followed by an invented
+    // "$77 a month" installment (230 / 3), repeated on every retry.
+    callClaudeInteractiveMock.mockResolvedValue(
+      modelResult({ reply: "Semaglutide is $230 for your first 3 months with the $40 off, about $77 a month.", knowledgeTopicsUsed: ["semaglutide_pricing", "first_month_offer"] }),
+    );
+    const personId = await seedCustomer();
+    const result = await runAlexisTurn(personId, baseBody());
+
+    const retryNote = callClaudeInteractiveMock.mock.calls[1][2];
+    expect(retryNote).toMatch(/\$77/);
+    expect(retryNote).toMatch(/not an approved amount/i);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("UNSUPPORTED_PRICING_CLAIM");
+      expect(result.rejectedDraft).toContain("$77 a month");
+    }
+  });
+
   it("rejects a knowledge topic the model wasn't permitted to use this turn", async () => {
     callClaudeInteractiveMock.mockClear();
     callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ knowledgeTopicsUsed: ["some_future_unenabled_topic"] }));

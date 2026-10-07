@@ -143,7 +143,7 @@ async function processInboundEmailLocked(
 
   if (!result.ok) {
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Alexis email turn rejected — no outbound email sent");
-    await updateEmailConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code }) });
+    await updateEmailConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code, rejectedDraft: result.rejectedDraft }) });
     return result;
   }
 

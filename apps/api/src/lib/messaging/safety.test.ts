@@ -364,16 +364,25 @@ describe("interactivePostCheck: pricing and financing claims", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a fabricated price even when a pricing topic is declared", () => {
+  it("rejects a fabricated price even when a pricing topic is declared, and names the figure", () => {
     const result = check(reply({ reply: "Tirzepatide is $299 a month right now.", knowledgeTopicsUsed: ["tirzepatide_pricing"] }));
-    expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: expect.stringContaining("$299") });
   });
 
   it("rejects a fabricated promo discount even when first_month_offer and a product topic are both declared", () => {
     const result = check(
       reply({ reply: "With $50 off, semaglutide is $70 for the first month.", knowledgeTopicsUsed: ["semaglutide_pricing", "first_month_offer"] }),
     );
-    expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: expect.stringContaining("$50") });
+  });
+
+  it("names a computed monthly installment from a discounted total — e.g. '$230 for 3 months, about $77 a month'", () => {
+    const result = check(
+      reply({ reply: "Semaglutide is $270 for the 3-month plan, or $230 with your $40 off, which is about $77 a month.", knowledgeTopicsUsed: ["semaglutide_pricing", "first_month_offer"] }),
+    );
+    expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: expect.stringMatching(/\$77\b.*not an approved amount/) });
+    // The same quote without the invented installment is fine.
+    expect(check(reply({ reply: "Semaglutide is $270 for the 3-month plan, or $230 with your $40 off, normally $90 a month.", knowledgeTopicsUsed: ["semaglutide_pricing", "first_month_offer"] })).ok).toBe(true);
   });
 
   it("allows every real approved figure across both products, all plan lengths, and the promo-adjusted plan totals", () => {
@@ -475,7 +484,7 @@ describe("interactivePostCheck: first_month_offer promotion rules", () => {
 
   it("rejects an invented discount amount", () => {
     const result = check(reply({ reply: "New customers get $50 off.", knowledgeTopicsUsed: ["first_month_offer"] }));
-    expect(result).toEqual({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: expect.stringContaining("$50") });
   });
 });
 
@@ -726,7 +735,7 @@ describe("interactivePostCheck: follow-up content safety", () => {
     ["Would you use [UNAPPROVED_PLACEHOLDER]?", [], "DISALLOWED_TEMPLATE"],
   ] as const)("rejects unsafe follow-up: %s", (nextQuestion, knowledgeTopicsUsed, code) => {
     for (const mainReply of ["Thanks for your message.", null]) {
-      expect(check(reply({ reply: mainReply, nextQuestion, knowledgeTopicsUsed }))).toEqual({ ok: false, code });
+      expect(check(reply({ reply: mainReply, nextQuestion, knowledgeTopicsUsed }))).toMatchObject({ ok: false, code });
     }
   });
 

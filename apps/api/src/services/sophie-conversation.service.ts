@@ -54,7 +54,12 @@ export type SophieTurnResult =
       source: "pre_check_block" | "model";
       preCheckCode: string | null;
     }
-  | { ok: false; code: string };
+  | {
+      ok: false;
+      code: string;
+      /** The last draft the post-check blocked (Sophie's own text, never the customer's) — surfaced in the needs-attention reason so a blocked turn is diagnosable. */
+      rejectedDraft?: string;
+    };
 
 /** Deterministic replies for pre-check blocks — these never reach Claude. */
 const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; reply: string | null }> = {
@@ -162,7 +167,8 @@ export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<Sop
     const canRetry = attempt < MAX_ATTEMPTS && RETRYABLE_POST_CHECK_CODES.has(post.code);
     logger.warn({ code: post.code, attempt, retrying: canRetry }, "Sophie reply rejected by post-check");
     if (!canRetry) {
-      return { ok: false, code: post.code };
+      const rejectedDraft = [raw.reply, raw.nextQuestion].filter((t): t is string => Boolean(t?.trim())).join("\n\n") || undefined;
+      return { ok: false, code: post.code, rejectedDraft };
     }
   }
 

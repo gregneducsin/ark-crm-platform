@@ -15,7 +15,7 @@ import { AI_DIDNT_UNDERSTAND_REASON } from "@luma/shared";
 
 export type NeedsAttentionSource =
   | { readonly kind: "exception" }
-  | { readonly kind: "rejected"; readonly code: string }
+  | { readonly kind: "rejected"; readonly code: string; readonly rejectedDraft?: string }
   | { readonly kind: "staff_flagged"; readonly preCheckCode: string | null }
   | { readonly kind: "stuck_repeating" };
 
@@ -83,8 +83,16 @@ export function describeNeedsAttentionReason(source: NeedsAttentionSource): stri
   switch (source.kind) {
     case "exception":
       return "An unexpected system error stopped a reply from being generated or sent — the customer got nothing.";
-    case "rejected":
-      return REJECTED_REASONS[source.code] ?? `The draft reply was rejected by an automatic check (${source.code}) and nothing was sent.`;
+    case "rejected": {
+      const base = REJECTED_REASONS[source.code] ?? `The draft reply was rejected by an automatic check (${source.code}) and nothing was sent.`;
+      // The blocked text is the bot's own draft, never the customer's words,
+      // so showing it is safe — and it's the only way to tell in ten seconds
+      // whether the guard caught a real problem or tripped on a technicality.
+      const draft = source.rejectedDraft?.trim();
+      if (!draft) return base;
+      const shown = draft.length > 300 ? `${draft.slice(0, 300)}…` : draft;
+      return `${base}\n\nBlocked draft: "${shown}"`;
+    }
     case "staff_flagged":
       return source.preCheckCode
         ? (STAFF_FLAGGED_REASONS[source.preCheckCode] ?? `Flagged for a person to review (${source.preCheckCode}).`)

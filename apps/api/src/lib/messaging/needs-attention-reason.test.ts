@@ -16,6 +16,19 @@ describe("describeNeedsAttentionReason", () => {
     );
   });
 
+  it("appends the blocked draft to a rejection reason so staff can see what was withheld", () => {
+    const reason = describeNeedsAttentionReason({ kind: "rejected", code: "UNSUPPORTED_PRICING_CLAIM", rejectedDraft: "Semaglutide is about $77 a month." });
+    expect(reason).toMatch(/isn't backed by an approved pricing topic/i);
+    expect(reason).toContain('Blocked draft: "Semaglutide is about $77 a month."');
+  });
+
+  it("truncates a long blocked draft and omits the section entirely when there is no draft", () => {
+    const long = "x".repeat(400);
+    const reason = describeNeedsAttentionReason({ kind: "rejected", code: "UNSUPPORTED_PRICING_CLAIM", rejectedDraft: long });
+    expect(reason).toContain(`Blocked draft: "${"x".repeat(300)}…"`);
+    expect(describeNeedsAttentionReason({ kind: "rejected", code: "UNSUPPORTED_PRICING_CLAIM", rejectedDraft: "   " })).not.toContain("Blocked draft");
+  });
+
   it("maps a known staff-flagged pre-check code to its specific explanation", () => {
     expect(describeNeedsAttentionReason({ kind: "staff_flagged", preCheckCode: "EMERGENCY_CONTENT" })).toMatch(/medical emergency/i);
   });

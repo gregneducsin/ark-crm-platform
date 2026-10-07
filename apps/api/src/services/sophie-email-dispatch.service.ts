@@ -118,7 +118,7 @@ async function processInboundSupportEmailLocked(
 
   if (!result.ok) {
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Sophie email turn rejected — no outbound email sent");
-    await updateSupportEmailConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code }) });
+    await updateSupportEmailConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code, rejectedDraft: result.rejectedDraft }) });
     return result;
   }
 

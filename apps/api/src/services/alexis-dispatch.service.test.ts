@@ -390,6 +390,21 @@ describe("processInboundMessage", () => {
     expect(messages.some((m) => m.direction === "inbound" && m.body === "hello")).toBe(true);
   });
 
+  it("shows the blocked draft in the needs-attention reason when a rejected turn carries one", async () => {
+    runAlexisTurnMock.mockClear();
+    sendMessageMock.mockClear();
+    runAlexisTurnMock.mockResolvedValueOnce({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", rejectedDraft: "Semaglutide is $230 for 3 months, about $77 a month." });
+
+    const personId = await seedCustomer();
+    await processInboundMessage(personId, "I was planning on doing semaglutide for 3 months");
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const conversation = await getOrCreateConversation(personId);
+    expect(conversation.needsAttention).toBe(true);
+    expect(conversation.needsAttentionReason).toMatch(/isn't backed by an approved pricing topic/i);
+    expect(conversation.needsAttentionReason).toContain('Blocked draft: "Semaglutide is $230 for 3 months, about $77 a month."');
+  });
+
   it("does not send or persist any outbound message when the guardrail rejects the turn, but flags the conversation for staff attention", async () => {
     runAlexisTurnMock.mockClear();
     sendMessageMock.mockClear();

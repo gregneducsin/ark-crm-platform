@@ -31,7 +31,12 @@ export type AlexisTurnResult =
       learnedFirstName: string | null;
       preferredReengagementDate: string | null;
     }
-  | { ok: false; code: string };
+  | {
+      ok: false;
+      code: string;
+      /** The last draft the post-check blocked (Alexis's own text, never the customer's) — surfaced in the needs-attention reason so a blocked turn is diagnosable. */
+      rejectedDraft?: string;
+    };
 
 /**
  * Deterministic replies for pre-check blocks — these never reach Claude.
@@ -110,6 +115,11 @@ const NEVER_SILENT_CODES = new Set([
 
 /** PROHIBITED_CLINICAL's own, larger attempt budget — see RETRYABLE_POST_CHECK_CODES' docstring. Every other retryable code uses the shared MAX_ATTEMPTS. */
 const CLINICAL_MAX_ATTEMPTS = 5;
+
+/** What the customer would have received, for a blocked turn's needs-attention reason. */
+function draftText(raw: { reply: string | null; nextQuestion: string | null }): string | undefined {
+  return [raw.reply, raw.nextQuestion].filter((t): t is string => Boolean(t?.trim())).join("\n\n") || undefined;
+}
 
 /** Corrective feedback injected into a retry — see RETRYABLE_POST_CHECK_CODES' docstring. Codes not listed here retry with no added context. */
 const RETRY_NOTES: Partial<Record<string, string>> = {
@@ -333,11 +343,11 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
         // Something else is also wrong with this reply (e.g. an unapproved
         // URL) — that's a real, different rejection, not something waiving
         // one specific code can fix, so fail closed with THAT code instead.
-        return { ok: false, code: bypass.code };
+        return { ok: false, code: bypass.code, rejectedDraft: draftText(raw) };
       }
-      return { ok: false, code: post.code };
+      return { ok: false, code: post.code, rejectedDraft: draftText(raw) };
     }
-    retryNote = RETRY_NOTES[post.code];
+    retryNote = [RETRY_NOTES[post.code], post.detail].filter(Boolean).join(" ") || undefined;
   }
 
   // The loop only falls through to here via `break` on post.ok — every other

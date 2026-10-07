@@ -265,7 +265,7 @@ describe("Sophie malformed provider recovery", () => {
     callSophieInteractiveMock.mockReset();
     callSophieInteractiveMock.mockRejectedValueOnce(new SophieProviderError("SCHEMA_VALIDATION_ERROR"))
       .mockResolvedValueOnce(modelResult({ reply: "Your semaglutide dose is being increased." }));
-    expect(await runSophieTurn(baseBody())).toEqual({ ok: false, code: "PROHIBITED_CLINICAL" });
+    expect(await runSophieTurn(baseBody())).toMatchObject({ ok: false, code: "PROHIBITED_CLINICAL", rejectedDraft: expect.stringContaining("dose is being increased") });
     expect(callSophieInteractiveMock).toHaveBeenCalledTimes(2);
   });
   it.each(["PROVIDER_NOT_CONFIGURED", "PROVIDER_TIMEOUT", "PROVIDER_HTTP_ERROR"])("does not retry %s", async code => {

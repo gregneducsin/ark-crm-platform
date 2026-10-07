@@ -123,7 +123,7 @@ async function processInboundSupportMessageLocked(personId: string, generation: 
 
   if (!result.ok) {
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Sophie turn rejected — no outbound message sent");
-    await updateSupportConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code }) });
+    await updateSupportConversationState(conversation.id, { needsAttention: true, needsAttentionReason: describeNeedsAttentionReason({ kind: "rejected", code: result.code, rejectedDraft: result.rejectedDraft }) });
     return result;
   }
 
