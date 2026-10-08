@@ -275,3 +275,19 @@ describe("Sophie malformed provider recovery", () => {
     expect(callSophieInteractiveMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("account action handoff", () => {
+  it("routes a shipment reschedule without asking the model or confirming completion", async () => {
+    callSophieInteractiveMock.mockClear();
+    const result = await runSophieTurn(baseBody({ messages: [{ direction: "inbound", body: "Please reschedule my shipment for Friday" }] }));
+    expect(callSophieInteractiveMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, action: "staff_review", requiresStaff: true, preCheckCode: "ACCOUNT_CHANGE_REQUEST", nextQuestion: null });
+    if (result.ok) expect(result.reply).toContain("No account change has been made by this chat");
+  });
+  it("rejects an invented completed action without retrying it", async () => {
+    callSophieInteractiveMock.mockReset().mockResolvedValueOnce(modelResult({ reply: "I have rescheduled your shipment for Friday.", nextQuestion: null }));
+    const result = await runSophieTurn(baseBody());
+    expect(result).toMatchObject({ ok: false, code: "UNVERIFIED_ACCOUNT_ACTION" });
+    expect(callSophieInteractiveMock).toHaveBeenCalledTimes(1);
+  });
+});
