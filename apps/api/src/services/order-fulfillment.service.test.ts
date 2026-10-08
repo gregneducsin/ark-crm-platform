@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, reviewRequestTriggersTable } from "@luma/db";
+import { db, customersTable, reviewRequestTriggersTable, supportConversationMessagesTable, smsReplyWorkTable } from "@luma/db";
+import { recordSmsDeliveryReceipt, sweepSmsDeliveryTimeouts } from "./sms-delivery.service.js";
 import { setCustomerSmsDnd } from "./dnd.service.js";
 
 beforeAll(() => {
@@ -559,4 +560,100 @@ describe("sweepReviewRequestTriggers", () => {
 vi.mock("../lib/send-window.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/send-window.js")>();
   return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
+});
+
+describe("shipping SMS delivery reliability", () => {
+  it("keeps provider acceptance queued until a confirmed receipt arrives", async () => {
+    sendMessageMock.mockReset().mockResolvedValue({ providerMessageId: "ship-queued" });
+    const personId = await seedCustomer();
+    await handleOrderShipped(personId, "TRACK-QUEUED");
+    const conversation = await getOrCreateSupportConversation(personId);
+    let messages = await listSupportMessages(conversation.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].deliveryStatus).toBe("queued");
+    expect(messages[0].sentAt).toBeNull();
+    const sentAt = new Date("2026-10-01T12:00:00Z");
+    await recordSmsDeliveryReceipt("ship-queued", "sent", sentAt);
+    messages = await listSupportMessages(conversation.id);
+    expect(messages[0].deliveryStatus).toBe("sent");
+    expect(messages[0].sentAt).toEqual(sentAt);
+  });
+
+  it("reconciles a receipt that arrives before the provider returns", async () => {
+    sendMessageMock.mockReset().mockImplementationOnce(async () => {
+      await recordSmsDeliveryReceipt("ship-early", "delivered", new Date());
+      return { providerMessageId: "ship-early" };
+    });
+    const personId = await seedCustomer();
+    await handleOrderShipped(personId, "TRACK-EARLY");
+    const conversation = await getOrCreateSupportConversation(personId);
+    expect((await listSupportMessages(conversation.id))[0].deliveryStatus).toBe("delivered");
+  });
+
+  it("flags transport uncertainty and does not resend when the handler retries", async () => {
+    sendMessageMock.mockReset().mockRejectedValue(new Error("provider timeout after acceptance"));
+    const personId = await seedCustomer();
+    await handleOrderShipped(personId, "TRACK-UNCERTAIN");
+    await handleOrderShipped(personId, " track-uncertain ");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    const conversation = await getOrCreateSupportConversation(personId);
+    expect(conversation.needsAttention).toBe(true);
+    expect((await listSupportMessages(conversation.id))[0].deliveryStatus).toBe("unknown");
+    const work = await db.select().from(smsReplyWorkTable).where(eq(smsReplyWorkTable.personId, personId));
+    expect(work.some(row => row.heldForStaff)).toBe(true);
+  });
+
+  it("flags a later failed delivery receipt", async () => {
+    sendMessageMock.mockReset().mockResolvedValue({ providerMessageId: "ship-failed" });
+    const personId = await seedCustomer();
+    await handleOrderShipped(personId, "TRACK-FAILED");
+    await recordSmsDeliveryReceipt("ship-failed", "failed", new Date());
+    const conversation = await getOrCreateSupportConversation(personId);
+    expect(conversation.needsAttention).toBe(true);
+    expect((await listSupportMessages(conversation.id))[0].deliveryStatus).toBe("failed");
+  });
+
+  it("flags accepted sends with no receipt rather than silently treating them as sent", async () => {
+    sendMessageMock.mockReset().mockResolvedValue({ providerMessageId: null });
+    const personId = await seedCustomer();
+    await handleOrderShipped(personId, "TRACK-NO-RECEIPT");
+    const conversation = await getOrCreateSupportConversation(personId);
+    await db.update(supportConversationMessagesTable).set({ createdAt: new Date(Date.now() - 6 * 60_000) })
+      .where(eq(supportConversationMessagesTable.conversationId, conversation.id));
+    await sweepSmsDeliveryTimeouts();
+    expect((await getOrCreateSupportConversation(personId)).needsAttention).toBe(true);
+    expect((await listSupportMessages(conversation.id))[0].deliveryStatus).toBe("unknown");
+    await handleOrderShipped(personId, "TRACK-NO-RECEIPT");
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves one SMS under concurrent duplicate handlers but allows a different shipment", async () => {
+    sendMessageMock.mockReset().mockResolvedValue({ providerMessageId: "ship-concurrent" });
+    const personId = await seedCustomer();
+    await Promise.all([handleOrderShipped(personId, "TRACK-SAME"), handleOrderShipped(personId, " track-same ")]);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    await handleOrderShipped(personId, "TRACK-NEXT");
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a missing phone without attempting SMS", async () => {
+    sendMessageMock.mockReset();
+    const personId = await seedCustomer({ phone: null });
+    await handleOrderShipped(personId, "TRACK-NO-PHONE");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const conversation = await getOrCreateSupportConversation(personId);
+    expect(conversation.needsAttention).toBe(true);
+    expect((await listSupportMessages(conversation.id))[0].deliveryStatus).toBe("failed");
+  });
+
+  it("respects opt-out without creating a delivery-failure flag", async () => {
+    sendMessageMock.mockReset();
+    const personId = await seedCustomer();
+    await setCustomerSmsDnd(personId, true);
+    await handleOrderShipped(personId, "TRACK-OPT-OUT");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    const conversation = await getOrCreateSupportConversation(personId);
+    expect(await listSupportMessages(conversation.id)).toHaveLength(0);
+    expect(conversation.needsAttention).toBe(false);
+  });
 });

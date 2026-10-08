@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+import { sendReservedSms, flagSmsDeliveryForStaff } from "./sms-delivery.service.js";
 import { withScheduledJobLock } from "./scheduled-job-recovery.service.js";
 import { and, eq, lt, lte, or, sql } from "drizzle-orm";
-import { db, customersTable, reviewRequestTriggersTable } from "@luma/db";
+import { db, customersTable, reviewRequestTriggersTable, supportConversationMessagesTable } from "@luma/db";
 import { getOrCreateSupportConversation, appendSupportMessage, updateSupportConversationState, hasAnyOutboundSupportMessage } from "./support-conversations.service.js";
 import { getOrCreateSupportEmailConversation } from "./support-email-conversations.service.js";
 import { getSmsProvider } from "../lib/sms-provider.js";
@@ -172,22 +174,30 @@ export async function handlePrescriptionWritten(personId: string): Promise<void>
  * post-delivery review check-in.
  */
 export async function handleOrderShipped(personId: string, trackingNumber: string): Promise<void> {
+  trackingNumber = trackingNumber.trim().toUpperCase();
   const customer = await getCustomerContact(personId);
   const conversation = await getOrCreateSupportConversation(personId);
   await updateSupportConversationState(conversation.id, { orderShipped: true, orderShippedAt: new Date(), trackingNumber });
 
   const dnd = await isCustomerSmsDnd(personId);
-  if (customer?.phone && !dnd) {
+  if (customer && !dnd) {
     const text = renderOrderShippedMessage(customer.firstName, trackingNumber);
-    try {
-      const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "order-shipped notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
+    // A stable UUID makes the reservation atomic across concurrent/retried
+    // webhook handlers, including a crash after transport but before completion.
+    // A reserved attempt is never automatically resent, even without a provider ID:
+    // the delivery timeout sweep sends uncertain outcomes to staff instead.
+    const digest = createHash("sha256").update(JSON.stringify(["ark-shipping-sms-v1", personId, trackingNumber])).digest("hex");
+    const messageId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-8${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+    const [reserved] = await db.insert(supportConversationMessagesTable).values({
+      id: messageId, conversationId: conversation.id, direction: "outbound", body: text,
+      deliveryStatus: customer.phone ? "queued" : "failed",
+    }).onConflictDoNothing({ target: supportConversationMessagesTable.id }).returning({ id: supportConversationMessagesTable.id });
+    if (reserved) {
+      if (customer.phone) await sendReservedSms(personId, "support", reserved.id, customer.phone, text);
+      else await flagSmsDeliveryForStaff(personId);
     }
   } else {
-    logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "order-shipped notice not sent");
+    logger.warn({ personId, reason: dnd ? "do_not_disturb" : "customer_not_found" }, "order-shipped notice not sent");
   }
 
   if (customer) {
