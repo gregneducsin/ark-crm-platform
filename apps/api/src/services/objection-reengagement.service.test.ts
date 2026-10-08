@@ -126,7 +126,7 @@ describe("sweepObjectionReengagementTriggers", () => {
 
     const result = await sweepObjectionReengagementTriggers();
     expect(result.sentCount).toBe(1);
-    expect(sendMessageMock).toHaveBeenCalledWith("+15558880000", expect.stringContaining("holding you back"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15558880000", expect.stringMatching(/Would you like (?:help with the next step|to pick up where we left off)\?/), { scheduled: true });
 
     const [trigger] = await db.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.personId, personId));
     expect(trigger.status).toBe("sent");
