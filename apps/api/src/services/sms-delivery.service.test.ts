@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, customersTable, conversationsTable, conversationMessagesTable } from "@luma/db";
-import { recordSmsInbound, getSmsReplyWork, finishSmsReplyWork, hasPendingSmsDelivery, sendTrackedSms, recordSmsDeliveryReceipt, sweepSmsDeliveryTimeouts } from "./sms-delivery.service.js";
+import { db, customersTable, conversationsTable, conversationMessagesTable, supportConversationsTable } from "@luma/db";
+import { flagSmsDeliveryForStaff, recordSmsInbound, getSmsReplyWork, finishSmsReplyWork, hasPendingSmsDelivery, sendTrackedSms, recordSmsDeliveryReceipt, sweepSmsDeliveryTimeouts } from "./sms-delivery.service.js";
 import { recordPhoneSmsOptOut } from "../lib/sms-opt-out.js";
 const send = vi.hoisted(() => vi.fn());
 vi.mock("../lib/sms-provider.js", () => ({ getSmsProvider: () => ({ sendMessage: send }) }));
@@ -95,4 +95,28 @@ it("does not send or clear a staff hold raised while a turn was running", async 
   await finishSmsReplyWork(f.personId, "sales", f.generation);
   expect(send).not.toHaveBeenCalled();
   expect((await getSmsReplyWork(f.personId, "sales"))?.heldForStaff).toBe(true);
+});
+
+describe("delivery review reasons", () => {
+  it.each(["Clinical review required.", "Billing dispute needs staff.", "Verify account ownership before linking."])("preserves %s on sales and support", async reason => {
+    const f = await fixture();
+    await db.update(conversationsTable).set({ needsAttention: true, needsAttentionReason: reason }).where(eq(conversationsTable.personId, f.personId));
+    await db.insert(supportConversationsTable).values({ personId: f.personId, needsAttention: true, needsAttentionReason: reason });
+    await Promise.all([flagSmsDeliveryForStaff(f.personId), flagSmsDeliveryForStaff(f.personId)]);
+    for (const table of [conversationsTable, supportConversationsTable]) {
+      const [row] = await db.select().from(table).where(eq(table.personId, f.personId));
+      expect(row.needsAttention).toBe(true);
+      expect(row.needsAttentionReason).toMatch(new RegExp("^" + reason.replace(/[.]/g, "\\.")));
+      expect(row.needsAttentionReason?.split("SMS delivery is unconfirmed or failed.")).toHaveLength(2);
+    }
+    expect((await getSmsReplyWork(f.personId, "sales"))?.heldForStaff).toBe(true);
+    expect((await getSmsReplyWork(f.personId, "support"))?.heldForStaff).toBe(true);
+  });
+  it.each([null, "", "   "])("sets a useful reason when the existing reason is %s", async reason => {
+    const f = await fixture();
+    await db.update(conversationsTable).set({ needsAttentionReason: reason }).where(eq(conversationsTable.personId, f.personId));
+    await flagSmsDeliveryForStaff(f.personId);
+    const [row] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, f.personId));
+    expect(row.needsAttentionReason).toMatch(/^SMS delivery is unconfirmed or failed/);
+  });
 });

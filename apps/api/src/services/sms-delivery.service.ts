@@ -56,8 +56,19 @@ export async function flagSmsDeliveryForStaff(personId: string, tx?: Tx): Promis
   if (!tx) return db.transaction((transaction) => flagSmsDeliveryForStaff(personId, transaction));
   await tx.select({ id: customersTable.id }).from(customersTable).where(eq(customersTable.id, personId)).for("update");
   const reason = "SMS delivery is unconfirmed or failed. Review the provider conversation, then reply or clear this flag to resume. No automatic resend was attempted.";
-  await tx.update(conversationsTable).set({ needsAttention: true, needsAttentionReason: reason }).where(eq(conversationsTable.personId, personId));
-  await tx.update(supportConversationsTable).set({ needsAttention: true, needsAttentionReason: reason }).where(eq(supportConversationsTable.personId, personId));
+  for (const table of [conversationsTable, supportConversationsTable]) {
+    // Merge against the current row inside the update: never replace an
+    // existing clinical/billing/identity reason with delivery information.
+    // Repeated receipts and timeout sweeps append this detail only once.
+    await tx.update(table).set({
+      needsAttention: true,
+      needsAttentionReason: sql`case
+        when nullif(btrim(${table.needsAttentionReason}), '') is null then ${reason}
+        when strpos(${table.needsAttentionReason}, ${reason}) > 0 then ${table.needsAttentionReason}
+        else ${table.needsAttentionReason} || chr(10) || chr(10) || ${reason}
+      end`,
+    }).where(eq(table.personId, personId));
+  }
   for (const persona of ["sales", "support"] as const) {
     const conversations = persona === "sales" ? conversationsTable : supportConversationsTable;
     const [existing] = await tx.select({ id: conversations.id }).from(conversations).where(eq(conversations.personId, personId));
