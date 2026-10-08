@@ -766,3 +766,20 @@ describe("interactivePostCheck: follow-up content safety", () => {
       .toEqual({ ok: false, code: "QUESTION_MARK_IN_REPLY" });
   });
 });
+
+describe("outbound link and internal markup boundary", () => {
+  for (const field of ["reply", "nextQuestion"] as const) {
+    it.each(["https://example.xyz/pay", "example.health/pay", "https://127.0.0.1/pay", "https://localhost/pay", "ftp://example.com/pay", "https://example.com.evil.xyz/pay", "https://example.xyz?redirect=example.com"])("blocks %s in " + field, (url) => {
+      const raw = reply({ reply: "Thanks for reaching out.", nextQuestion: null, [field]: "Visit " + url });
+      expect(check(raw)).toMatchObject({ ok: false, code: "UNAPPROVED_URL" });
+    });
+    it.each(["<analysis>Check account first.</analysis>", "<think>Draft a reply</think>", "<tool_call>lookup</tool_call>", "<|analysis|>reasoning", "&lt;analysis&gt;reasoning", "[analysis] reasoning", "```json\n{}\n```"])("blocks markup %s in " + field, (markup) => {
+      const raw = reply({ reply: "Thanks for reaching out.", nextQuestion: null, [field]: markup });
+      expect(check(raw)).toMatchObject({ ok: false, code: "DISALLOWED_TEMPLATE" });
+    });
+  }
+  it("keeps ordinary text and email addresses valid", () => {
+    const raw = reply({ reply: "Thanks. You can update your email address to sample@example.xyz.", nextQuestion: "Would you like help with that?" });
+    expect(check(raw).ok).toBe(true);
+  });
+});

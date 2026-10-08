@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import { OUTBOUND_URL_RE, hasInternalMarkup } from "../outbound-content.js";
 import type { SophieInteractiveResult } from "./types.js";
 import { APPROVED_REVIEW_URLS, APPROVED_PORTAL_URL, APPROVED_REVIEW_WRITE_URL } from "../messaging/knowledge-catalog.js";
 import { stripEmDashes } from "../text-sanitize.js";
@@ -212,7 +213,7 @@ export function supportPreCheck(lastInbound: string): SupportPreCheckResult {
  * Matches a URL WITH OR WITHOUT an explicit http(s):// scheme — see the
  * matching comment in messaging/safety.ts for why the scheme is optional.
  */
-const URL_RE = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|co)\b(?:\/[^\s)]*)?/gi;
+const URL_RE = OUTBOUND_URL_RE;
 
 /** Strips scheme/www/trailing-slash so an approved URL still matches whether or not Sophie echoes its scheme. */
 function normalizeUrlForComparison(url: string): string {
@@ -304,6 +305,7 @@ export function supportPostCheck(
   for (const field of ["reply", "nextQuestion"] as const) {
     const reply = raw[field];
     if (reply === null || reply === undefined) continue;
+    if (hasInternalMarkup(reply)) return { ok: false, code: "DISALLOWED_TEMPLATE" };
     URL_RE.lastIndex = 0;
     const urlMatches = [...reply.matchAll(URL_RE)];
     for (const match of urlMatches) {

@@ -19,6 +19,7 @@
  */
 
 import { z } from "zod";
+import { OUTBOUND_URL_RE, hasInternalMarkup } from "../outbound-content.js";
 import type { ClaudeInteractiveResult } from "./types.js";
 import { APPROVED_REVIEW_URLS, APPROVED_PRICING_TOPIC_KEYS, PRODUCT_PRICING_TOPIC_KEYS } from "./knowledge-catalog.js";
 import { OBJECTION_KEYS } from "./objection-handling.js";
@@ -523,7 +524,7 @@ export function interactivePreCheck(lastInbound: string, ourLastQuestion: string
  * optional; everything else about the shape (domain + recognized TLD +
  * optional path/query) still has to look like a URL.
  */
-const URL_RE = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|co)\b(?:\/[^\s)]*)?/gi;
+const URL_RE = OUTBOUND_URL_RE;
 
 /** Strips scheme/www/trailing-slash so an approved URL still matches whether or not Claude echoes its scheme. */
 function normalizeUrlForComparison(url: string): string {
@@ -970,6 +971,7 @@ export function interactivePostCheck(
   for (const field of ["reply", "nextQuestion"] as const) {
     const reply = raw[field];
     if (reply === null || reply === undefined) continue;
+    if (hasInternalMarkup(reply)) return { ok: false, code: "DISALLOWED_TEMPLATE" };
     // URL — only the fixed review-site URLs are allowed. No intake/signup URL
     // is ever allowlisted here: those are minted per-lead server-side (see
     // knowledge-catalog.ts's APPROVED_REVIEW_URLS docstring) and Claude must
