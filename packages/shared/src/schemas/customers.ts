@@ -122,3 +122,13 @@ export const customerNotesListResponseSchema = z.object({
   notes: z.array(customerNoteSchema),
 });
 export type CustomerNotesListResponse = z.infer<typeof customerNotesListResponseSchema>;
+
+// iBluSend's Calls API never dials by itself — this only prepares a
+// five-minute session and hands back a confirmation page a signed-in human
+// must open and approve before anything actually rings. See
+// lib/iblusend-calls.ts for the prepare call.
+export const prepareCallResponseSchema = z.object({
+  callId: z.string(),
+  confirmationUrl: z.string().url(),
+});
+export type PrepareCallResponse = z.infer<typeof prepareCallResponseSchema>;

@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useParams, Link } from "wouter";
-import { useCustomer, useCreatePurchase, useUpdatePurchase, useCreateIntakeLink } from "../hooks/useCustomers";
+import { useCustomer, useCreatePurchase, useUpdatePurchase, useCreateIntakeLink, usePrepareCall } from "../hooks/useCustomers";
 import { Badge, Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { ApiError, useCurrentUser } from "../hooks/useAuth";
 import { formatDate, formatDateTime } from "../lib/formatTime";
 import { CustomerNotesCard } from "../components/CustomerNotesCard";
+import type { Customer } from "@luma/shared";
 
 const STATUS_COLORS: Record<string, "gray" | "green" | "yellow" | "red"> = {
   pending: "yellow",
@@ -19,12 +20,41 @@ const QUESTIONNAIRE_BADGE_COLOR: Record<string, "gray" | "green" | "yellow" | "b
   submitted: "green",
 };
 
+/**
+ * Click-to-call, not an autodialer: this only prepares the call on our
+ * backend and opens iBluSend's own confirmation page in a new tab — a
+ * signed-in human still has to review it and press Start call there before
+ * anything actually rings. Disabled with no phone number on file, since
+ * the backend would just reject the request anyway.
+ */
+function CallButton({ customer }: { customer: Customer }) {
+  const prepareCall = usePrepareCall(customer.id);
+
+  function handleClick() {
+    prepareCall.mutate(undefined, {
+      onSuccess: (data) => {
+        window.open(data.confirmationUrl, "_blank", "noopener,noreferrer");
+      },
+    });
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button variant="secondary" onClick={handleClick} disabled={!customer.phone || prepareCall.isPending}>
+        {prepareCall.isPending ? "Preparing call…" : "Call"}
+      </Button>
+      <ErrorText>{prepareCall.isError ? (prepareCall.error instanceof ApiError ? prepareCall.error.message : "Something went wrong.") : null}</ErrorText>
+    </div>
+  );
+}
+
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading } = useCustomer(id);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const { data: currentUser } = useCurrentUser();
   const canEdit = currentUser?.user?.role === "admin";
+  const canCall = currentUser?.user?.role === "admin" || currentUser?.user?.role === "customer_service";
 
   if (isLoading) return <p className="text-sm text-gray-500">Loading…</p>;
   if (!data) return <p className="text-sm text-gray-500">Customer not found.</p>;
@@ -47,6 +77,7 @@ export function CustomerDetailPage() {
           >
             View in Conversations →
           </Link>
+          {canCall && <CallButton customer={customer} />}
         </div>
       </div>
 

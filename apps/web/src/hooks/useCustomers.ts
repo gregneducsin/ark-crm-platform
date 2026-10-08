@@ -20,6 +20,7 @@ import type {
   CustomerQuestionnaireEvent,
   CustomerNote,
   CreateCustomerNoteRequest,
+  PrepareCallResponse,
 } from "@luma/shared";
 import { api } from "../lib/apiClient";
 
@@ -147,6 +148,17 @@ export function useCreateCustomerNote(customerId: string) {
 export function useCreateIntakeLink(customerId: string) {
   return useMutation({
     mutationFn: () => api.post<IntakeLinkResponse>(`/api/app/customers/${customerId}/intake-link`, {}),
+  });
+}
+
+/**
+ * Click-to-call — only prepares the call and returns iBluSend's own
+ * confirmation page; nothing dials until a signed-in human opens
+ * confirmationUrl and presses Start call there. See iblusend-calls.ts.
+ */
+export function usePrepareCall(customerId: string) {
+  return useMutation({
+    mutationFn: () => api.post<PrepareCallResponse>(`/api/app/customers/${customerId}/call`, {}),
   });
 }
 
