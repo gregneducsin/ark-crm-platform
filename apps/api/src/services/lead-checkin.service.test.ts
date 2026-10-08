@@ -104,7 +104,7 @@ describe("sweepLeadCheckinTriggers", () => {
 
     await sweepLeadCheckinTriggers();
 
-    expect(sendMessageMock).toHaveBeenCalledWith("+15557770000", expect.stringContaining("holding you back"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15557770000", expect.stringMatching(/Would you like (?:help with the next step|to pick up where we left off)\?/), { scheduled: true });
     const [trigger] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
     expect(trigger.variant).toBe("reengagement");
   });
@@ -121,7 +121,7 @@ describe("sweepLeadCheckinTriggers", () => {
 
     await sweepLeadCheckinTriggers();
 
-    expect(sendMessageMock).toHaveBeenCalledWith("+15557770000", expect.stringContaining("holding you back"), { scheduled: true });
+    expect(sendMessageMock).toHaveBeenCalledWith("+15557770000", expect.stringMatching(/Would you like (?:help with the next step|to pick up where we left off)\?/), { scheduled: true });
     const [trigger] = await db.select().from(leadCheckinTriggersTable).where(eq(leadCheckinTriggersTable.personId, personId));
     expect(trigger.variant).toBe("reengagement");
   });
