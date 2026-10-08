@@ -21,6 +21,7 @@ export type NeedsAttentionSource =
 
 /** Post-check/provider rejection codes — the draft reply existed but got blocked before it ever reached the customer. */
 const REJECTED_REASONS: Record<string, string> = {
+  UNVERIFIED_ACCOUNT_ACTION: "The draft claimed or promised an account change without verified execution. Nothing was sent; staff must review and perform or confirm the requested action.",
   PROHIBITED_CLINICAL: "The draft reply included clinical/medical language that isn't allowed, so it was blocked instead of sent.",
   PROHIBITED_CLINICAL_ABSOLUTE:
     "The draft reply used clinical/medical language (diagnosing, contraindications, or symptoms) that's never allowed regardless of context, so it was blocked instead of sent.",
@@ -56,6 +57,7 @@ const REJECTED_REASONS: Record<string, string> = {
  * know what to glance at.
  */
 const STAFF_FLAGGED_REASONS: Record<string, string> = {
+  ACCOUNT_CHANGE_REQUEST: "The customer requested an account, shipment or billing change. Sophie cannot perform this action. Staff must review it; no change has been confirmed by the assistant.",
   DOSING_REVIEW: "A dosing question or unsafe dose detail needs clinical review. Alexis deferred to the licensed provider without confirming or recommending a dose.",
   STOP_WORD: "The customer used a word that might mean they want to stop texts, but it wasn't clear enough to auto-confirm.",
   EMERGENCY_CONTENT: "The customer's message may describe a medical emergency — flagged immediately rather than answered automatically.",

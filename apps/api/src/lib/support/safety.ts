@@ -182,6 +182,15 @@ const PAUSE_PRESCRIPTION_REQUEST_PHRASES_LOWER = [
   "skip next month",
 ] as const;
 
+
+// Sophie has no account-mutation tools. These requests need a person, even
+// when they concern billing/shipping rather than clinical information.
+const ACCOUNT_CHANGE_REQUEST_RE = /\b(?:reschedul\w*|postpon\w*|cancel\w*|refund\w*|pause|skip|hold|delay|move|change|update|push\s+back)\b[\s\S]{0,100}\b(?:order|shipment|delivery|refill|subscription|payment|charge|billing|address|account|plan)\b|\b(?:order|shipment|delivery|refill|subscription|payment|charge|billing|address|account|plan)\b[\s\S]{0,100}\b(?:reschedul\w*|postpon\w*|cancel\w*|refund\w*|paused?|skipped?|held|delayed?|moved?|changed?|updated?)\b|^\s*(?:cancel|refund|pause|skip|reschedule)(?:\s+(?:it|that|please))*[.!?]*\s*$/i;
+
+// Block both completed-action claims and promises to perform mutations.
+// This check deliberately does not accept an AI-declared "success" flag.
+const UNVERIFIED_ACCOUNT_ACTION_RE = /\b(?:i|we)\b(?:['’](?:ve|ll)|\s+(?:have|will|can))?[\s\S]{0,35}\b(?:reschedul\w*|postpon\w*|cancel\w*|refund\w*|paus\w*|skip\w*|hold|held|delay\w*|mov\w*|chang\w*|updat\w*)\b[\s\S]{0,80}\b(?:order|shipment|delivery|refill|subscription|payment|charge|billing|address|account|plan|it|that)\b|\b(?:order|shipment|delivery|refill|subscription|payment|charge|billing|address|account|plan)\b[\s\S]{0,35}\b(?:rescheduled|postponed|cancelled|canceled|refunded|paused|skipped|on\s+hold|delayed|moved|changed|updated)\b|\b(?:issued|processed|submitted)\b[\s\S]{0,25}\b(?:refund|cancellation)\b/i;
+
 export type SupportPreCheckResult = { readonly blocked: false } | { readonly blocked: true; readonly code: string };
 
 /**
@@ -204,6 +213,7 @@ export function supportPreCheck(lastInbound: string): SupportPreCheckResult {
   if (COLD_CHAIN_CONCERN_PHRASES_LOWER.some((w) => lower.includes(w))) return { blocked: true, code: "COLD_CHAIN_CONCERN" };
   if (LEGAL_WORDS_LOWER.some((w) => lower.includes(w)) || LEGAL_SUE_RE.test(lower)) return { blocked: true, code: "LEGAL_CONTENT" };
 
+  if (ACCOUNT_CHANGE_REQUEST_RE.test(lastInbound)) return { blocked: true, code: "ACCOUNT_CHANGE_REQUEST" };
   return { blocked: false };
 }
 
@@ -336,6 +346,8 @@ export function supportPostCheck(
         }
       }
     }
+
+    if (UNVERIFIED_ACCOUNT_ACTION_RE.test(reply)) return { ok: false, code: "UNVERIFIED_ACCOUNT_ACTION" };
 
     if (STAFF_AVAIL_RE.test(reply)) {
       return { ok: false, code: "PROHIBITED_STAFF_CLAIM" };

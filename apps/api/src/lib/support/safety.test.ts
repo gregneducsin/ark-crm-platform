@@ -312,3 +312,20 @@ describe("outbound link and internal markup boundary", () => {
     expect(supportPostCheck(raw, null).ok).toBe(true);
   });
 });
+
+describe("account changes require staff", () => {
+  it.each(["Please reschedule my shipment for Friday", "Move my refill to next month", "I need a refund for my order", "Update my billing address", "Cancel it please", "My next payment should be delayed"])("routes %s", text => {
+    expect(supportPreCheck(text)).toMatchObject({ blocked: true, code: "ACCOUNT_CHANGE_REQUEST" });
+  });
+  it.each(["Where is my shipment?", "How do I log into the portal?", "Thanks for your help"])("keeps ordinary support available: %s", text => {
+    expect(supportPreCheck(text)).toEqual({ blocked: false });
+  });
+  for (const field of ["reply", "nextQuestion"] as const) {
+    it.each(["I have rescheduled your shipment for Friday.", "We'll move your next payment.", "Your subscription is now cancelled.", "Your shipment has been delayed.", "I processed your refund.", "I've updated your address."])("blocks unsupported claim %s in " + field, text => {
+      expect(supportPostCheck(reply({ reply: "Thanks.", nextQuestion: null, [field]: text }), null)).toMatchObject({ ok: false, code: "UNVERIFIED_ACCOUNT_ACTION" });
+    });
+  }
+  it("allows portal guidance without claiming an action", () => {
+    expect(supportPostCheck(reply({ reply: "Please contact support through your patient portal to request a change.", nextQuestion: null }), null).ok).toBe(true);
+  });
+});

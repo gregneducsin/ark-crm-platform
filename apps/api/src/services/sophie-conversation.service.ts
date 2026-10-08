@@ -77,6 +77,7 @@ const PRE_CHECK_RESULTS: Record<string, { action: "pause" | "staff_review"; repl
   PAUSE_PRESCRIPTION_REQUEST: { action: "staff_review", reply: null },
   COLD_CHAIN_CONCERN: { action: "staff_review", reply: null },
   LEGAL_CONTENT: { action: "staff_review", reply: null },
+  ACCOUNT_CHANGE_REQUEST: { action: "staff_review", reply: `Our team needs to review that request. No account change has been made by this chat. You can also contact support through your patient portal: ${APPROVED_PORTAL_URL}` },
 };
 
 /**
