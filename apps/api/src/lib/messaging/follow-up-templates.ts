@@ -126,7 +126,7 @@ export function renderCurrentlyTakingCheckin(firstName: string): string {
 export function renderReengagementCheckin(firstName: string): string {
   const name = firstName.trim() || "there";
   return pickVariant([
-    `Hi ${name}, still thinking it over? What's the biggest thing holding you back from getting started?`,
-    `Hi ${name}, still weighing it? What's the main thing holding you back from getting started?`,
+    `Hi ${name}, checking back in. Would you like help with the next step?`,
+    `Hi ${name}, checking in. Would you like to pick up where we left off?`,
   ]);
 }

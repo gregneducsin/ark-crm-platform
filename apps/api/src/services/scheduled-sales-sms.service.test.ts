@@ -305,3 +305,22 @@ vi.mock("../lib/send-window.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/send-window.js")>();
   return { ...actual, isScheduledSmsTime: () => true, assertScheduledSmsTime: () => {} };
 });
+
+describe("scheduled follow-ups acknowledge customer concerns", () => {
+  it.each(kinds)("uses checkout context for %s instead of a generic question", async kind => {
+    const item = await seed(kind);
+    const row = await conversation(item.personId);
+    await db.insert(conversationMessagesTable).values({ conversationId: row.id, direction: "inbound", body: "Where do I pay? The checkout has an error." });
+    await sweepScheduledSalesSms(kind);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(mocks.send.mock.calls[0][1]).toContain("form or checkout");
+    expect(mocks.send.mock.calls[0][1]).not.toContain("holding you back");
+  });
+  it("uses a saved price concern even when currentlyTaking is unanswered", async () => {
+    const item = await seed("lead_checkin");
+    const row = await conversation(item.personId);
+    await db.update(conversationsTable).set({ objectionKey: "price" }).where(eq(conversationsTable.id, row.id));
+    await sweepScheduledSalesSms("lead_checkin");
+    expect(mocks.send.mock.calls[0][1]).toContain("cost was a concern");
+  });
+});

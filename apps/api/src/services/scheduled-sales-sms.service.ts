@@ -1,3 +1,4 @@
+import { renderConcernFollowUp } from "../lib/messaging/concern-follow-up.js";
 import { intakeCompletionReason } from "./intake-completion.service.js";
 import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import {
@@ -48,27 +49,31 @@ async function prepare(tx: Tx, kind: ScheduledSalesSmsKind, id: string, customer
   if (customer.aiPaused) return { cancel: "ai_paused" };
   const completed = await intakeCompletionReason(personId, tx);
   if (completed) return { cancel: kind === "follow_up" ? "completed_before_followup" : completed };
+  const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
+  const recentInbound = conversation ? await tx.select({ body: conversationMessagesTable.body }).from(conversationMessagesTable)
+    .where(and(eq(conversationMessagesTable.conversationId, conversation.id), eq(conversationMessagesTable.direction, "inbound")))
+    .orderBy(desc(conversationMessagesTable.createdAt)).limit(40) : [];
+  const concernReply = renderConcernFollowUp(customer.firstName, recentInbound.map(row => row.body), conversation?.objectionKey);
   if (kind === "follow_up") {
     const [job] = await tx.select().from(followUpJobsTable).where(eq(followUpJobsTable.id, id));
     const [token] = await tx.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.id, job.intakeLinkTokenId));
     if (!token) return { cancel: "intake_link_removed" };
-    return { body: renderFollowUpMessage(job.messageStep, customer.firstName), leadSource: token.leadSource };
+    return { body: concernReply ?? renderFollowUpMessage(job.messageStep, customer.firstName), leadSource: token.leadSource };
   }
-  const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
   if (kind === "abandoned_cart") {
     const [trigger] = await tx.select().from(abandonedCartTriggersTable).where(eq(abandonedCartTriggersTable.id, id));
     const [event] = await tx.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.id, trigger.questionnaireEventId));
     if (!event || event.status !== "abandoned") return { cancel: "no_longer_abandoned" };
     const [token] = await tx.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId)).orderBy(desc(intakeLinkTokensTable.createdAt)).limit(1);
     if (token?.clickedAt) { await armCheckin(tx, personId); return { cancel: "already_clicked_intake_link" }; }
-    return { body: conversation ? renderAbandonedCartFollowUp(customer.firstName) : renderAbandonedCartOpener(customer.firstName), promoOffered: true, armCheckin: true };
+    return { body: concernReply ?? (conversation ? renderAbandonedCartFollowUp(customer.firstName) : renderAbandonedCartOpener(customer.firstName)), promoOffered: !concernReply, armCheckin: true };
   }
   if (kind === "lead_checkin") {
     const variant = !conversation || conversation.currentlyTaking === null ? "currently_taking" : "reengagement";
-    return { variant, body: variant === "currently_taking" ? renderCurrentlyTakingCheckin(customer.firstName) : renderReengagementCheckin(customer.firstName) };
+    return { variant, body: concernReply ?? (variant === "currently_taking" ? renderCurrentlyTakingCheckin(customer.firstName) : renderReengagementCheckin(customer.firstName)) };
   }
   const [trigger] = await tx.select().from(objectionReengagementTriggersTable).where(eq(objectionReengagementTriggersTable.id, id));
-  return { body: renderReengagementCheckin(customer.firstName), leadSource: trigger.leadSource };
+  return { body: concernReply ?? renderReengagementCheckin(customer.firstName), leadSource: trigger.leadSource };
 }
 
 async function isHeldOrBusy(tx: Tx, personId: string): Promise<boolean> {
