@@ -214,6 +214,16 @@ export async function countRecentOutboundMessages(conversationId: string, window
   return Number(row?.count ?? 0);
 }
 
+/** An accepted/queued send is not evidence that the customer received a price. */
+export async function hasSentPriceReply(conversationId: string): Promise<boolean> {
+  const [row] = await db.select({ id: conversationMessagesTable.id }).from(conversationMessagesTable)
+    .where(and(eq(conversationMessagesTable.conversationId, conversationId),
+      eq(conversationMessagesTable.direction, "outbound"),
+      sql`${conversationMessagesTable.deliveryStatus} in ('sent', 'delivered', 'read')`,
+      sql`${conversationMessagesTable.body} ~ ${"[$][[:space:]]*[0-9]"}`)).limit(1);
+  return Boolean(row);
+}
+
 /** Builds the shape runAlexisTurn expects from persisted conversation state + recent history. */
 export function toBotPreviewBody(conversation: Conversation, history: readonly ConversationMessage[], customerFirstName: string | null): BotPreviewRequestBody {
   return {

@@ -18,6 +18,7 @@ const {
   getConversationDetail,
   getConversationResponseStats,
   sendStaffReply,
+  hasSentPriceReply,
 } = await import("./conversations.service.js");
 
 async function seedCustomer(opts: { phone?: string | null } = {}): Promise<string> {
@@ -387,5 +388,19 @@ describe("sendStaffReply", () => {
       if (originalEnv === undefined) delete process.env.SALES_SMS_ENABLED;
       else process.env.SALES_SMS_ENABLED = originalEnv;
     }
+  });
+});
+
+describe("deferred price delivery evidence", () => {
+  it("keeps pricing pending for queued or failed replies and recognizes a sent price outside recent history", async () => {
+    const conversation = await getOrCreateConversation(await seedCustomer());
+    await appendMessage(conversation.id, "outbound", "Semaglutide is $169.", { deliveryStatus: "queued" });
+    expect(await hasSentPriceReply(conversation.id)).toBe(false);
+    await appendMessage(conversation.id, "outbound", "Semaglutide is $169.", { deliveryStatus: "failed" });
+    expect(await hasSentPriceReply(conversation.id)).toBe(false);
+    await appendMessage(conversation.id, "outbound", "Semaglutide is $169.", { deliveryStatus: "sent" });
+    for (let index = 0; index < 22; index++) await appendMessage(conversation.id, "inbound", "Later detail");
+    expect(await hasSentPriceReply(conversation.id)).toBe(true);
+    expect(await hasSentPriceReply((await getOrCreateConversation(await seedCustomer())).id)).toBe(false);
   });
 });

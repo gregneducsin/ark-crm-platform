@@ -649,6 +649,43 @@ it.each(["Got it, thanks. What state are you in?", "Got it, thanks. One more thi
   });
 });
 
+describe("deferred onboarding pricing", () => {
+  it("corrects a draft that skips the customer's deferred price question", async () => {
+    callClaudeInteractiveMock.mockReset();
+    callClaudeInteractiveMock.mockResolvedValueOnce(modelResult({ reply: "Let's keep going.", nextQuestion: "Do you have time for the form?" }))
+      .mockResolvedValueOnce(modelResult({ reply: "Semaglutide is $169 for 1 month.", nextQuestion: "Does that price work for you?", knowledgeTopicsUsed: ["semaglutide_pricing"] }));
+    const body = baseBody({ pendingTopic: "onboarding_pricing" });
+    const request = { ...body, currentSlots: { ...body.currentSlots, state: "North Carolina", selectedProduct: "semaglutide" as const } };
+    const response = await runAlexisTurn(await seedCustomer(), request);
+    expect(response).toMatchObject({ ok: true, reply: "Semaglutide is $169 for 1 month." });
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(2);
+    expect(callClaudeInteractiveMock.mock.calls[1][2]).toContain("already asked about pricing");
+  });
+
+  it("returns an actionable failure after repeated deferral instead of sending an unrelated question", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValue(modelResult({ reply: "Let's keep going.", nextQuestion: "Do you have time for the form?" }));
+    const body = baseBody({ pendingTopic: "onboarding_pricing" });
+    expect(await runAlexisTurn(await seedCustomer(), { ...body, currentSlots: { ...body.currentSlots, state: "Texas", selectedProduct: "semaglutide" } }))
+      .toEqual({ ok: false, code: "DEFERRED_PRICE_UNANSWERED" });
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not insist on the price before state and product are known", async () => {
+    callClaudeInteractiveMock.mockReset().mockResolvedValue(modelResult({ reply: "Happy to help.", nextQuestion: "What state are you in?" }));
+    const response = await runAlexisTurn(await seedCustomer(), baseBody({ pendingTopic: "onboarding_pricing" }));
+    expect(response).toMatchObject({ ok: true });
+    expect(callClaudeInteractiveMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps clinical and opt-out safeguards ahead of a pending price question", async () => {
+    callClaudeInteractiveMock.mockReset();
+    const body = baseBody({ pendingTopic: "onboarding_pricing", messages: [{ direction: "inbound", body: "STOP" }] });
+    const response = await runAlexisTurn(await seedCustomer(), body);
+    expect(response).toMatchObject({ ok: true, preCheckCode: "OPT_OUT" });
+    expect(callClaudeInteractiveMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("plan selection without repeated confirmation", () => {
   it("accepts a six-month choice without asking for separate confirmation", async () => {
     callClaudeInteractiveMock.mockReset();

@@ -316,6 +316,20 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
         retryNote = "An intake link was already provided. Answer the actual message without send_form or promising another link unless the customer requests a replacement.";
         continue;
       }
+      // A pricing question deferred during unmatched-number onboarding (see
+      // transferToAlexis in unmatched-inbound-sms.service.ts) must be answered
+      // once state and product are both known — not quietly skipped in favor
+      // of the next intake question. Safety holds (requiresStaff) still win.
+      const state = post.validatedSlotUpdates.state ?? body.currentSlots.state;
+      const product = post.validatedSlotUpdates.selectedProduct ?? body.currentSlots.selectedProduct;
+      const pricingDue = body.pendingTopic === "onboarding_pricing" && state && product &&
+        !post.result.requiresStaff && (post.result.action === "reply" || post.result.action === "send_form");
+      if (pricingDue && (!/\$\s*\d/.test(post.result.reply ?? "") ||
+          !post.result.knowledgeTopicsUsed.includes(`${product}_pricing`))) {
+        if (attempt >= MAX_ATTEMPTS) return { ok: false, code: "DEFERRED_PRICE_UNANSWERED" };
+        retryNote = "The customer already asked about pricing during onboarding and their state and product are now known. Answer that deferred question using the approved product pricing topic before moving on. Do not repeat a supplied detail or skip their question.";
+        continue;
+      }
       break;
     }
 

@@ -26,6 +26,7 @@ const REJECTED_REASONS: Record<string, string> = {
   PROHIBITED_CLINICAL_ABSOLUTE:
     "The draft reply used clinical/medical language (diagnosing, contraindications, or symptoms) that's never allowed regardless of context, so it was blocked instead of sent.",
   UNSUPPORTED_PRICING_CLAIM: "The draft reply stated a price or discount that isn't backed by an approved pricing topic, so it was blocked.",
+  DEFERRED_PRICE_UNANSWERED: "The customer asked about pricing during onboarding, but Alexis could not produce an approved answer after retries. Review the requested product and reply with approved pricing.",
   UNAPPROVED_URL: "The draft reply included a link that isn't on the approved list, so it was blocked.",
   PROHIBITED_STAFF_CLAIM: "The draft reply promised something about staff availability/monitoring that isn't allowed, so it was blocked.",
   DISALLOWED_TEMPLATE: "The draft reply contained placeholder/template text that should never reach a customer, so it was blocked.",

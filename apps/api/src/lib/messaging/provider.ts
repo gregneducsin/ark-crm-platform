@@ -250,6 +250,13 @@ CURRENT CONVERSATION STATE:
 ${slotSummary}
 ${lastQ}
 Pending topic: ${body.pendingTopic ?? "none"}
+HANDOFF CONTINUITY: CURRENT CONVERSATION STATE includes explicit answers supplied during first-time onboarding.
+Do not ask again for a known state, product choice or current-use answer. Only update these from clear new customer
+statements; never infer a dose, suitability, product preference from current medication use, or a fact from an ambiguous yes/no.
+If pending topic is onboarding_pricing, the customer asked about pricing before intake setup finished. Return to that
+question as soon as state and selectedProduct are known: answer with the approved pricing topic before the next intake
+question, without making them ask again. If either is missing, ask only the next missing detail. A new opt-out, cancellation,
+medical concern or other safety hold takes precedence over the deferred pricing question.
 ${linkState}
 ${promoState}
 

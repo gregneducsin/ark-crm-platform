@@ -382,6 +382,14 @@ export const unmatchedSmsThreadsTable = pgTable(
     linkedCustomerId: uuid("linked_customer_id").references(() => customersTable.id, { onDelete: "set null" }),
     status: text("status", { enum: ["needs_review", "replied", "dismissed"] }).notNull().default("needs_review"),
     repliedAt: timestamp("replied_at", { withTimezone: true }),
+    /**
+     * Set once the 24-hour "still there?" nudge has gone out for this
+     * thread — see sweepUnmatchedSmsFollowUps in
+     * unmatched-inbound-sms.service.ts. Gates the follow-up to exactly one
+     * per thread; never reset after a real send, so a thread that goes cold
+     * only ever gets nudged once, not on a repeating schedule.
+     */
+    followUpSentAt: timestamp("follow_up_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

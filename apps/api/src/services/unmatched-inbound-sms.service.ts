@@ -461,6 +461,20 @@ const ACK_VARIANTS = [
   "Hi there, thanks for texting Ark Health! What's your name so I know who I'm talking to? We'll follow up with you shortly.",
 ] as const;
 
+/** One-time 24-hour nudge when a thread goes cold waiting on a name — see sweepUnmatchedSmsFollowUps. */
+const NAME_FOLLOW_UP_VARIANTS = [
+  "Hey, just following up — what's your name? We'd love to help you get started.",
+  "Hi again! Didn't want to lose touch — could you share your name so we can help you out?",
+] as const;
+
+/** Same as NAME_FOLLOW_UP_VARIANTS, once the sender's name is already known. */
+function emailFollowUpVariants(name: string): readonly string[] {
+  return [
+    `Hey ${name}, just checking back in — what's your email so I can get your account started?`,
+    `Hi ${name}! Still there? Let me know your email whenever you get a chance so we can move forward.`,
+  ];
+}
+
 function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)];
 }
@@ -481,7 +495,7 @@ async function sendReservedUnmatchedSms(thread: UnmatchedSmsThread, outbound: Un
         await tx.delete(unmatchedSmsMessagesTable).where(eq(unmatchedSmsMessagesTable.id, outbound.id));
         // Do not restart the 24-hour inactivity timer when no text was sent.
         // Preserve the timestamp of any genuinely newer incoming message.
-        await tx.update(unmatchedSmsThreadsTable).set({ updatedAt: current.pendingInboundId ? current.updatedAt : thread.updatedAt })
+        await tx.update(unmatchedSmsThreadsTable).set({ followUpSentAt: null, updatedAt: current.pendingInboundId ? current.updatedAt : thread.updatedAt })
           .where(eq(unmatchedSmsThreadsTable.id, thread.id));
       });
       return;
@@ -639,7 +653,13 @@ type OnboardingTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * as linking the new lead. A crash cannot leave a visible customer without history. */
 async function transferToAlexis(tx: OnboardingTx, thread: UnmatchedSmsThread, messages: readonly UnmatchedSmsMessage[]): Promise<void> {
   const personId = thread.linkedCustomerId!;
-  await tx.insert(conversationsTable).values({ personId, leadSource: "meta_form", ...extractOnboardingSlots(messages) }).onConflictDoNothing();
+  await tx.insert(conversationsTable).values({
+    personId, leadSource: "meta_form", ...extractOnboardingSlots(messages),
+    // A price question asked before intake setup finished is carried over so
+    // Alexis answers it once state and product are known (see alexis-conversation.service.ts).
+    pendingTopic: messages.some((m) => m.direction === "inbound" && /\b(?:how much|pricing|what.{0,30}(?:price|cost))\b|\b(?:price|cost)\s*\?/i.test(m.body))
+      ? "onboarding_pricing" : null,
+  }).onConflictDoNothing();
   const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
   const inserted = await tx.insert(conversationMessagesTable).values(messages.map((m) => ({
     id: m.id, conversationId: conversation.id, direction: m.direction, body: m.body,
@@ -840,6 +860,7 @@ export async function listUnmatchedSmsThreads(): Promise<UnmatchedSmsThreadSumma
     linkedCustomerId: string | null;
     status: UnmatchedSmsThread["status"];
     repliedAt: Date | null;
+    followUpSentAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
     lastMessageAt: Date | null;
@@ -850,7 +871,7 @@ export async function listUnmatchedSmsThreads(): Promise<UnmatchedSmsThreadSumma
       t.pending_inbound_id as "pendingInboundId", t.onboarding_held as "onboardingHeld", t.delivery_reviewed_at as "deliveryReviewedAt",
       t.ai_intent as "aiIntent", t.ai_summary as "aiSummary",
       t.suggested_match_customer_id as "suggestedMatchCustomerId", t.suggested_match_confidence as "suggestedMatchConfidence",
-      t.suggested_reply as "suggestedReply", t.linked_customer_id as "linkedCustomerId", t.status, t.replied_at as "repliedAt",
+      t.suggested_reply as "suggestedReply", t.linked_customer_id as "linkedCustomerId", t.status, t.replied_at as "repliedAt", t.follow_up_sent_at as "followUpSentAt",
       t.created_at as "createdAt", t.updated_at as "updatedAt",
       (select max(m.created_at) from unmatched_sms_messages m where m.thread_id = t.id) as "lastMessageAt",
       (select m.body from unmatched_sms_messages m where m.thread_id = t.id order by m.created_at desc limit 1) as "lastMessagePreview"
@@ -916,4 +937,61 @@ async function sendUnmatchedStaffReplyLocked(id: string, body: string, staffEmai
     pendingInboundId: sql`case when ${unmatchedSmsThreadsTable.pendingInboundId} is not distinct from ${thread.pendingInboundId}::uuid then null else ${unmatchedSmsThreadsTable.pendingInboundId} end`,
   }).where(eq(unmatchedSmsThreadsTable.id, id));
   return { sent: true };
+}
+
+const FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * After 24 hours without an inbound reply, send one nudge for the missing name or email and record followUpSentAt. Only follow up when the latest message is outbound.
+ */
+export async function sweepUnmatchedSmsFollowUps(): Promise<void> {
+  if (!isScheduledSmsTime()) return;
+  const cutoff = new Date(Date.now() - FOLLOW_UP_DELAY_MS);
+  const staleThreads = await db
+    .select()
+    .from(unmatchedSmsThreadsTable)
+    .where(
+      and(
+        eq(unmatchedSmsThreadsTable.status, "needs_review"),
+        isNull(unmatchedSmsThreadsTable.linkedCustomerId),
+        isNull(unmatchedSmsThreadsTable.followUpSentAt),
+        lte(unmatchedSmsThreadsTable.updatedAt, cutoff),
+      ),
+    );
+
+  for (const candidate of staleThreads) {
+    await withPersonLock(`onboarding:${candidate.fromPhone}`, async () => {
+    const thread = await getUnmatchedSmsThread(candidate.id);
+    if (thread && await isPhoneSmsOptedOut(thread.fromPhone)) { await holdOptedOutThread(thread.id); return; }
+    if (!thread || thread.pendingInboundId || thread.onboardingHeld || thread.linkedCustomerId ||
+        thread.followUpSentAt || thread.status !== "needs_review" || thread.updatedAt > cutoff) return;
+    if (thread.suggestedMatchCustomerId || thread.aiSummary?.startsWith("Identity verification required.")) return;
+    // Both already known means this is stuck on something other than a
+    // missing name/email (e.g. a suggested-match awaiting staff review) —
+    // re-asking for info we already have would make no sense.
+    if (thread.fromName && thread.collectedEmail) return;
+    if (!isScheduledSmsTime()) return;
+
+    const messages = await listUnmatchedSmsMessages(thread.id);
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.direction !== "outbound") return;
+    if (await holdForUnmatchedDelivery(thread, messages)) return;
+
+    const body = thread.fromName ? pickVariant(emailFollowUpVariants(thread.fromName)) : pickVariant(NAME_FOLLOW_UP_VARIANTS);
+    const outbound = await db.transaction(async (tx) => {
+      // Receiving input does not wait for the phone lock. Recheck eligibility
+      // atomically at the send reservation, just as for a model draft.
+      const [claimed] = await tx.update(unmatchedSmsThreadsTable).set({ followUpSentAt: new Date(), suggestedReply: null })
+        .where(and(eq(unmatchedSmsThreadsTable.id, thread.id), isNull(unmatchedSmsThreadsTable.pendingInboundId),
+          isNull(unmatchedSmsThreadsTable.followUpSentAt), eq(unmatchedSmsThreadsTable.onboardingHeld, false),
+          lte(unmatchedSmsThreadsTable.updatedAt, cutoff))).returning();
+      if (!claimed) return null;
+      const [message] = await tx.insert(unmatchedSmsMessagesTable).values({
+        threadId: thread.id, direction: "outbound", body, sentBy: "ai", deliveryStatus: "queued",
+      }).returning();
+      return message;
+    });
+    if (outbound) await sendReservedUnmatchedSms(thread, outbound, true);
+    });
+  }
 }

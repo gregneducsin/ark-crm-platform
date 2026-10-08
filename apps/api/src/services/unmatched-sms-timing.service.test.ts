@@ -163,6 +163,17 @@ describe("onboarding validation and visibility", () => {
     const messages = await db.select().from(conversationMessagesTable).where(eq(conversationMessagesTable.conversationId, conversation.id));
     expect(messages.some(m => m.body === "How much does it cost?")).toBe(true);
     expect(messages.some(m => m.body === email)).toBe(true);
+    expect(conversation.pendingTopic).toBe("onboarding_pricing");
+  });
+
+  it("does not mark pricing pending when the sender never asked about price", async () => {
+    const [thread] = await db.insert(unmatchedSmsThreadsTable).values({ fromPhone: phone(), fromName: "Synthetic" }).returning();
+    await db.insert(unmatchedSmsMessagesTable).values([{ threadId: thread.id, direction: "inbound", body: "Virginia" }]);
+    const email = `${crypto.randomUUID()}@example.com`;
+    mocks.classify.mockResolvedValue(result({ senderEmail: email }));
+    const updated = await recordAndClassifyUnmatchedSms(thread.fromPhone, email);
+    const [conversation] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, updated.linkedCustomerId!));
+    expect(conversation.pendingTopic).toBeNull();
   });
 
   it("does not turn questions or conditional statements into confirmed answers", () => {

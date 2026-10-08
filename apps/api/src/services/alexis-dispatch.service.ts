@@ -13,6 +13,7 @@ import {
   updateConversationState,
   toBotPreviewBody,
   countRecentOutboundMessages,
+  hasSentPriceReply,
   type ConversationStatePatch,
 } from "./conversations.service.js";
 import { logger } from "../lib/logger.js";
@@ -156,8 +157,13 @@ async function processInboundMessageLocked(personId: string, generation: string)
   // a real name, so it resolves to null the same as no firstName at all.
   const customerFirstName = customer && customer.firstName && customer.firstName !== "Unknown" ? customer.firstName : null;
 
+  // A deferred onboarding price question is only settled once a priced reply
+  // was actually confirmed as sent — a queued or failed send doesn't count.
+  const pricingAnswered = conversation.pendingTopic === "onboarding_pricing" && await hasSentPriceReply(conversation.id);
+  if (pricingAnswered) await updateConversationState(conversation.id, { pendingTopic: null });
   const linkProvided = await hasConfirmedIntakeLink(personId, messages);
-  const body = toBotPreviewBody({ ...conversation, linkProvided }, messages, customerFirstName);
+  const body = toBotPreviewBody({ ...conversation, linkProvided,
+    ...(pricingAnswered ? { pendingTopic: null } : {}) }, messages, customerFirstName);
   let result: AlexisTurnResult;
   try {
     result = await runAlexisTurn(personId, body);
@@ -176,6 +182,7 @@ async function processInboundMessageLocked(personId: string, generation: string)
   if (!await isCurrent()) return { ok: false, code: "SUPERSEDED" };
 
   if (!result.ok) {
+    if (result.code === "DEFERRED_PRICE_UNANSWERED") await holdSmsReplyForStaff(personId, "sales");
     logger.warn({ personId, conversationId: conversation.id, code: result.code }, "Alexis turn rejected — no outbound message sent");
     // The customer got silence, not just a routed reply — that's exactly the
     // kind of thing a human should see, not just a log line.
