@@ -369,6 +369,46 @@ describe("interactivePostCheck: pricing and financing claims", () => {
     expect(result).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: expect.stringContaining("$299") });
   });
 
+  describe("resume code MG25", () => {
+    it("lets the bot say the code takes $25 off when the code topic is cited", () => {
+      const result = check(reply({ reply: "The code MG25 takes $25 off the price.", knowledgeTopicsUsed: ["resume_code_mg25"] }));
+      expect(result.ok).toBe(true);
+    });
+
+    it("allows the code answer alongside the $40 offer, with no product price", () => {
+      const result = check(reply({ reply: "MG25 takes $25 off the price.", knowledgeTopicsUsed: ["first_month_offer", "resume_code_mg25"] }));
+      expect(result.ok).toBe(true);
+    });
+
+    it("allows the code's $25 next to a real plan price, but only with the code topic cited", () => {
+      const text = "Semaglutide is $169 for 1 month, and the code MG25 takes $25 off the price.";
+      expect(check(reply({ reply: text, knowledgeTopicsUsed: ["semaglutide_pricing", "resume_code_mg25"] })).ok).toBe(true);
+      expect(check(reply({ reply: text, knowledgeTopicsUsed: ["semaglutide_pricing"] }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    });
+
+    it("explains the price after the $25 off using the listed with-code totals, each beside its regular total", () => {
+      const topics = ["resume_code_mg25", "semaglutide_pricing"];
+      expect(check(reply({ reply: "Enter MG25 at checkout. Semaglutide for 3 months is $270 regular and $245 with the code.", knowledgeTopicsUsed: topics })).ok).toBe(true);
+      expect(check(reply({ reply: "Enter MG25 at checkout. Semaglutide for 1 month is $169 regular and $144 with the code.", knowledgeTopicsUsed: topics })).ok).toBe(true);
+      expect(check(reply({ reply: "Enter MG25 at checkout. Tirzepatide for 6 months is $1,035 regular and $1,010 with the code.", knowledgeTopicsUsed: ["resume_code_mg25", "tirzepatide_pricing"] })).ok).toBe(true);
+    });
+
+    it("rejects a with-code total that is not on the list, or that belongs to the other medication", () => {
+      const topics = ["resume_code_mg25", "semaglutide_pricing"];
+      expect(check(reply({ reply: "Semaglutide for 3 months is $240 with the code.", knowledgeTopicsUsed: topics }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+      // $485 is the tirzepatide 3-month with-code total, not a semaglutide price.
+      expect(check(reply({ reply: "Semaglutide for 3 months is $485 with the code.", knowledgeTopicsUsed: topics }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+      // A monthly average or installment computed from the code is not approved.
+      expect(check(reply({ reply: "With the code semaglutide works out to about $82 a month.", knowledgeTopicsUsed: topics }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    });
+
+    it("does not make $25 or a with-code total quotable without citing the code topic", () => {
+      expect(check(reply({ reply: "That would be $25 off.", knowledgeTopicsUsed: [] }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+      expect(check(reply({ reply: "Semaglutide is $25 a month.", knowledgeTopicsUsed: ["semaglutide_pricing"] }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+      expect(check(reply({ reply: "Semaglutide for 3 months is $245.", knowledgeTopicsUsed: ["semaglutide_pricing"] }))).toMatchObject({ ok: false, code: "UNSUPPORTED_PRICING_CLAIM" });
+    });
+  });
+
   it("rejects a fabricated promo discount even when first_month_offer and a product topic are both declared", () => {
     const result = check(
       reply({ reply: "With $50 off, semaglutide is $70 for the first month.", knowledgeTopicsUsed: ["semaglutide_pricing", "first_month_offer"] }),

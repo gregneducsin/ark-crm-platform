@@ -1,3 +1,5 @@
+import { RESUME_CODE_AMOUNT, RESUME_CODE_TOPIC_KEY, RESUME_CODE_TOTALS } from "./knowledge-catalog.js";
+
 type Product = "semaglutide" | "tirzepatide";
 
 // Includes regular prices, approved monthly equivalents, discounted totals,
@@ -23,6 +25,7 @@ function products(text: string): Product[] {
 export function medicationPriceError(fields: readonly string[], topics: readonly string[]): string | null {
   const cited = (["semaglutide", "tirzepatide"] as const).filter(p => topics.includes(p + "_pricing"));
   let context: Product | undefined = cited.length === 1 ? cited[0] : undefined;
+  const codeCited = topics.includes(RESUME_CODE_TOPIC_KEY);
   for (const text of fields) {
     if (/\b(?:semaglutide\s+(?:and|or|\/)\s+tirzepatide|tirzepatide\s+(?:and|or|\/)\s+semaglutide)\b/i.test(text) && /\$/.test(text)) {
       return "Quote each medication with its own price in a separate clause; a shared price for both medications is ambiguous.";
@@ -36,6 +39,10 @@ export function medicationPriceError(fields: readonly string[], topics: readonly
         // Only the discount itself is product-independent, never a plan price.
         const adjacent = clause.slice(Math.max(0, match.index! - 25), match.index! + match[0].length + 25);
         if (amount === PROMOTION && /\b(?:off|discount|offer|save)\b/i.test(adjacent)) continue;
+        // The resume code's reduction is likewise product-independent, and only when that topic is cited.
+        if (codeCited && amount === Number(RESUME_CODE_AMOUNT) && /\b(?:off|discount|save|code)\b/i.test(adjacent)) continue;
+        // A with-code total is valid only for its own medication, and only when the code topic is cited.
+        if (product && cited.includes(product) && codeCited && RESUME_CODE_TOTALS[product].has(amount)) continue;
         if (!product || !cited.includes(product) || !AMOUNTS[product].has(amount)) {
           return `The figure $${match[1]} is not an approved amount for ${product ?? "an unambiguous medication"}. Name each medication with its own catalog prices in a separate clause; cite that medication's pricing topic. Do not reuse another medication's price or invent installments.`;
         }

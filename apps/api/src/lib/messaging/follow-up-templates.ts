@@ -1,3 +1,4 @@
+import { RESUME_CODE } from "./knowledge-catalog.js";
 /**
  * Fixed, pre-approved follow-up nudges for a lead who clicked the intake
  * link but hasn't completed the Bask questionnaire yet. These are sent
@@ -65,6 +66,33 @@ export function renderAbandonedCartOpener(firstName: string): string {
   return pickVariant([
     `Hi ${name}, this is Alexis with Ark Health. I noticed you started your online visit but didn't get a chance to finish it. Complete your enrollment now and get $40 off your first month. Want me to send the link to get started?`,
     `Hi ${name}, this is Alexis with Ark Health. Looks like you started your online visit but didn't quite finish it. Complete your enrollment and get $40 off your first month. Want the link so you can pick back up?`,
+  ]);
+}
+
+/** Swapped for a freshly minted tracked link at send time — the link can't be minted while the template is still only a plan. */
+export const RESUME_LINK_PLACEHOLDER = "{{resume_link}}";
+export const ABANDONED_CART_RESUME_CODE = RESUME_CODE;
+
+/**
+ * First text for an abandoned cart when Bask sent the patient's magic resume
+ * link: leads with the link (a tracked Ark link that lands them back where
+ * they left off) and a code in place of the $40-off pitch. Contains
+ * RESUME_LINK_PLACEHOLDER, which the sender replaces with the real link.
+ */
+export function renderAbandonedCartResumeOpener(firstName: string): string {
+  const name = firstName.trim() || "there";
+  return pickVariant([
+    `Hi ${name}, this is Alexis with Ark Health. We're so happy you found us, and you're very close to finishing! Use this link to get back to where you left off: ${RESUME_LINK_PLACEHOLDER} Enter code ${ABANDONED_CART_RESUME_CODE} at checkout to save an additional $25. The price won't change unless you enter it.`,
+    `Hi ${name}, this is Alexis with Ark Health. So glad you found us, and you're almost done! Pick up right where you left off with this link: ${RESUME_LINK_PLACEHOLDER} Enter code ${ABANDONED_CART_RESUME_CODE} at checkout to save an additional $25. The price won't change unless you enter it.`,
+  ]);
+}
+
+/** Same as renderAbandonedCartResumeOpener, without the self-introduction, for a lead already in a conversation with Alexis. */
+export function renderAbandonedCartResumeFollowUp(firstName: string): string {
+  const name = firstName.trim() || "there";
+  return pickVariant([
+    `Hey ${name}, we're so happy you found us, and you're very close to finishing! Use this link to get back to where you left off: ${RESUME_LINK_PLACEHOLDER} Enter code ${ABANDONED_CART_RESUME_CODE} at checkout to save an additional $25. The price won't change unless you enter it.`,
+    `Hey ${name}, you're almost done! Pick up right where you left off with this link: ${RESUME_LINK_PLACEHOLDER} Enter code ${ABANDONED_CART_RESUME_CODE} at checkout to save an additional $25. The price won't change unless you enter it.`,
   ]);
 }
 

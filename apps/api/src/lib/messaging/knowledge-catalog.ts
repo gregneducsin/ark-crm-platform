@@ -54,6 +54,39 @@ export const APPROVED_REVIEW_URLS = new Set([
   "https://consumersverified.com/ark-health",
 ]);
 
+/**
+ * The code sent in the abandoned-cart text and email alongside the patient's
+ * resume link. Defined once so the message copy, the knowledge topic below and
+ * the pricing guards cannot drift apart.
+ */
+export const RESUME_CODE = "MG25";
+export const RESUME_CODE_AMOUNT = "25";
+export const RESUME_CODE_TOPIC_KEY = "resume_code_mg25";
+
+/**
+ * Plan totals with the resume code applied: the regular plan total (the same
+ * regular totals the pricing topics quote) minus the code's $25, applied once
+ * to the plan total. Computed here once so the topic text, the pricing guards
+ * and the email price box all agree and the model never does the subtraction
+ * itself. Totals only, never monthly averages or installments.
+ */
+const REGULAR_PLAN_TOTALS = {
+  semaglutide: [{ months: 1, regular: 169 }, { months: 3, regular: 270 }, { months: 6, regular: 594 }],
+  tirzepatide: [{ months: 1, regular: 225 }, { months: 3, regular: 510 }, { months: 6, regular: 1035 }],
+} as const;
+export type ResumeCodeProduct = keyof typeof REGULAR_PLAN_TOTALS;
+export const RESUME_CODE_PLAN_TOTALS: Readonly<Record<ResumeCodeProduct, ReadonlyArray<{ months: number; regular: number; withCode: number }>>> = {
+  semaglutide: REGULAR_PLAN_TOTALS.semaglutide.map((p) => ({ ...p, withCode: p.regular - Number(RESUME_CODE_AMOUNT) })),
+  tirzepatide: REGULAR_PLAN_TOTALS.tirzepatide.map((p) => ({ ...p, withCode: p.regular - Number(RESUME_CODE_AMOUNT) })),
+};
+/** Every with-code total, per product — the only totals the guards accept alongside the code. */
+export const RESUME_CODE_TOTALS: Readonly<Record<ResumeCodeProduct, ReadonlySet<number>>> = {
+  semaglutide: new Set(RESUME_CODE_PLAN_TOTALS.semaglutide.map((p) => p.withCode)),
+  tirzepatide: new Set(RESUME_CODE_PLAN_TOTALS.tirzepatide.map((p) => p.withCode)),
+};
+const formatPlanTotals = (product: ResumeCodeProduct): string =>
+  RESUME_CODE_PLAN_TOTALS[product].map((p) => `${p.months} month${p.months === 1 ? "" : "s"} $${p.withCode.toLocaleString("en-US")} (regular $${p.regular.toLocaleString("en-US")})`).join(", ");
+
 export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
   // ── Product comparison ─────────────────────────────────────────────────────
   // Source: alexis-knowledge-v1 §MEDICATIONS OFFERED, §COMPARING TIRZEPATIDE AND SEMAGLUTIDE
@@ -623,9 +656,36 @@ export const KNOWLEDGE_CATALOG: readonly KnowledgeTopic[] = [
       "eligibility_after_prior_purchase", // discount applies to new customers only
       "stackable_promotions", // cannot be combined with another promotion
       "guaranteed_eligibility", // never promise eligibility
-      "invented_coupon_code", // no code required; automatically applied
+      "invented_coupon_code", // the $40 discount needs no code; the only code that exists is MG25, covered by resume_code_mg25
       "offer_expiry_date", // no expiration unless a later approved source supplies one
       "plans_other_than_semaglutide_or_tirzepatide", // applies to both plans only
+    ],
+    enabledForPreview: true,
+  },
+  // ── Abandoned-cart resume code ─────────────────────────────────────────────
+  // Source: owner direction (2026-10): the code is sent with the patient's
+  // resume link in the abandoned-cart text and email. Deliberately narrow —
+  // it states only what the code does to the price, so the bot never invents
+  // totals, stacking rules or entry instructions the owner has not supplied.
+  {
+    key: RESUME_CODE_TOPIC_KEY,
+    approvedText:
+      `Customers who started the online visit and did not finish are sent the code ${RESUME_CODE} along with a link back to where they left off. The code ${RESUME_CODE} takes $25 off the plan total. ` +
+      `The customer must enter ${RESUME_CODE} at checkout; if the code is not entered, the price does not change. Always say so when explaining the code. ` +
+      `Plan totals with the code, once the customer says which medication: Semaglutide ${formatPlanTotals("semaglutide")}. Tirzepatide ${formatPlanTotals("tirzepatide")}. ` +
+      "Give the total with the code next to the regular total, and quote only these totals: the $25 comes off the plan total once; do not calculate monthly averages or installments from it. " +
+      "Do not say whether the code can be used together with any other discount or offer, including the $40 discount, and do not promise it to anyone who says they were not sent it. For either question, set requiresStaff so a person answers.",
+    allowedParaphrase: true,
+    legalStatus: "approved",
+    clinicalStatus: "approved",
+    lastReviewedDate: "2026-10-09",
+    alexisSourceVersion: "alexis-promotion-v1",
+    prohibitedClaims: [
+      "unlisted_total_after_code", // only the listed with-code totals; no monthly averages or installments
+      "code_stacking", // combination with other offers is unconfirmed
+      "code_other_than_at_checkout", // it is entered at checkout and nowhere else
+      "code_expiry", // no expiry stated
+      "invented_coupon_code", // MG25 is the only code
     ],
     enabledForPreview: true,
   },
@@ -764,7 +824,7 @@ export const PRODUCT_PRICING_TOPIC_KEYS = new Set(["semaglutide_pricing", "tirze
  * All topic keys that carry approved dollar-amount claims.
  * Superset of PRODUCT_PRICING_TOPIC_KEYS — includes the promotion entry.
  */
-export const APPROVED_PRICING_TOPIC_KEYS = new Set(["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer"]);
+export const APPROVED_PRICING_TOPIC_KEYS = new Set(["semaglutide_pricing", "tirzepatide_pricing", "first_month_offer", RESUME_CODE_TOPIC_KEY]);
 
 /**
  * Topic keys derived from the alexis-promotion-v1 approved promotion entry.

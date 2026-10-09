@@ -9,6 +9,8 @@ import {
   renderAbandonedCartUrgencyEmail,
   renderAbandonedCartEducationalEmail,
   renderAbandonedCartPlanComparisonEmail,
+  renderAbandonedCartResumeOpenerEmail,
+  renderAbandonedCartResumeReminderEmail,
   type RenderedEmail,
 } from "../lib/email/templates.js";
 import { isCustomerEmailDnd } from "./dnd.service.js";
@@ -86,7 +88,15 @@ export async function scheduleAbandonedCartEmailSequence(personId: string, quest
   });
 }
 
-function renderStep(step: AbandonedCartEmailStep, firstName: string, ctaUrl: string, unsubscribeUrl: string): RenderedEmail {
+/**
+ * With the patient's magic resume link on file, the first two emails (the
+ * ones that pitch the $40 offer) are replaced by magic-link versions that
+ * offer the resume code instead. The educational and plan-comparison emails
+ * make no discount claim, so they are unchanged and just point at the same link.
+ */
+function renderStep(step: AbandonedCartEmailStep, firstName: string, ctaUrl: string, unsubscribeUrl: string, withResumeLink = false): RenderedEmail {
+  if (withResumeLink && step === "opener") return renderAbandonedCartResumeOpenerEmail(firstName, ctaUrl, unsubscribeUrl);
+  if (withResumeLink && step === "urgency") return renderAbandonedCartResumeReminderEmail(firstName, ctaUrl, unsubscribeUrl);
   switch (step) {
     case "opener":
       return renderAbandonedCartOpenerEmail(firstName, ctaUrl, unsubscribeUrl);
@@ -172,10 +182,23 @@ async function sweepAbandonedCartEmailTriggersLocked(): Promise<AbandonedCartEma
       continue;
     }
 
-    let ctaUrl: string;
+    // The patient's magic resume link, if Bask sent one with this abandonment.
+    // Minted as a tracked link (a click still arms the follow-up job); if that
+    // fails for any reason, fall through to the standard $40 link and emails.
+    const [questionnaireEvent] = await db.select({ resumeUrl: questionnaireEventsTable.resumeUrl }).from(questionnaireEventsTable)
+      .where(eq(questionnaireEventsTable.id, trigger.questionnaireEventId));
+    let ctaUrl: string | undefined;
+    let withResumeLink = false;
+    if (questionnaireEvent?.resumeUrl) {
+      try {
+        ctaUrl = (await createIntakeLink(trigger.personId, "none", "abandoned_cart", { destinationUrl: questionnaireEvent.resumeUrl })).url;
+        withResumeLink = true;
+      } catch (err) {
+        logger.warn({ personId: trigger.personId, step, reason: err instanceof Error ? err.message : String(err) }, "abandoned-cart email: could not mint resume link, using the standard link");
+      }
+    }
     try {
-      const minted = await createIntakeLink(trigger.personId, "first_month_20");
-      ctaUrl = minted.url;
+      if (!ctaUrl) ctaUrl = (await createIntakeLink(trigger.personId, "first_month_20")).url;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.warn({ personId: trigger.personId, step, reason }, "abandoned-cart email: failed to mint intake link");
@@ -188,13 +211,14 @@ async function sweepAbandonedCartEmailTriggersLocked(): Promise<AbandonedCartEma
       continue;
     }
 
+    const finalCtaUrl = ctaUrl;
     const emailConversation = await getOrCreateEmailConversation(trigger.personId);
     const result = await sendTriggerEmail({
       persona: "alexis",
       personId: trigger.personId,
       conversationId: emailConversation.id,
       email: customer.email,
-      render: (unsubscribeUrl) => renderStep(step, customer.firstName, ctaUrl, unsubscribeUrl),
+      render: (unsubscribeUrl) => renderStep(step, customer.firstName, finalCtaUrl, unsubscribeUrl, withResumeLink),
       logLabel: `abandoned-cart email (${step})`,
     });
 
@@ -206,7 +230,8 @@ async function sweepAbandonedCartEmailTriggersLocked(): Promise<AbandonedCartEma
       // The opener step promises $40 off directly — the eventual send_form
       // in the reply-driven conversation must use the promo link, not the
       // plain one. Same reasoning as the SMS opener's identical line.
-      if (step === "opener") {
+      // The magic-link opener does not pitch the $40 offer, so it must not be recorded as offered.
+      if (step === "opener" && !withResumeLink) {
         await updateEmailConversationState(emailConversation.id, { promoOffered: true });
       }
       sentCount++;

@@ -143,6 +143,50 @@ describe("intake-links.service", () => {
       expect(jobs.length).toBe(1);
     });
 
+    describe("magic resume link destination", () => {
+      const MAGIC = "https://bask.example.com/resume?token=magic-abc";
+
+      it("redirects to the magic link, counts the click, and arms the same follow-up job", async () => {
+        const { createIntakeLink, handleIntakeLinkClick } = await import("./intake-links.service.js");
+        const personId = await seedCustomer();
+        const { url } = await createIntakeLink(personId, "none", "abandoned_cart", { destinationUrl: MAGIC });
+        expect(url).toMatch(/^http:\/\/localhost:3000\/go\/[^/]+$/);
+        const { redirectUrl } = await handleIntakeLinkClick(url.split("/go/")[1]);
+        expect(redirectUrl).toBe(MAGIC);
+        const [token] = await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId));
+        expect(token.clickedAt).not.toBeNull();
+        expect(token.destinationUrl).toBe(MAGIC);
+        const [job] = await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, personId));
+        expect(job.messageStep).toBe("provider_check_in");
+      });
+
+      it("stays live for a week, not a day, so a text read days later still tracks the click", async () => {
+        const { createIntakeLink } = await import("./intake-links.service.js");
+        const personId = await seedCustomer();
+        const { expiresAt } = await createIntakeLink(personId, "none", "abandoned_cart", { destinationUrl: MAGIC });
+        expect(expiresAt.getTime()).toBeGreaterThan(Date.now() + 6 * 24 * 3600_000);
+      });
+
+      it("still lands on the magic link after the tracking window, without arming a follow-up", async () => {
+        const { handleIntakeLinkClick } = await import("./intake-links.service.js");
+        const personId = await seedCustomer();
+        const rawToken = "expired-magic-token";
+        await db.insert(intakeLinkTokensTable).values({ personId, tokenHash: hashToken(rawToken), destinationUrl: MAGIC, expiresAt: new Date(Date.now() - 1000) });
+        const { redirectUrl } = await handleIntakeLinkClick(rawToken);
+        expect(redirectUrl).toBe(MAGIC);
+        expect(await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, personId))).toHaveLength(0);
+      });
+
+      it("does not arm a follow-up when the patient already finished", async () => {
+        const { createIntakeLink, handleIntakeLinkClick } = await import("./intake-links.service.js");
+        const personId = await seedCustomer();
+        await db.insert(questionnaireEventsTable).values({ personId, questionnaireId: crypto.randomUUID(), status: "submitted", lastEventAt: new Date() });
+        const { url } = await createIntakeLink(personId, "none", "abandoned_cart", { destinationUrl: MAGIC });
+        expect((await handleIntakeLinkClick(url.split("/go/")[1])).redirectUrl).toBe(MAGIC);
+        expect(await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, personId))).toHaveLength(0);
+      });
+    });
+
     it("an unknown token still redirects, without creating a follow-up job", async () => {
       const { handleIntakeLinkClick } = await import("./intake-links.service.js");
       const { redirectUrl } = await handleIntakeLinkClick("this-token-does-not-exist");

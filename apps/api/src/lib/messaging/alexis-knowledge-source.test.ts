@@ -333,6 +333,20 @@ describe("LK-17: getPreviewEnabledTopics() includes all Alexis-v1 topic keys and
     expect(enabledKeys.has("portal_help")).toBe(false);
   });
 
+  it("resume_code_mg25 is preview-enabled, a pricing topic, and tells customers to enter the code at checkout", () => {
+    const enabledKeys = new Set(getPreviewEnabledTopics().map((t) => t.key));
+    expect(enabledKeys.has("resume_code_mg25")).toBe(true);
+    const topic = getTopicByKey("resume_code_mg25");
+    expect(topic?.approvedText).toContain("MG25");
+    expect(topic?.approvedText).toContain("$25");
+    expect(topic?.alexisSourceVersion).toBe("alexis-promotion-v1");
+    expect(topic?.approvedText).toMatch(/enter MG25 at checkout/i);
+    expect(topic?.approvedText).toMatch(/price does not change/i);
+    expect(topic?.approvedText).toContain("3 months $245 (regular $270)");
+    expect(topic?.approvedText).toContain("3 months $485 (regular $510)");
+    expect(topic?.approvedText).toContain("6 months $1,010 (regular $1,035)");
+  });
+
   it("first_month_offer is in the catalog and is preview-enabled (alexis-promotion-v1)", () => {
     const topic = getTopicByKey("first_month_offer");
     expect(topic).toBeDefined();

@@ -5,6 +5,19 @@ import { generateRawToken, hashToken } from "../lib/crypto.js";
 import { clampToSendWindow } from "../lib/send-window.js";
 
 const INTAKE_LINK_TTL_MS = 24 * 60 * 60 * 1000;
+// A link that points at the patient's own magic resume link is sent in a
+// scheduled text that may be read days later, and clicking it is what arms
+// the follow-up chain — so it stays "live" for tracking much longer than a
+// promo link, whose 24-hour life exists to stop a discount outlasting its offer.
+const RESUME_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export interface CreateIntakeLinkOptions {
+  /** Redirect clicks here (the patient's magic resume link) instead of a Bask questionnaire URL. */
+  readonly destinationUrl?: string;
+  /** Mint inside the caller's transaction, so the token only exists if the message using it is actually queued. */
+  readonly tx?: Tx;
+}
 const FOLLOW_UP_DELAY_MS = 2 * 60 * 60 * 1000;
 
 export type PromoVariant = IntakeLinkToken["promoApplied"];
@@ -44,19 +57,28 @@ function intakeLinkBaseUrl(): string {
  * right kind of conversation, since it can end up being the very first SMS
  * this person ever gets, with no existing conversation row to read it from.
  */
-export async function createIntakeLink(personId: string, promo: PromoVariant = "none", leadSource: IntakeLeadSource = "abandoned_cart"): Promise<{ url: string; expiresAt: Date }> {
+export async function createIntakeLink(
+  personId: string,
+  promo: PromoVariant = "none",
+  leadSource: IntakeLeadSource = "abandoned_cart",
+  options: CreateIntakeLinkOptions = {},
+): Promise<{ url: string; expiresAt: Date }> {
+  // Resolved before any database write, so a missing base URL fails without
+  // leaving an unusable token behind (or aborting a caller's transaction).
+  const baseUrl = intakeLinkBaseUrl();
   const rawToken = generateRawToken();
-  const expiresAt = new Date(Date.now() + INTAKE_LINK_TTL_MS);
+  const expiresAt = new Date(Date.now() + (options.destinationUrl ? RESUME_LINK_TTL_MS : INTAKE_LINK_TTL_MS));
 
-  await db.insert(intakeLinkTokensTable).values({
+  await (options.tx ?? db).insert(intakeLinkTokensTable).values({
     personId,
     tokenHash: hashToken(rawToken),
     promoApplied: promo,
     leadSource,
+    destinationUrl: options.destinationUrl ?? null,
     expiresAt,
   });
 
-  return { url: `${intakeLinkBaseUrl()}/go/${rawToken}`, expiresAt };
+  return { url: `${baseUrl}/go/${rawToken}`, expiresAt };
 }
 
 /**
@@ -85,7 +107,9 @@ export async function handleIntakeLinkClick(rawToken: string): Promise<{ redirec
     // an expired link still honored its promo variant forever, so a $40-off
     // link kept discounting orders well past the offer's 24-hour window.
     // Once expired, fall back to the plain URL, same as an unknown token.
-    const redirectUrl = expired ? baskQuestionnaireUrl("none") : baskQuestionnaireUrl(token.promoApplied);
+    // A magic resume link keeps working after expiry (it never expires on
+    // Bask's side); only the follow-up arming below is gated on freshness.
+    const redirectUrl = token.destinationUrl ?? (expired ? baskQuestionnaireUrl("none") : baskQuestionnaireUrl(token.promoApplied));
 
     if (!alreadyClicked && !expired) {
       await tx.update(intakeLinkTokensTable).set({ clickedAt: sql`now()` }).where(eq(intakeLinkTokensTable.id, token.id));

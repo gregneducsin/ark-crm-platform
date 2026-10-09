@@ -324,3 +324,77 @@ describe("scheduled follow-ups acknowledge customer concerns", () => {
     expect(mocks.send.mock.calls[0][1]).toContain("cost was a concern");
   });
 });
+
+describe("abandoned cart with the patient's magic resume link", () => {
+  const MAGIC = "https://bask.example.com/resume?token=magic-abc";
+  async function seedAbandoned(resumeUrl: string | null) {
+    const item = await seed("abandoned_cart");
+    const job = (await jobFor(item)) as typeof abandonedCartTriggersTable.$inferSelect;
+    await db.update(questionnaireEventsTable).set({ resumeUrl }).where(eq(questionnaireEventsTable.id, job.questionnaireEventId));
+    return item;
+  }
+  const originalBase = process.env.INTAKE_LINK_BASE_URL;
+  beforeEach(() => { process.env.INTAKE_LINK_BASE_URL = "http://localhost:3000"; });
+  afterEach(() => { if (originalBase === undefined) delete process.env.INTAKE_LINK_BASE_URL; else process.env.INTAKE_LINK_BASE_URL = originalBase; });
+
+  it("leads with a tracked link and the MG25 code instead of the $40 question", async () => {
+    const item = await seedAbandoned(MAGIC);
+    await sweepScheduledSalesSms("abandoned_cart");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    const body = mocks.send.mock.calls[0][1] as string;
+    expect(body).toMatch(/http:\/\/localhost:3000\/go\/\S+/);
+    expect(body).not.toContain(MAGIC);
+    expect(body).not.toContain("{{resume_link}}");
+    expect(body).toContain("MG25");
+    expect(body).toContain("$25");
+    expect(body).toMatch(/at checkout/i);
+    expect(body).toMatch(/price won't change unless you enter it/i);
+    expect(body).not.toContain("$40");
+    expect(body).not.toContain("?");
+
+    // The minted link is tracked and lands on the magic link.
+    const [token] = await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, item.personId));
+    expect(token.destinationUrl).toBe(MAGIC);
+    const { handleIntakeLinkClick } = await import("./intake-links.service.js");
+    const rawToken = (body.match(/\/go\/(\S+)/) as RegExpMatchArray)[1];
+    expect((await handleIntakeLinkClick(rawToken)).redirectUrl).toBe(MAGIC);
+    expect(await db.select().from(followUpJobsTable).where(eq(followUpJobsTable.personId, item.personId))).toHaveLength(1);
+
+    // The $40 offer was not pitched, so it must not be recorded as offered.
+    const [convo] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, item.personId));
+    expect(convo.promoOffered).toBe(false);
+  });
+
+  it("drops the self-introduction when the lead is already in a conversation", async () => {
+    const item = await seedAbandoned(MAGIC);
+    await conversation(item.personId);
+    await sweepScheduledSalesSms("abandoned_cart");
+    const body = mocks.send.mock.calls[0][1] as string;
+    expect(body).toMatch(/^Hey /);
+    expect(body).not.toContain("this is Alexis");
+    expect(body).toContain("MG25");
+  });
+
+  it("sends the standard $40 text when Bask sent no link", async () => {
+    await seedAbandoned(null);
+    await sweepScheduledSalesSms("abandoned_cart");
+    const body = mocks.send.mock.calls[0][1] as string;
+    expect(body).toContain("$40");
+    expect(body).not.toContain("MG25");
+    expect(body).not.toContain("/go/");
+  });
+
+  it("falls back to the standard text, never a dangling placeholder, when the link cannot be minted", async () => {
+    delete process.env.INTAKE_LINK_BASE_URL;
+    const item = await seedAbandoned(MAGIC);
+    await sweepScheduledSalesSms("abandoned_cart");
+    const body = mocks.send.mock.calls[0][1] as string;
+    expect(body).toContain("$40");
+    expect(body).not.toContain("{{resume_link}}");
+    expect(body).not.toContain("MG25");
+    expect(await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, item.personId))).toHaveLength(0);
+    const [convo] = await db.select().from(conversationsTable).where(eq(conversationsTable.personId, item.personId));
+    expect(convo.promoOffered).toBe(true);
+  });
+});
+

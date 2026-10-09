@@ -22,7 +22,7 @@ import { medicationPriceError } from "./medication-price.js";
 import { z } from "zod";
 import { OUTBOUND_URL_RE, hasInternalMarkup } from "../outbound-content.js";
 import type { ClaudeInteractiveResult } from "./types.js";
-import { APPROVED_REVIEW_URLS, APPROVED_PRICING_TOPIC_KEYS, PRODUCT_PRICING_TOPIC_KEYS } from "./knowledge-catalog.js";
+import { APPROVED_REVIEW_URLS, APPROVED_PRICING_TOPIC_KEYS, PRODUCT_PRICING_TOPIC_KEYS, RESUME_CODE_AMOUNT, RESUME_CODE_TOPIC_KEY, RESUME_CODE_TOTALS } from "./knowledge-catalog.js";
 import { OBJECTION_KEYS } from "./objection-handling.js";
 import { stripEmDashes } from "../text-sanitize.js";
 
@@ -1063,10 +1063,18 @@ export function interactivePostCheck(
     // attached." Catches e.g. knowledgeTopicsUsed:["tirzepatide_pricing"] with
     // reply "$299 a month" — a fabricated price that the topic-only check above
     // would otherwise wave through.
+    // The resume code's $25 and with-code plan totals are approved only when
+    // that topic is cited: they are not catalog prices, so they must not become
+    // figures any pricing answer can quote.
+    const citesResumeCode = raw.knowledgeTopicsUsed.includes(RESUME_CODE_TOPIC_KEY);
     if (hasPricingTopic) {
       DOLLAR_AMOUNT_GLOBAL_RE.lastIndex = 0;
       for (const match of reply.matchAll(DOLLAR_AMOUNT_GLOBAL_RE)) {
-        if (!APPROVED_DOLLAR_AMOUNTS.has(String(Number(normalizeDollarAmount(match[1]))))) {
+        const amount = String(Number(normalizeDollarAmount(match[1])));
+        if (citesResumeCode && amount === RESUME_CODE_AMOUNT) continue;
+        // With-code plan totals are checked against the right medication by medicationPriceError below.
+        if (citesResumeCode && (RESUME_CODE_TOTALS.semaglutide.has(Number(amount)) || RESUME_CODE_TOTALS.tirzepatide.has(Number(amount)))) continue;
+        if (!APPROVED_DOLLAR_AMOUNTS.has(amount)) {
           // Name the figure: a generic "use approved amounts" note lets the
           // model repeat the same arithmetic (e.g. a discounted total divided
           // into a monthly installment) on every retry.
@@ -1100,7 +1108,8 @@ export function interactivePostCheck(
       // Invented discount amount — when first_month_offer is the only pricing topic
       // (no product pricing topic declared), any dollar amount must be exactly $40.
       const hasProductPricingTopic = raw.knowledgeTopicsUsed.some((k) => PRODUCT_PRICING_TOPIC_KEYS.has(k));
-      if (!hasProductPricingTopic && DOLLAR_AMOUNT_RE.test(reply) && !APPROVED_PROMOTION_AMOUNT_RE.test(reply)) {
+      if (!hasProductPricingTopic && DOLLAR_AMOUNT_RE.test(reply) && !APPROVED_PROMOTION_AMOUNT_RE.test(reply) &&
+          !(citesResumeCode && new RegExp(`\\$${RESUME_CODE_AMOUNT}\\b`).test(reply))) {
         return {
           ok: false,
           code: "UNSUPPORTED_PRICING_CLAIM",

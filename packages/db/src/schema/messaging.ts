@@ -39,6 +39,15 @@ export const intakeLinkTokensTable = pgTable(
      * which only matches abandoned-cart leads.
      */
     leadSource: text("lead_source", { enum: ["abandoned_cart", "meta_form"] }).notNull().default("abandoned_cart"),
+    /**
+     * When set, a click redirects here instead of to a Bask questionnaire URL
+     * — used for the patient's Bask magic resume link (see
+     * questionnaire_events.resume_url). Click tracking and the follow-up
+     * chain work exactly as for any other intake link, and the redirect is
+     * honored even after expiresAt: the magic link itself does not expire,
+     * so a late click must still land where the patient left off.
+     */
+    destinationUrl: text("destination_url"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     clickedAt: timestamp("clicked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

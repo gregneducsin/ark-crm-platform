@@ -290,3 +290,69 @@ describe("sweepAbandonedCartEmailTriggers", () => {
     expect(subjects).toContain("Which Ark Health plan is right for you?");
   });
 });
+
+describe("abandoned-cart emails with the patient's magic resume link", () => {
+  const MAGIC = "https://bask.example.com/resume?token=magic-abc";
+  async function seedWithResume(resumeUrl: string | null) {
+    const personId = await seedCustomer();
+    const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
+    await db.update(questionnaireEventsTable).set({ resumeUrl }).where(eq(questionnaireEventsTable.id, questionnaireEventId));
+    await scheduleAbandonedCartEmailSequence(personId, questionnaireEventId);
+    await backdateAllSteps(personId);
+    return personId;
+  }
+
+  it("sends the magic-link opener and reminder with the code, and a tracked link that lands on the magic link", async () => {
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValue({ messageId: "<resume@example.com>" });
+    const personId = await seedWithResume(MAGIC);
+
+    const result = await sweepAbandonedCartEmailTriggers();
+    expect(result.sentCount).toBe(4);
+
+    const htmls = sendEmailMock.mock.calls.map((call) => String(call[2]));
+    const withCode = htmls.filter((html) => html.includes("MG25"));
+    expect(withCode).toHaveLength(2);
+    for (const html of withCode) {
+      expect(html).toContain("save an additional $25");
+      expect(html).toContain("Enter the code at checkout");
+      expect(html).toContain("The price won't change unless you enter it");
+      expect(html).not.toContain("$40");
+    }
+    // The opener explains the price after the $25 off, beside the regular totals.
+    const opener = withCode.find((html) => html.includes("with code MG25 entered at checkout"));
+    expect(opener).toBeDefined();
+    expect(opener).toContain("$245");
+    expect(opener).toContain("(regular $270)");
+    expect(opener).toContain("$485");
+    expect(opener).toContain("(regular $510)");
+    expect(opener).toContain("$1,010");
+    expect(opener).toContain("(regular $1,035)");
+    // Every email in the sequence points at a tracked link, never the raw magic link.
+    for (const html of htmls) {
+      expect(html).toContain("http://localhost:3000/go/");
+      expect(html).not.toContain(MAGIC);
+    }
+
+    const { intakeLinkTokensTable } = await import("@luma/db");
+    const tokens = await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId));
+    expect(tokens).toHaveLength(4);
+    for (const token of tokens) expect(token.destinationUrl).toBe(MAGIC);
+
+    // The $40 offer was not pitched, so the conversation must not record it as offered.
+    const conversation = await getOrCreateEmailConversation(personId);
+    expect(conversation.promoOffered).toBe(false);
+  });
+
+  it("keeps the standard $40 emails when Bask sent no link", async () => {
+    sendEmailMock.mockClear();
+    sendEmailMock.mockResolvedValue({ messageId: "<standard@example.com>" });
+    const personId = await seedWithResume(null);
+    await sweepAbandonedCartEmailTriggers();
+    const htmls = sendEmailMock.mock.calls.map((call) => String(call[2]));
+    expect(htmls.some((html) => html.includes("MG25"))).toBe(false);
+    expect(htmls.some((html) => html.includes("$40"))).toBe(true);
+    expect((await getOrCreateEmailConversation(personId)).promoOffered).toBe(true);
+  });
+});
+

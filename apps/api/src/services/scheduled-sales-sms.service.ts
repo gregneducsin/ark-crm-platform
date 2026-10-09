@@ -12,7 +12,9 @@ import { clampToSendWindow, isScheduledSmsTime, SmsQuietHoursError } from "../li
 import {
   renderFollowUpMessage, renderCurrentlyTakingCheckin, renderReengagementCheckin,
   renderAbandonedCartOpener, renderAbandonedCartFollowUp,
+  renderAbandonedCartResumeOpener, renderAbandonedCartResumeFollowUp, RESUME_LINK_PLACEHOLDER,
 } from "../lib/messaging/follow-up-templates.js";
+import { createIntakeLink } from "./intake-links.service.js";
 import { sendReservedSms, flagSmsDeliveryForStaff } from "./sms-delivery.service.js";
 import { isSalesSmsPaused, SalesSmsPausedError } from "../lib/sales-sms.js";
 import { logger } from "../lib/logger.js";
@@ -34,6 +36,13 @@ const retryTables = { lead_checkin: leadCheckinTriggersTable, objection_reengage
 type Plan = { cancel: string } | {
   body: string; leadSource?: "abandoned_cart" | "meta_form"; promoOffered?: boolean;
   variant?: "currently_taking" | "reengagement"; armCheckin?: boolean;
+  /**
+   * Set when `body` contains RESUME_LINK_PLACEHOLDER: the patient's Bask magic
+   * link. At send time it is wrapped in a freshly minted tracked intake link
+   * (so a click still arms the follow-up chain). If minting fails, `fallback`
+   * — the standard $40-offer text — goes out instead of a half-built message.
+   */
+  resume?: { url: string; fallback: { body: string; promoOffered: boolean } };
 };
 
 async function armCheckin(tx: Tx, personId: string) {
@@ -66,7 +75,18 @@ async function prepare(tx: Tx, kind: ScheduledSalesSmsKind, id: string, customer
     if (!event || event.status !== "abandoned") return { cancel: "no_longer_abandoned" };
     const [token] = await tx.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId)).orderBy(desc(intakeLinkTokensTable.createdAt)).limit(1);
     if (token?.clickedAt) { await armCheckin(tx, personId); return { cancel: "already_clicked_intake_link" }; }
-    return { body: concernReply ?? (conversation ? renderAbandonedCartFollowUp(customer.firstName) : renderAbandonedCartOpener(customer.firstName)), promoOffered: !concernReply, armCheckin: true };
+    const standardBody = conversation ? renderAbandonedCartFollowUp(customer.firstName) : renderAbandonedCartOpener(customer.firstName);
+    // Bask sent the patient's magic resume link: lead with it instead of the
+    // "want the link?" question — never over a reply to a stated concern.
+    if (event.resumeUrl && !concernReply) {
+      return {
+        body: conversation ? renderAbandonedCartResumeFollowUp(customer.firstName) : renderAbandonedCartResumeOpener(customer.firstName),
+        // The $40 offer is not mentioned in this text, so it must not be marked as offered.
+        promoOffered: false, armCheckin: true,
+        resume: { url: event.resumeUrl, fallback: { body: standardBody, promoOffered: true } },
+      };
+    }
+    return { body: concernReply ?? standardBody, promoOffered: !concernReply, armCheckin: true };
   }
   if (kind === "lead_checkin") {
     const variant = !conversation || conversation.currentlyTaking === null ? "currently_taking" : "reengagement";
@@ -188,14 +208,29 @@ async function processJob(kind: ScheduledSalesSmsKind, id: string, personId: str
         await tx.update(table).set({ status: "failed", failureReason: "NO_PHONE_NUMBER" }).where(eq(table.id, id));
         return { outcome: "failed" as const };
       }
+      let body = plan.body;
+      let promoOffered = plan.promoOffered;
+      if (plan.resume) {
+        try {
+          // Minted inside this transaction: the token exists only if the message does.
+          const tracked = await createIntakeLink(personId, "none", plan.leadSource ?? "abandoned_cart", { destinationUrl: plan.resume.url, tx });
+          body = body.replace(RESUME_LINK_PLACEHOLDER, tracked.url);
+        } catch (err) {
+          // Misconfiguration (e.g. no INTAKE_LINK_BASE_URL) must not strand the lead or send a text with a
+          // dangling placeholder. Fall back to the standard offer; never log the link itself.
+          logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "resume link could not be minted — sending the standard abandoned-cart text");
+          body = plan.resume.fallback.body;
+          promoOffered = plan.resume.fallback.promoOffered;
+        }
+      }
       await tx.insert(conversationsTable).values({ personId, leadSource: plan.leadSource ?? "abandoned_cart" }).onConflictDoNothing();
       const [conversation] = await tx.select().from(conversationsTable).where(eq(conversationsTable.personId, personId));
-      if (plan.promoOffered) await tx.update(conversationsTable).set({ promoOffered: true }).where(eq(conversationsTable.id, conversation.id));
+      if (promoOffered) await tx.update(conversationsTable).set({ promoOffered: true }).where(eq(conversationsTable.id, conversation.id));
       if (plan.variant) await tx.update(leadCheckinTriggersTable).set({ variant: plan.variant }).where(eq(leadCheckinTriggersTable.id, id));
       if (plan.armCheckin) await armCheckin(tx, personId);
       await tx.update(table).set({ status: "processing", failureReason: null }).where(eq(table.id, id));
-      await tx.insert(conversationMessagesTable).values({ id, conversationId: conversation.id, direction: "outbound", body: plan.body, sentBy: "ai", deliveryStatus: "queued" });
-      return { outcome: "deferred" as const, send: { phone: customer.phone, body: plan.body } };
+      await tx.insert(conversationMessagesTable).values({ id, conversationId: conversation.id, direction: "outbound", body, sentBy: "ai", deliveryStatus: "queued" });
+      return { outcome: "deferred" as const, send: { phone: customer.phone, body } };
     });
     if (!result.send) return result.outcome;
     try {

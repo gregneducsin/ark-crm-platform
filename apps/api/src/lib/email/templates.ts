@@ -1,3 +1,4 @@
+import { RESUME_CODE, RESUME_CODE_PLAN_TOTALS } from "../messaging/knowledge-catalog.js";
 /**
  * Fixed, pre-approved email templates for automated trigger sends — same
  * "fixed text, not AI-drafted" reasoning as follow-up-templates.ts and
@@ -745,6 +746,154 @@ export function renderAbandonedCartOpenerEmail(firstName: string, ctaUrl: string
 </body>
 </html>`;
   return { subject: "Your Ark Health visit is waiting — don't lose your spot", html };
+}
+
+interface ResumeEmailContent {
+  readonly subject: string;
+  readonly greetingParagraphs: readonly string[];
+  readonly ctaLabel: string;
+  /** Show each medication's plan totals with the code applied, next to the regular totals. */
+  readonly showCodePrices?: boolean;
+}
+
+function resumeCodePriceBox(): string {
+  const money = (n: number) => `$${n.toLocaleString("en-US")}`;
+  const row = (label: string, product: keyof typeof RESUME_CODE_PLAN_TOTALS) =>
+    `          <p class="price-row">${label} — ${RESUME_CODE_PLAN_TOTALS[product]
+      .map((p) => `${p.months} month${p.months === 1 ? "" : "s"} <span class="price-value">${money(p.withCode)}</span> <span class="price-was">(regular ${money(p.regular)})</span>`)
+      .join(" &middot; ")}</p>`;
+  return `        <div class="price-box">
+          <p class="price-title">Your plan total with code ${RESUME_CODE} entered at checkout</p>
+${row("Compounded Semaglutide", "semaglutide")}
+${row("Compounded Tirzepatide", "tirzepatide")}
+        </div>`;
+}
+
+/**
+ * Shell shared by the two magic-link abandoned-cart emails. Same look as the
+ * rest of the sequence, with no first-month-discount pitch: the one offer
+ * here is the resume code. `ctaUrl` is a tracked intake link that redirects
+ * to the patient's magic resume link (createIntakeLink with a destinationUrl),
+ * so a click still arms the 2-hour follow-up job.
+ */
+function renderResumeEmail(content: ResumeEmailContent, name: string, ctaUrl: string, unsubscribeUrl: string): RenderedEmail {
+  const paragraphs = content.greetingParagraphs.map((p) => `        <p class="paragraph">${p}</p>`).join("\n\n");
+  const html = `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${content.subject}</title>
+<style>
+  body, table, td { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  body { margin: 0; padding: 0; background-color: #eef2f5; }
+  .email-wrapper { width: 100%; background-color: #eef2f5; padding: 40px 0; }
+  .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dce3e8; }
+  .header { background-color: #1a2a38; padding: 36px 40px; text-align: center; }
+  .logo-text { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 30px; letter-spacing: 3px; color: #ffffff; margin: 0; font-weight: 500; }
+  .header-sub { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: 2px; color: #a9bccb; text-transform: uppercase; margin-top: 6px; }
+  .body-content { padding: 44px 40px 20px 40px; }
+  .greeting { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 26px; color: #1a2a38; margin: 0 0 22px 0; font-weight: 500; }
+  .paragraph { font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 26px; color: #3e4a56; margin: 0 0 20px 0; }
+  .code-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; text-align: center; }
+  .code-label { font-family: Arial, sans-serif; font-size: 13px; color: #3e4a56; margin: 0 0 8px 0; }
+  .code-value { font-family: Arial, sans-serif; font-size: 26px; letter-spacing: 4px; font-weight: bold; color: #3e6f8e; margin: 0 0 8px 0; }
+  .code-note { font-family: Arial, sans-serif; font-size: 13px; color: #1a2a38; margin: 0; }
+  .price-box { background-color: #eef2f5; border: 1px solid #dce3e8; border-radius: 4px; padding: 20px 24px; margin: 0 0 24px 0; }
+  .price-title { font-family: Arial, sans-serif; font-size: 13px; font-weight: bold; color: #3e4a56; margin: 0 0 12px 0; }
+  .price-row { font-family: Arial, sans-serif; font-size: 14px; line-height: 22px; color: #1a2a38; margin: 0 0 8px 0; }
+  .price-row:last-child { margin-bottom: 0; }
+  .price-value { color: #3e6f8e; font-weight: bold; }
+  .price-was { color: #7c8a96; font-size: 12px; }
+  .cta-wrapper { text-align: center; margin: 32px 0; }
+  .cta-button { display: inline-block; background-color: #d9f26a; color: #1a2a38; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; letter-spacing: 1px; text-decoration: none; padding: 16px 38px; border-radius: 3px; text-transform: uppercase; }
+  .divider { border: none; border-top: 1px solid #dce3e8; margin: 30px 0; }
+  .footer { padding: 28px 40px 40px 40px; text-align: center; }
+  .footer-text { font-family: Arial, sans-serif; font-size: 12px; line-height: 20px; color: #7c8a96; margin: 4px 0; }
+  .footer-phone { color: #3e6f8e; text-decoration: none; font-weight: bold; }
+  a { color: #3e6f8e; }
+</style>
+</head>
+<body>
+<div class="email-wrapper">
+  <table class="email-container" role="presentation" cellpadding="0" cellspacing="0" width="100%">
+    <tr>
+      <td class="header">
+        <p class="logo-text">ARK HEALTH</p>
+        <p class="header-sub">Your Journey to Wellness</p>
+      </td>
+    </tr>
+    <tr>
+      <td class="body-content">
+        <p class="greeting">Dear ${name},</p>
+
+${paragraphs}
+
+        <div class="code-box">
+          <p class="code-label">Use code</p>
+          <p class="code-value">${RESUME_CODE}</p>
+          <p class="code-note">to save an additional $25</p>
+          <p class="code-note" style="margin-top:8px;"><strong>Enter the code at checkout.</strong> The price won't change unless you enter it.</p>
+        </div>
+
+${content.showCodePrices ? resumeCodePriceBox() + "\n" : ""}
+        <div class="cta-wrapper">
+          <a href="${ctaUrl}" class="cta-button">${content.ctaLabel}</a>
+        </div>
+
+        <p class="paragraph">Questions? Call or text us at <a href="tel:8557582275" class="footer-phone">(855) 758-2275</a> — we're here to help you finish.</p>
+
+        <p class="paragraph" style="margin-bottom:0;">The Ark Health Team</p>
+      </td>
+    </tr>
+    <tr>
+      <td><hr class="divider" style="margin-left:40px; margin-right:40px;"></td>
+    </tr>
+    <tr>
+      <td class="footer">
+        <p class="footer-text">Ark Health &middot; 8 The Green, Dover, DE</p>
+        <p class="footer-text"><a href="tel:8557582275" class="footer-phone">(855) 758-2275</a></p>
+        <p class="footer-text"><a href="${unsubscribeUrl}" class="footer-phone">Unsubscribe</a> from future emails.</p>
+      </td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>`;
+  return { subject: content.subject, html };
+}
+
+/**
+ * Abandoned-cart step 1 when Bask sent the patient's magic resume link: a
+ * different email from renderAbandonedCartOpenerEmail — leads with picking up
+ * where they left off, and offers the resume code instead of the $40 pitch.
+ * `ctaUrl` must be a tracked intake link with a destinationUrl (see
+ * renderResumeEmail).
+ */
+export function renderAbandonedCartResumeOpenerEmail(firstName: string, ctaUrl: string, unsubscribeUrl: string): RenderedEmail {
+  const name = firstName.trim() || "there";
+  return renderResumeEmail({
+    subject: "You're so close — pick up right where you left off",
+    greetingParagraphs: [
+      "We're so happy you found Ark Health, and you're very close to finishing.",
+      "Use the button below to get back to exactly where you left off. It takes just a few minutes, and our clinical team is ready to review your visit as soon as it's submitted.",
+    ],
+    ctaLabel: "Pick Up Where I Left Off",
+    showCodePrices: true,
+  }, name, ctaUrl, unsubscribeUrl);
+}
+
+/** Abandoned-cart step 2 for a lead with a magic resume link — same link and code, no expiry claim. */
+export function renderAbandonedCartResumeReminderEmail(firstName: string, ctaUrl: string, unsubscribeUrl: string): RenderedEmail {
+  const name = firstName.trim() || "there";
+  return renderResumeEmail({
+    subject: `Your Ark Health visit is still saved — code ${RESUME_CODE} inside`,
+    greetingParagraphs: [
+      "A quick reminder that your Ark Health visit is still saved, right where you left off.",
+      "Use the button below to jump back in and finish. Remember to enter your code at checkout. Our clinical team will review your visit as soon as it's submitted.",
+    ],
+    ctaLabel: "Finish My Visit",
+  }, name, ctaUrl, unsubscribeUrl);
 }
 
 /** Abandoned-cart drip step 2 ("urgency") — fires 24 hours after abandonment. Same ctaUrl-minting requirement as renderAbandonedCartOpenerEmail. */
