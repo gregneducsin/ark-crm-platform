@@ -1,3 +1,4 @@
+import { pendingInboundMessages } from "../lib/pending-inbound.js";
 import { deduplicateFollowUp } from "../lib/messaging/deduplicate-follow-up.js";
 import { hasStatedSupportPlan, isMessagingFeedback, omitGenericSupportQuestion } from "../lib/support/conversation-quality.js";
 import { supportPreCheck, supportPostCheck } from "../lib/support/safety.js";
@@ -90,9 +91,14 @@ const MAX_ATTEMPTS = 3;
 const RETRYABLE_PROVIDER_CODES = new Set(["SCHEMA_VALIDATION_ERROR", "EMPTY_RESPONSE", "NO_JSON_OBJECT", "JSON_PARSE_ERROR", "TRUNCATED_RESPONSE"]);
 
 export async function runSophieTurn(body: SophiePreviewRequestBody): Promise<SophieTurnResult> {
-  const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
+  const batch = pendingInboundMessages(body.messages);
+  const lastInbound = batch[0];
   if (lastInbound) {
-    const pre = supportPreCheck(lastInbound.body);
+    const checks = batch.map(m => supportPreCheck(m.body));
+    const pre = checks.find(p => p.blocked && p.code === "OPT_OUT")
+      ?? checks.find(p => p.blocked && p.code === "EMERGENCY_CONTENT")
+      ?? checks.find(p => p.blocked)
+      ?? { blocked: false as const };
     if (pre.blocked) {
       const deterministic = PRE_CHECK_RESULTS[pre.code] ?? { action: "staff_review" as const, reply: null };
       const reply =

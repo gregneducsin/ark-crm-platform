@@ -145,7 +145,7 @@ const OPT_OUT_PHRASES_LOWER = [
  */
 const STOP_WORDS_UPPER = ["END", "QUIT"] as const;
 
-const EMERGENCY_WORDS_LOWER = ["emergency", "crisis", "suicide", "self-harm", "self harm"] as const;
+const EMERGENCY_WORDS_LOWER = ["emergency", "crisis", "suicide", "self-harm", "self harm", "chest pain"] as const;
 
 /**
  * "911" as a standalone token — split out from EMERGENCY_WORDS_LOWER because a

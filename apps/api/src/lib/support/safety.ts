@@ -68,7 +68,7 @@ const OPT_OUT_PHRASES_LOWER = [
   "stop contacting me",
 ] as const;
 const STOP_WORDS_UPPER = ["END", "QUIT"] as const;
-const EMERGENCY_WORDS_LOWER = ["emergency", "crisis", "suicide", "self-harm", "self harm"] as const;
+const EMERGENCY_WORDS_LOWER = ["emergency", "crisis", "suicide", "self-harm", "self harm", "chest pain"] as const;
 
 /** "911" as a standalone token — see the matching comment in messaging/safety.ts for why a plain substring check false-positives on order numbers, zip codes, and phone numbers. */
 const EMERGENCY_911_RE = /(?<!\d)911(?!\d)/;

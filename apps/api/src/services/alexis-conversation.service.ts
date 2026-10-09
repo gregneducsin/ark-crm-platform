@@ -1,3 +1,4 @@
+import { pendingInboundMessages } from "../lib/pending-inbound.js";
 import { applyAffirmFlow } from "../lib/messaging/affirm-flow.js";
 import { signupHelp } from "../lib/messaging/signup-help.js";
 import { priceOfferFor, priceConfirmationText } from "../lib/messaging/price-offer.js";
@@ -209,13 +210,11 @@ export async function runAlexisTurn(personId: string, body: BotPreviewRequestBod
     validatedSlotUpdates: { dosagePreference: null }, source: "pre_check_block",
     preCheckCode: review ? "DOSING_REVIEW" : "DOSE_HISTORY_DEFERRED", learnedFirstName: null, preferredReengagementDate: null,
   });
-  const lastInbound = [...body.messages].reverse().find((m) => m.direction === "inbound");
+  const batch = pendingInboundMessages(body.messages);
+  const lastInbound = batch[0];
   if (lastInbound) {
     const pre = interactivePreCheck(lastInbound.body, body.lastQuestion);
     const dosing = inboundDosingBoundary(body);
-    const pending = [...body.messages].reverse();
-    const lastOutbound = pending.findIndex(m => m.direction === "outbound");
-    const batch = pending.slice(0, lastOutbound < 0 ? pending.length : lastOutbound).filter(m => m.direction === "inbound");
     const checks = batch.map(m => interactivePreCheck(m.body, body.lastQuestion));
     const urgent = checks.find(p => p.blocked && p.code === "OPT_OUT")
       ?? checks.find(p => p.blocked && p.code === "EMERGENCY_CONTENT")
