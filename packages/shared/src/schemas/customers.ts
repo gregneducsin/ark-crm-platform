@@ -20,6 +20,8 @@ export const customerQuestionnaireEventSchema = z.object({
   startedAt: z.string().nullable(),
   abandonedAt: z.string().nullable(),
   lastEventAt: z.string(),
+  /** The patient's magic link back into their Bask questionnaire, when Bask sent one with the abandoned-session event. Staff-only; signs the patient in. */
+  resumeUrl: z.string().nullable().optional(),
 });
 export type CustomerQuestionnaireEvent = z.infer<typeof customerQuestionnaireEventSchema>;
 

@@ -52,6 +52,8 @@ export const questionnaireEventsTable = pgTable(
     lastEventAt: timestamp("last_event_at", { withTimezone: true }).notNull(),
     externalPersonId: text("external_person_id"),
     source: text("source").notNull().default("questionnaire"),
+    /** Patient's magic link back into their Bask questionnaire, from the abandoned-session webhook. Kept across later events; see extractBaskResumeLink. */
+    resumeUrl: text("resume_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

@@ -1429,6 +1429,67 @@ describe("Webhooks", () => {
       expect(trigger).toBeDefined();
     });
 
+    it("stores the magic resume link Bask sends with an abandoned session, and keeps it when a later event arrives without one", async () => {
+      const link = "https://bask.example.com/resume?token=magic-abc";
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          type: "abandonedSession",
+          data: {
+            eventId: "ark-abandoned-magic-evt-1",
+            externalPersonId: "bask-person-abandoned-magic-1",
+            email: "ark-abandoned-magic@example.com",
+            questionnaireId: "QUEST-ABANDONED-MAGIC-1",
+            "Data Magic Link": link,
+          },
+        });
+      expect(res.status).toBe(200);
+
+      const { db, customersTable, questionnaireEventsTable, webhookEventsTable } = await import("@luma/db");
+      const { eq, and } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "ark-abandoned-magic@example.com"));
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.resumeUrl).toBe(link);
+
+      // The raw delivery keeps the field too, so the exact Bask field name stays inspectable.
+      const [raw] = await db.select().from(webhookEventsTable)
+        .where(and(eq(webhookEventsTable.source, "bask_questionnaire"), eq(webhookEventsTable.externalEventId, "ark-abandoned-magic-evt-1")));
+      expect((raw.rawPayload as Record<string, unknown>)["Data Magic Link"]).toBe(link);
+
+      // A later "submitted" event carries no link and must not erase it.
+      const later = await request(app).post("/api/webhooks/bask-questionnaire").set("x-webhook-secret", QUESTIONNAIRE_SECRET).send({
+        eventId: "ark-abandoned-magic-evt-2",
+        externalPersonId: "bask-person-abandoned-magic-1",
+        email: "ark-abandoned-magic@example.com",
+        questionnaireId: "QUEST-ABANDONED-MAGIC-1",
+        status: "submitted",
+      });
+      expect(later.status).toBe(200);
+      const [after] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(after.status).toBe("submitted");
+      expect(after.resumeUrl).toBe(link);
+    });
+
+    it("ignores a link-shaped field that is not an http(s) URL instead of storing it", async () => {
+      const res = await request(app)
+        .post("/api/webhooks/bask-questionnaire-abandoned")
+        .set("x-webhook-secret", QUESTIONNAIRE_SECRET)
+        .send({
+          eventId: "ark-abandoned-badlink-evt-1",
+          externalPersonId: "bask-person-abandoned-badlink-1",
+          email: "ark-abandoned-badlink@example.com",
+          questionnaireId: "QUEST-ABANDONED-BADLINK-1",
+          "Data Magic Link": "{{data.magicLink}}",
+        });
+      expect(res.status).toBe(200);
+      const { db, customersTable, questionnaireEventsTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      const [customer] = await db.select().from(customersTable).where(eq(customersTable.email, "ark-abandoned-badlink@example.com"));
+      const [event] = await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, customer!.id));
+      expect(event.resumeUrl).toBeNull();
+    });
+
     it("unwraps Bask's own { type, data } envelope — its webhook dashboard sends the mapped fields nested under data, not flat", async () => {
       const res = await request(app)
         .post("/api/webhooks/bask-questionnaire-abandoned")

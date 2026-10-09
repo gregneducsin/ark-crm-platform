@@ -138,7 +138,12 @@ export const baskQuestionnaireAbandonedWebhookRequestSchema = z.object({
   phone: z.string().min(1).optional(),
   questionnaireId: idLike,
   occurredAt: z.string().datetime().optional(),
-});
+})
+  // Bask can also send the patient's magic resume link here under a field
+  // name chosen when the webhook is configured (see extractBaskResumeLink).
+  // .passthrough() keeps that field alive in the parsed body — and therefore
+  // in the stored webhook_events.raw_payload — instead of stripping it.
+  .passthrough();
 export type BaskQuestionnaireAbandonedWebhookRequest = z.infer<typeof baskQuestionnaireAbandonedWebhookRequestSchema>;
 
 // ── Bask payment-failed webhook ────────────────────────────────────────────────

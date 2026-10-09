@@ -236,6 +236,7 @@ export async function listQuestionnaireEventsForCustomer(personId: string) {
       startedAt: questionnaireEventsTable.startedAt,
       abandonedAt: questionnaireEventsTable.abandonedAt,
       lastEventAt: questionnaireEventsTable.lastEventAt,
+      resumeUrl: questionnaireEventsTable.resumeUrl,
     })
     .from(questionnaireEventsTable)
     .where(eq(questionnaireEventsTable.personId, personId))

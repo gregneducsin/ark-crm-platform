@@ -25,6 +25,7 @@ import type {
   BaskOrderShippedWebhookRequest,
 } from "@luma/shared";
 import { scheduleAbandonedCartOpener } from "./abandoned-cart.service.js";
+import { extractBaskResumeLink } from "../lib/bask-resume-link.js";
 import { scheduleAbandonedCartEmailSequence } from "./abandoned-cart-email.service.js";
 import { sendMetaLeadOpener } from "./meta-lead.service.js";
 import { scheduleMetaLeadEmailSequence } from "./meta-lead-email.service.js";
@@ -515,7 +516,10 @@ const BASK_QUESTIONNAIRE_LEAD_TYPES: Record<BaskQuestionnaireWebhookRequest["sta
   submitted: "Bask questionnaire submitted",
 };
 
-export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireWebhookRequest): Promise<{ duplicate: boolean }> {
+export async function handleBaskQuestionnaireWebhook(
+  payload: BaskQuestionnaireWebhookRequest,
+  extras: { resumeUrl?: string | null } = {},
+): Promise<{ duplicate: boolean }> {
   const recorded = await recordWebhookEventIfNew("bask_questionnaire", payload.eventId, payload);
   if (!recorded) return { duplicate: true };
 
@@ -543,6 +547,7 @@ export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireW
         startedAt: payload.status === "started" ? now : undefined,
         abandonedAt: payload.status === "abandoned" ? now : undefined,
         lastEventAt: now,
+        resumeUrl: extras.resumeUrl ?? undefined,
       })
       .onConflictDoUpdate({
         target: [questionnaireEventsTable.personId, questionnaireEventsTable.questionnaireId],
@@ -550,6 +555,9 @@ export async function handleBaskQuestionnaireWebhook(payload: BaskQuestionnaireW
           status: payload.status,
           lastEventAt: now,
           ...(payload.status === "abandoned" ? { abandonedAt: now } : {}),
+          // Only ever overwritten by a newer link — a later started/submitted
+          // event without one must not erase the link already on file.
+          ...(extras.resumeUrl ? { resumeUrl: extras.resumeUrl } : {}),
           updatedAt: new Date(),
         },
       })
@@ -612,7 +620,7 @@ export async function handleBaskQuestionnaireNewPatientWebhook(payload: BaskQues
  * the regular webhook's status=abandoned path.
  */
 export async function handleBaskQuestionnaireAbandonedWebhook(payload: BaskQuestionnaireAbandonedWebhookRequest): Promise<{ duplicate: boolean }> {
-  return handleBaskQuestionnaireWebhook({ ...payload, status: "abandoned" });
+  return handleBaskQuestionnaireWebhook({ ...payload, status: "abandoned" }, { resumeUrl: extractBaskResumeLink(payload) });
 }
 
 // Bask's failed-payment webhook sends `amount` as a bare integer of CENTS

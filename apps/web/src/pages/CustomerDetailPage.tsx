@@ -114,6 +114,12 @@ export function CustomerDetailPage() {
                 <span className="text-sm text-gray-800">{qe.questionnaireId}</span>
                 <div className="flex items-center gap-2">
                   <Badge color={QUESTIONNAIRE_BADGE_COLOR[qe.status] ?? "gray"}>{qe.status}</Badge>
+                  {qe.resumeUrl && (
+                    // Signs the patient back into their own questionnaire — staff-only, opened in a new tab.
+                    <a href={qe.resumeUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-ark-ink hover:underline">
+                      Open resume link
+                    </a>
+                  )}
                   <span className="text-xs text-gray-400">as of {formatDate(qe.lastEventAt)}</span>
                 </div>
               </div>
