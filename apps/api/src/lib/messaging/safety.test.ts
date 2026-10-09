@@ -757,7 +757,7 @@ describe("interactivePostCheck: follow-up content safety", () => {
 
   it("allows an ordinary question and approved, grounded pricing in a question", () => {
     expect(check(reply({ nextQuestion: "Would you like to continue?" })).ok).toBe(true);
-    expect(check(reply({ nextQuestion: "Would you like the $169 option?", knowledgeTopicsUsed: ["semaglutide_pricing"] })).ok).toBe(true);
+    expect(check(reply({ reply: "Semaglutide is an option.", nextQuestion: "Would you like the $169 option?", knowledgeTopicsUsed: ["semaglutide_pricing"] })).ok).toBe(true);
     expect(check(reply({ nextQuestion: "Would you like details about dosing?", knowledgeTopicsUsed: ["titration"] })).ok).toBe(true);
   });
 
@@ -781,5 +781,24 @@ describe("outbound link and internal markup boundary", () => {
   it("keeps ordinary text and email addresses valid", () => {
     const raw = reply({ reply: "Thanks. You can update your email address to sample@example.xyz.", nextQuestion: "Would you like help with that?" });
     expect(check(raw).ok).toBe(true);
+  });
+});
+
+describe("product-specific pricing cannot bypass post-check", () => {
+  it.each(["reply", "nextQuestion"] as const)("rejects the wrong medication's approved amount in %s", field => {
+    const raw = reply({
+      reply: "Semaglutide is an option.",
+      nextQuestion: "Would you like to learn more?",
+      knowledgeTopicsUsed: ["semaglutide_pricing", "tirzepatide_pricing"],
+      [field]: field === "reply" ? "Semaglutide is $225 for one month." : "Does semaglutide at $225 work?",
+    });
+    expect(check(raw, null, new Set(), { bypassCodes: new Set(["UNSUPPORTED_PRICING_CLAIM"]) })).toMatchObject({
+      ok: false, code: "UNSUPPORTED_PRICING_CLAIM",
+    });
+  });
+  it("rejects a decimal price instead of truncating to an approved integer", () => {
+    expect(check(reply({ reply: "Semaglutide is $169.99.", knowledgeTopicsUsed: ["semaglutide_pricing"] }))).toMatchObject({
+      ok: false, code: "UNSUPPORTED_PRICING_CLAIM",
+    });
   });
 });

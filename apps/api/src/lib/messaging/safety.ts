@@ -1,3 +1,4 @@
+import { medicationPriceError } from "./medication-price.js";
 /**
  * Pre- and post-Claude safety rules for the interactive bot-preview reply.
  *
@@ -710,7 +711,7 @@ const INSURANCE_MENTION_RE = /\binsur(e|ance)\b/i;
  * nearest whole dollar for display, see knowledge-catalog.ts).
  */
 const DOLLAR_AMOUNT_RE = /\$\d{1,3}(?:,\d{3})*/;
-const DOLLAR_AMOUNT_GLOBAL_RE = /\$(\d{1,3}(?:,\d{3})*)/g;
+const DOLLAR_AMOUNT_GLOBAL_RE = /\$\s*(\d+(?:,\d{3})*(?:\.\d+)?)/g;
 
 /** Strips comma thousands-separators so "$1,100" and "$1100" compare equal. */
 function normalizeDollarAmount(raw: string): string {
@@ -1065,7 +1066,7 @@ export function interactivePostCheck(
     if (hasPricingTopic) {
       DOLLAR_AMOUNT_GLOBAL_RE.lastIndex = 0;
       for (const match of reply.matchAll(DOLLAR_AMOUNT_GLOBAL_RE)) {
-        if (!APPROVED_DOLLAR_AMOUNTS.has(normalizeDollarAmount(match[1]))) {
+        if (!APPROVED_DOLLAR_AMOUNTS.has(String(Number(normalizeDollarAmount(match[1]))))) {
           // Name the figure: a generic "use approved amounts" note lets the
           // model repeat the same arithmetic (e.g. a discounted total divided
           // into a monthly installment) on every retry.
@@ -1077,6 +1078,9 @@ export function interactivePostCheck(
         }
       }
     }
+
+    const priceError = medicationPriceError([raw.reply ?? "", raw.nextQuestion ?? ""], raw.knowledgeTopicsUsed);
+    if (priceError) return { ok: false, code: "UNSUPPORTED_PRICING_CLAIM", detail: priceError };
 
     // ── Promotion-specific rules (active whenever first_month_offer is declared) ─
     const hasFirstMonthOffer = raw.knowledgeTopicsUsed.includes("first_month_offer");
