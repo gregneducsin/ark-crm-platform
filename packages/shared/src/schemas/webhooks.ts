@@ -91,7 +91,9 @@ export const baskQuestionnaireWebhookRequestSchema = z.object({
   // the time the webhook was received rather than requiring the caller to
   // manufacture one.
   occurredAt: z.string().datetime().optional(),
-});
+})
+  // Preserve configured magic/resume-link fields, matching the dedicated endpoint.
+  .passthrough();
 export type BaskQuestionnaireWebhookRequest = z.infer<typeof baskQuestionnaireWebhookRequestSchema>;
 
 // ── Bask "new patient" webhook ──────────────────────────────────────────────
