@@ -101,6 +101,50 @@ beforeEach(() => {
 });
 
 describe("recordAndClassifyUnmatchedSms", () => {
+  it("blocks a reworded name request and leaves a visible sticky review hold", async () => {
+    const phone = uniquePhone();
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedSms(phone, "I would like pricing information");
+    sendMessageMock.mockClear();
+    createMock.mockResolvedValueOnce(toolResponse(classification({ suggestedReply: "Who am I chatting with?" })));
+    const thread = await recordAndClassifyUnmatchedSms(phone, "Can you explain the cost first?");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(thread).toMatchObject({ status: "needs_review", onboardingHeld: true, suggestedReply: null });
+    expect(thread.aiSummary).toContain("repeated name/email request was blocked");
+    expect((await getUnmatchedSmsThreadDetail(thread.id))?.messages.filter(m => m.direction === "outbound")).toHaveLength(1);
+    await recordAndClassifyUnmatchedSms(phone, "Hello again");
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("allows the first email request after a name, but blocks a repeated email request", async () => {
+    const phone = uniquePhone();
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedSms(phone, "Hi");
+    createMock.mockResolvedValueOnce(toolResponse(classification({senderName:"Synthetic Customer",suggestedReply:"Thanks! What is your email?"})));
+    await recordAndClassifyUnmatchedSms(phone, "Synthetic Customer");
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    sendMessageMock.mockClear();
+    createMock.mockResolvedValueOnce(toolResponse(classification({senderName:"Synthetic Customer",suggestedReply:"Could you share your e-mail address?"})));
+    const thread = await recordAndClassifyUnmatchedSms(phone, "Why do you need that?");
+    expect(thread).toMatchObject({status:"needs_review",onboardingHeld:true,suggestedReply:null});
+    expect(thread.aiSummary).toContain("repeated name/email request was blocked");
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("allows an explanation without repeating the outstanding name question", async () => {
+    const phone = uniquePhone();
+    createMock.mockResolvedValueOnce(toolResponse(classification()));
+    await recordAndClassifyUnmatchedSms(phone, "Hi");
+    sendMessageMock.mockClear();
+    const explanation = "Your name and email help set up intake, and your state helps check service availability. A licensed provider determines medical eligibility.";
+    createMock.mockResolvedValueOnce(toolResponse(classification({suggestedReply:explanation})));
+    const thread = await recordAndClassifyUnmatchedSms(phone, "What are those details for?");
+    expect(thread.onboardingHeld).toBe(false);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][1]).toBe(explanation);
+  });
+
   it("holds a contradictory spam classification after sales interest and preserves the hold on later texts", async () => {
     const phone = uniquePhone();
     createMock.mockResolvedValueOnce(toolResponse(classification({ intent: "new_lead_interest" })));
@@ -768,3 +812,4 @@ describe("sendUnmatchedInboundSmsReply", () => {
     expect((await getUnmatchedSmsThread(thread.id))?.status).toBe("needs_review");
   });
 });
+
