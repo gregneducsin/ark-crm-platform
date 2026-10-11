@@ -523,6 +523,10 @@ export async function handleBaskQuestionnaireWebhook(
   const recorded = await recordWebhookEventIfNew("bask_questionnaire", payload.eventId, payload);
   if (!recorded) return { duplicate: true };
 
+  const resumeUrl = payload.status === "abandoned"
+    ? extractBaskResumeLink({ resumeUrl: extras.resumeUrl, ...payload })
+    : null;
+
   try {
     const occurredAt = payload.occurredAt ?? new Date().toISOString();
     const { id: customerId } = await findOrCreateCustomerByExternalIdentity({
@@ -547,7 +551,7 @@ export async function handleBaskQuestionnaireWebhook(
         startedAt: payload.status === "started" ? now : undefined,
         abandonedAt: payload.status === "abandoned" ? now : undefined,
         lastEventAt: now,
-        resumeUrl: extras.resumeUrl ?? undefined,
+        resumeUrl: resumeUrl ?? undefined,
       })
       .onConflictDoUpdate({
         target: [questionnaireEventsTable.personId, questionnaireEventsTable.questionnaireId],
@@ -557,7 +561,7 @@ export async function handleBaskQuestionnaireWebhook(
           ...(payload.status === "abandoned" ? { abandonedAt: now } : {}),
           // Only ever overwritten by a newer link — a later started/submitted
           // event without one must not erase the link already on file.
-          ...(extras.resumeUrl ? { resumeUrl: extras.resumeUrl } : {}),
+          ...(resumeUrl ? { resumeUrl } : {}),
           updatedAt: new Date(),
         },
       })
