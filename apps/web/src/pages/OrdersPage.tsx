@@ -104,7 +104,7 @@ export function OrdersPage() {
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
     search: search || undefined,
-    orderClassification: (orderClassification || undefined) as "first_order" | "recurring" | undefined,
+    orderClassification: (orderClassification || undefined) as "first_order" | "recurring" | "test" | undefined,
     status: status || undefined,
     sortBy: "purchaseDate",
     sortDir,
@@ -133,6 +133,7 @@ export function OrdersPage() {
           <option value="">All Orders</option>
           <option value="first_order">New (first order)</option>
           <option value="recurring">Recurring</option>
+          <option value="test">Test</option>
         </select>
 
         <select

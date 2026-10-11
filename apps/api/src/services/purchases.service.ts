@@ -86,7 +86,8 @@ export async function getPurchasesSummary(query: PurchasesSummaryQuery) {
       : query.period === "all"
         ? undefined
         : sql`${purchasesTable.purchaseDate} >= (current_date - ${query.period ?? 30}::int)`;
-  const completedCondition = eq(purchasesTable.status, "completed");
+  const completedCondition = and(eq(purchasesTable.status, "completed"),
+    sql`${purchasesTable.orderClassification} IS DISTINCT FROM 'test'`);
   const baseCondition = sinceCondition ? and(completedCondition, sinceCondition) : completedCondition;
 
   const [{ totalCompletedOrders, totalRevenue, purchasingCustomers }] = await db

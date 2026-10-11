@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const purchaseStatusSchema = z.enum(["pending", "completed", "refunded", "cancelled", "payment_failed"]);
-export const purchaseClassificationSchema = z.enum(["first_order", "recurring", "unknown"]);
+export const purchaseClassificationSchema = z.enum(["first_order", "recurring", "unknown", "test"]);
 export const purchaseClassificationSourceSchema = z.enum(["bask", "purchase_history", "manual", "unknown"]);
 
 export const purchaseSchema = z.object({
