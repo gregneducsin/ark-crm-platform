@@ -5,7 +5,7 @@ import { customersTable } from "./customers";
 export const purchaseStatusEnum = ["pending", "completed", "refunded", "cancelled", "payment_failed"] as const;
 export type PurchaseStatus = (typeof purchaseStatusEnum)[number];
 
-export const purchaseClassificationEnum = ["first_order", "recurring", "unknown"] as const;
+export const purchaseClassificationEnum = ["first_order", "recurring", "unknown", "test"] as const;
 export const purchaseClassificationSourceEnum = ["bask", "purchase_history", "manual", "unknown"] as const;
 
 export const purchasesTable = pgTable(

@@ -241,13 +241,14 @@ function PurchaseRow({
           onChange={(e) =>
             updatePurchase.mutate({
               id: purchase.id,
-              input: { orderClassification: e.target.value as "first_order" | "recurring" | "unknown" },
+              input: { orderClassification: e.target.value as "first_order" | "recurring" | "unknown" | "test" },
             })
           }
         >
           <option value="first_order">First order</option>
           <option value="recurring">Recurring</option>
           <option value="unknown">Unknown</option>
+          <option value="test">Test — excluded from CPA</option>
         </select>
         )}
       </td>
