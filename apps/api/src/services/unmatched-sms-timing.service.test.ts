@@ -263,6 +263,8 @@ describe("durable onboarding message timing", () => {
     await recordAndClassifyUnmatchedSms(number, "A third detail");
     expect(mocks.classify).toHaveBeenCalledTimes(1);
     expect((await threadFor(number)).pendingInboundId).not.toBeNull();
+    // Resume with a fresh answer rather than repeating the queued email request.
+    mocks.classify.mockResolvedValueOnce(result({ suggestedReply: "Thanks for the additional details. Your email helps set up intake." }));
     await recordSmsDeliveryReceipt(`queued-${number}`, "sent", new Date());
     await Promise.all([resumeUnmatchedSms(first.id), resumeUnmatchedSms(first.id)]);
     expect(mocks.send).toHaveBeenCalledTimes(2);
@@ -270,6 +272,19 @@ describe("durable onboarding message timing", () => {
     const input = mocks.classify.mock.calls[1][0].messages[0].content;
     expect(input).toContain("A second detail");
     expect(input).toContain("A third detail");
+  });
+
+  it("flags a repeated contact question after the queued request is confirmed", async () => {
+    const number = phone();
+    mocks.send.mockResolvedValueOnce({ providerMessageId: `queued-repeat-${number}` });
+    const first = await recordAndClassifyUnmatchedSms(number, "My name is Synthetic");
+    await recordAndClassifyUnmatchedSms(number, "Why do you need my email?");
+    await recordSmsDeliveryReceipt(`queued-repeat-${number}`, "sent", new Date());
+    await Promise.all([resumeUnmatchedSms(first.id), resumeUnmatchedSms(first.id)]);
+    expect(mocks.classify).toHaveBeenCalledTimes(2);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(await threadFor(number)).toMatchObject({status:"needs_review",onboardingHeld:true,suggestedReply:null,pendingInboundId:null});
+    expect((await threadFor(number)).aiSummary).toContain("repeated name/email request was blocked");
   });
 
   it("recovers persisted work in the sweep without a live webhook handler", async () => {
@@ -345,3 +360,4 @@ describe("unmatched staff attribution", () => {
     expect(copied.find((m) => m.body === "Synthetic staff reply")).toMatchObject({ sentBy: "staff", sentByStaffEmail: "agent@example.com", deliveryStatus: "sent" });
   });
 });
+
