@@ -146,9 +146,9 @@ export async function markWebhookEventFailed(id: string, errorMessage: string): 
  * delivery with no leadType of its own) never pass one, so that customer
  * is stuck on the "Other / Unknown" default forever — a later
  * bask_questionnaire webhook for the same person finds the existing match
- * and, before this, just left it alone. Real case: Jessi Lee's only
- * webhook was her bask_order purchase; no questionnaire event ever
- * created her, so she never got a real leadType. This only ever replaces
+ * and, before this, just left it alone. Synthetic example: an order event
+ * creates a customer before any questionnaire event supplies a lead type.
+ * A later questionnaire event can fill that gap. This only ever replaces
  * the generic default, never a leadType some other webhook already set.
  */
 export async function findOrCreateCustomerByExternalIdentity(params: {
@@ -823,3 +823,4 @@ export async function handleBaskPaymentRefundedWebhook(payload: BaskPaymentRefun
   }
   return { duplicate: false };
 }
+
