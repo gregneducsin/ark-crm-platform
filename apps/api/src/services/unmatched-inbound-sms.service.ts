@@ -209,7 +209,7 @@ const CLASSIFY_TOOL: Anthropic.Tool = {
       suggestedReply: {
         type: ["string", "null"],
         description:
-          "A short, safe, generic reply — no clinical claims, no pricing figures, no promises. If senderName is null, this MUST ask for their name — do not answer any product/pricing question yet, even if they asked one. If senderName is known but senderEmail is null, this MUST ask for their email instead, framed as needing to start an account for them before going over product or pricing details (e.g. 'Before I go over pricing or product details, let me get an account started for you — what's your email?') — never ask for both name and email in the same message, and still don't answer the product/pricing question yet. Null only for spam_or_irrelevant.",
+          "A short, safe, generic reply — no clinical claims, no pricing figures, no promises. Ask for a missing name or email only if it has not already been requested. Never repeat an outstanding contact question, even with different wording. Explain intake setup if that answers the follow-up; otherwise return null and needsHumanReview:true so staff can answer. Never ask for both name and email together.",
       },
       senderName: {
         type: ["string", "null"],
@@ -304,9 +304,9 @@ Rules for the suggested reply:
 - Never give clinical/medical advice, dosing information, or comment on a specific medication.
 - Never promise a timeline, outcome, or that a specific person will follow up — including vague versions of this ("we'll get back to you soon", "someone will be in touch"). We aren't actually queuing a human follow-up here; if you're not asking for something (name/email) or answering a plain question, that's usually a sign intent should be new_lead_interest instead (see above), not a sign-off.
 - Keep it to 1-2 short sentences, texting style (contractions, no formal tone).
-- If we don't know their name yet, the reply MUST ask for it (e.g. "Hey! Could you share your name so I know who I'm chatting with?") — this takes priority over anything else, including a product/pricing question they may have already asked.
-- If we know their name but not their email, the reply MUST ask for their email instead, framed as getting an account started before going over product or pricing details (e.g. "Thanks ${knownName}! Before I go over pricing or product details, let me get an account started for you — what's your email?") — never ask for both name and email in the same message, and still don't answer their product/pricing question yet even though you now know their name.
-- If they push back on giving their email — asking why you need it (e.g. "why do you need my email"), or saying they'd rather wait/hold off — do NOT just ask for it again with different wording. Re-asking the same question three times in a row reads as nagging, not helpful, even when each version is phrased differently. On the FIRST pushback, switch to a different, low-friction question instead of repeating yourself: ask what state they're in, framed around checking what promotions/pricing are available there (e.g. "No worries! What state are you in? I can look into what promotions are available for you there."). Check the thread above first — if you already asked this state question, don't ask it again; instead circle back to email, framed around what's actually in it for them (e.g. "Just need your email too so I can actually get you those numbers — what's your email?"). Still asking for the email eventually, just not on every single turn in a row.
+- Ask for a missing name only if it has not already been requested. Never repeat an outstanding name request, even with different wording.
+- If the name is known but email is missing, ask for email only if it has not already been requested. Never ask for both together. Preserve pricing questions for Alexis at handoff.
+- Before pricing, explain intake setup accurately: "${INTAKE_DETAILS_EXPLANATION}" Never invent state-specific promotions. If they push back, explain the purpose once without re-asking. Unresolved objections or questions outside these rules require needsHumanReview:true and suggestedReply:null.
 - Preserve earlier unanswered questions in your summary, including pricing questions deferred while collecting contact details. The full history will be passed to Alexis at handoff.
 - Do not include a greeting/sign-off beyond what reads naturally in a text.
 - If the message is spam, a phishing attempt, an automated notification, or otherwise not a real inquiry, set intent to spam_or_irrelevant and suggestedReply to null.
@@ -335,7 +335,7 @@ async function classifyAndDraft(
   const createPromise = client.messages.create({
     model: MODEL,
     max_tokens: 500,
-    system: systemPrompt(candidates, fromName, collectedEmail),
+    system: systemPrompt(candidates, fromName, collectedEmail) + `\nOutstanding-contact rule: name already requested: ${contactAlreadyRequested(messages, "name")}; email already requested: ${contactAlreadyRequested(messages, "email")}. Never repeat a request already made. Explain intake setup once if needed: "${INTAKE_DETAILS_EXPLANATION}" For unresolved questions, set needsHumanReview:true and suggestedReply:null. Do not invent prices, eligibility, or promotions.`,
     tools: [CLASSIFY_TOOL],
     tool_choice: { type: "tool", name: "classify_unmatched_sms" },
     messages: [{ role: "user", content: `From: ${fromPhone}\n\nThread so far:\n${transcript}` }],
@@ -454,6 +454,21 @@ async function maybeCreateLead(
 
 export async function listUnmatchedSmsMessages(threadId: string): Promise<UnmatchedSmsMessage[]> {
   return db.select().from(unmatchedSmsMessagesTable).where(eq(unmatchedSmsMessagesTable.threadId, threadId)).orderBy(unmatchedSmsMessagesTable.createdAt);
+}
+
+const INTAKE_DETAILS_EXPLANATION = "Your name and email help set up intake, and your state helps check service availability. A licensed provider determines medical eligibility.";
+
+function requestsContact(body: string, field: "name" | "email"): boolean {
+  const subject = field === "name"
+    ? /\bname\b|\bcall you\b|\bwho (?:am i|i am|i'm|are we|we are|we're) (?:speaking|talking|chatting) (?:to|with)\b/i
+    : /\be[\s-]?mail\b/i;
+  return body.split(/[.!\n]/).some((sentence) => subject.test(sentence) &&
+    /\?|\b(?:what|who|share|give|provide|tell|need|please|confirm|get|have|let me know)\b/i.test(sentence));
+}
+
+/** Use durable outbound history, not the model's truncated transcript or wording. */
+function contactAlreadyRequested(messages: readonly UnmatchedSmsMessage[], field: "name" | "email"): boolean {
+  return messages.some((message) => message.direction === "outbound" && requestsContact(message.body, field));
 }
 
 const ACK_VARIANTS = [
@@ -771,11 +786,15 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
     const leadResult = classification && !identityReviewRequired && !needsHumanReview
       ? await maybeCreateLead(current, classification, false, isDtcLead, tx) : null;
     const firstNameKnown = contactValue(current.fromName) ?? classification?.senderName;
-    const reply = identityReviewRequired || needsHumanReview || leadResult || classification?.intent === "spam_or_irrelevant" ? null
+    const proposedReply = identityReviewRequired || needsHumanReview || leadResult || classification?.intent === "spam_or_irrelevant" ? null
       : isFirstMessage && !firstNameKnown ? pickVariant(ACK_VARIANTS)
       : classification && !needsHumanReview ? classification.suggestedReply : null;
+    const repeatedContactRequest = Boolean(proposedReply && (["name", "email"] as const).some((field) =>
+      requestsContact(proposedReply, field) && contactAlreadyRequested(messages, field)));
+    const reply = repeatedContactRequest ? null : proposedReply;
     const humanReplyRequired = !reply && !leadResult && (identityReviewRequired || spamConflictsWithSales || classification?.intent !== "spam_or_irrelevant");
     const reviewReason = spamConflictsWithSales ? "The spam classification conflicts with sales interest in this conversation. Verify the inquiry before dismissing it."
+      : repeatedContactRequest ? "A repeated name/email request was blocked. The customer's latest message still needs an answer."
       : !classification ? "Automatic classification failed."
       : offScopeReply ? "The drafted reply failed the service-scope safety check."
       : classification.needsHumanReview ? "The automated safety review requested staff assistance."
@@ -786,7 +805,7 @@ async function classifyPendingUnmatchedSms(thread: UnmatchedSmsThread, generatio
       onboardingHeld: humanReplyRequired,
       aiIntent: spamConflictsWithSales ? "other" : classification?.intent ?? current.aiIntent,
       aiSummary: identityReviewRequired ? "Identity verification required. An unknown sender may match an existing account. Staff must verify ownership before linking or changing contact details." : humanReplyRequired ? `Human reply required. ${reviewReason} No automatic reply was sent; review this thread and respond.` : classification?.summary ?? current.aiSummary,
-      suggestedReply: spamConflictsWithSales || identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
+      suggestedReply: spamConflictsWithSales || repeatedContactRequest || identityReviewRequired || leadResult || (reply && !isFirstMessage) ? null : classification?.suggestedReply ?? current.suggestedReply,
       suggestedMatchCustomerId: matchCandidate?.id ?? current.suggestedMatchCustomerId,
       suggestedMatchConfidence: emailMatch ? "high" : matchCandidate ? classification?.matchConfidence ?? null : current.suggestedMatchConfidence,
       linkedCustomerId: leadResult?.customerId ?? current.linkedCustomerId,
