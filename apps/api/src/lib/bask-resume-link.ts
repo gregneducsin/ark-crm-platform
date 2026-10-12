@@ -1,3 +1,4 @@
+import { approvedBaskDestination } from "./approved-bask-destination.js";
 /**
  * Pulls the patient's "magic" resume link out of a Bask abandoned-session
  * payload, if Bask sent one.
@@ -5,7 +6,7 @@
  * Bask's webhook body builder lets whoever configures the endpoint choose
  * the field names, so the exact key isn't fixed. Known likely names are
  * tried first, in priority order; failing that, any key that mentions
- * "magic" or "resume" is accepted. Only an absolute http(s) URL counts —
+ * "magic" or "resume" is accepted. Only an approved absolute HTTPS destination counts —
  * anything else (a bare token, an unexpected object) is ignored rather than
  * stored, so a misconfigured mapping can never put junk in front of staff.
  *
@@ -22,30 +23,16 @@ const PREFERRED_KEYS = [
 ] as const;
 
 const FALLBACK_KEY = /magic|resume/i;
-const MAX_URL_LENGTH = 2048;
-
-function asHttpUrl(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > MAX_URL_LENGTH) return null;
-  try {
-    const url = new URL(trimmed);
-    return url.protocol === "https:" || url.protocol === "http:" ? trimmed : null;
-  } catch {
-    return null;
-  }
-}
-
 export function extractBaskResumeLink(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
   for (const key of PREFERRED_KEYS) {
-    const found = asHttpUrl(record[key]);
+    const found = approvedBaskDestination(record[key]);
     if (found) return found;
   }
   for (const [key, value] of Object.entries(record)) {
     if (!FALLBACK_KEY.test(key)) continue;
-    const found = asHttpUrl(value);
+    const found = approvedBaskDestination(value);
     if (found) return found;
   }
   return null;

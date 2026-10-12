@@ -1,3 +1,4 @@
+import { planPriceError } from "./plan-price-validation.js";
 import { RESUME_CODE_AMOUNT, RESUME_CODE_TOPIC_KEY, RESUME_CODE_TOTALS } from "./knowledge-catalog.js";
 
 type Product = "semaglutide" | "tirzepatide";
@@ -23,6 +24,8 @@ function products(text: string): Product[] {
  * Validate both visible fields together so a follow-up inherits reply context.
  */
 export function medicationPriceError(fields: readonly string[], topics: readonly string[]): string | null {
+  const planError = planPriceError(fields, topics, PROMOTION);
+  if (planError) return planError;
   const cited = (["semaglutide", "tirzepatide"] as const).filter(p => topics.includes(p + "_pricing"));
   let context: Product | undefined = cited.length === 1 ? cited[0] : undefined;
   const codeCited = topics.includes(RESUME_CODE_TOPIC_KEY);

@@ -557,13 +557,23 @@ export async function handleBaskQuestionnaireWebhook(
         target: [questionnaireEventsTable.personId, questionnaireEventsTable.questionnaireId],
         set: {
           status: payload.status,
-          lastEventAt: now,
+          lastEventAt: sql`greatest(${questionnaireEventsTable.lastEventAt}, ${now})`,
           ...(payload.status === "abandoned" ? { abandonedAt: now } : {}),
           // Only ever overwritten by a newer link — a later started/submitted
           // event without one must not erase the link already on file.
           ...(resumeUrl ? { resumeUrl } : {}),
           updatedAt: new Date(),
         },
+        // Completion is terminal for this questionnaire. A distinct questionnaire
+        // ID represents a new intake; receipt order must never reopen this one.
+        // Evaluate under the upsert row lock so concurrent deliveries cannot race.
+        setWhere: sql`${payload.status} = 'submitted' OR (
+          ${questionnaireEventsTable.status} <> 'submitted' AND (
+            ${questionnaireEventsTable.lastEventAt} < ${now} OR
+            (${questionnaireEventsTable.lastEventAt} = ${now} AND
+              ${questionnaireEventsTable.status} = 'started' AND ${payload.status} = 'abandoned')
+          )
+        )`,
       })
       .returning({ id: questionnaireEventsTable.id });
 
@@ -576,7 +586,7 @@ export async function handleBaskQuestionnaireWebhook(
     // Questionnaire 9562 is excluded from the SMS opener specifically
     // (2026-09-08, at the owner's direction) — the email sequence still
     // arms normally for it.
-    if (payload.status === "abandoned") {
+    if (event && payload.status === "abandoned") {
       if (payload.questionnaireId.trim() !== EXCLUDED_ABANDONED_CART_SMS_QUESTIONNAIRE_ID) {
         await scheduleAbandonedCartOpener(customerId, event.id);
       }
@@ -823,4 +833,3 @@ export async function handleBaskPaymentRefundedWebhook(payload: BaskPaymentRefun
   }
   return { duplicate: false };
 }
-

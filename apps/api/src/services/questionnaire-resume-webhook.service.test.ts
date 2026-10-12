@@ -9,7 +9,7 @@ vi.mock("./abandoned-cart.service.js", () => ({ scheduleAbandonedCartOpener: sms
 vi.mock("./abandoned-cart-email.service.js", () => ({ scheduleAbandonedCartEmailSequence: email }));
 const { handleBaskQuestionnaireWebhook, handleBaskQuestionnaireAbandonedWebhook } = await import("./webhooks.service.js");
 
-const link = "https://bask.example.com/resume?token=synthetic";
+const link = "https://patient.tryark.com/resume?token=synthetic";
 function payload() {
   const id = crypto.randomUUID();
   return { eventId: id, externalPersonId: id, email: `resume-${id}@example.com`, questionnaireId: id, status: "abandoned" as const };
@@ -78,3 +78,41 @@ describe("questionnaire resume links through the shared endpoint contract", () =
     expect((await readEvent(input.externalPersonId)).resumeUrl).toBe(link);
   });
 });
+
+ describe('questionnaire event ordering', () => {
+  beforeEach(() => { sms.mockClear(); email.mockClear(); });
+  it.each(['started','abandoned'])('never reopens completed intake for a later %s event', async (status) => {
+    const input=payload();
+    await handleBaskQuestionnaireWebhook({...input,status:'submitted',occurredAt:'2026-01-02T00:00:00Z'});
+    await handleBaskQuestionnaireWebhook({...input,eventId:crypto.randomUUID(),status:status as 'started'|'abandoned',occurredAt:'2026-01-03T00:00:00Z',magicLink:link});
+    expect((await readEvent(input.externalPersonId)).status).toBe('submitted');
+    expect(sms).not.toHaveBeenCalled();expect(email).not.toHaveBeenCalled();
+  });
+  it('ignores stale abandonment without replacing the newer link or arming outreach', async () => {
+    const input=payload();
+    await handleBaskQuestionnaireWebhook({...input,occurredAt:'2026-01-03T00:00:00Z',magicLink:link});
+    sms.mockClear();email.mockClear();
+    await handleBaskQuestionnaireWebhook({...input,eventId:crypto.randomUUID(),occurredAt:'2026-01-02T00:00:00Z',magicLink:link+'-old'});
+    const row=await readEvent(input.externalPersonId);
+    expect(row.resumeUrl).toBe(link);expect(row.lastEventAt.toISOString()).toBe('2026-01-03T00:00:00.000Z');
+    expect(sms).not.toHaveBeenCalled();expect(email).not.toHaveBeenCalled();
+  });
+  it('honors late completion and never moves the event clock backwards', async () => {
+    const input=payload();
+    await handleBaskQuestionnaireWebhook({...input,occurredAt:'2026-01-03T00:00:00Z'});
+    await handleBaskQuestionnaireWebhook({...input,eventId:crypto.randomUUID(),status:'submitted',occurredAt:'2026-01-02T00:00:00Z'});
+    expect(await readEvent(input.externalPersonId)).toMatchObject({status:'submitted',lastEventAt:new Date('2026-01-03T00:00:00Z')});
+  });
+  it('retains completion under concurrent conflicting events', async () => {
+    const input=payload();
+    await handleBaskQuestionnaireWebhook({...input,status:'started',occurredAt:'2026-01-01T00:00:00Z'});
+    await Promise.all(['abandoned','submitted'].map(status=>handleBaskQuestionnaireWebhook({...input,eventId:crypto.randomUUID(),status:status as 'abandoned'|'submitted',occurredAt:'2026-01-02T00:00:00Z'})));
+    expect((await readEvent(input.externalPersonId)).status).toBe('submitted');
+  });
+  it('allows a distinct questionnaire session after completion', async () => {
+    const input=payload();
+    await handleBaskQuestionnaireWebhook({...input,status:'submitted'});
+    await handleBaskQuestionnaireWebhook({...input,eventId:crypto.randomUUID(),questionnaireId:crypto.randomUUID()});
+    expect(sms).toHaveBeenCalledTimes(1);expect(email).toHaveBeenCalledTimes(1);
+  });
+ });
