@@ -48,3 +48,22 @@ describe("approved deterministic offers remain valid", () => {
     }
   }
 });
+
+ describe('plan and promotion binding',()=>{
+ it('allows code and regular totals together without confusing their roles',()=>expect(medicationPriceError(['Semaglutide with MG25 costs $569 total for six months (regular $594).'],[...topics,'resume_code_mg25'])).toBeNull());
+ it.each([
+  'Semaglutide costs $169 total for the 6-month plan.',
+  'Semaglutide costs $270 total for six months.',
+  'Semaglutide costs $594 total for 3 months.',
+  'Semaglutide costs $99 total for six months.',
+  'Semaglutide costs $169 per month for six months.',
+  'Semaglutide costs $594 total for 12 months.',
+  'Semaglutide is $554 total for six months.',
+  'Semaglutide with MG25 is $554 total for six months.',
+  'Semaglutide with MG25 is $245 total for six months.',
+ ])('rejects inconsistent plan: %s', text=>expect(medicationPriceError([text],[...topics,'resume_code_mg25'])).not.toBeNull());
+ it('keeps the stated duration for the follow-up',()=>expect(medicationPriceError(['The semaglutide six-month plan.', 'The total is $169.'],topics)).not.toBeNull());
+ it('allows the approved six-month average and total',()=>expect(medicationPriceError(['Semaglutide costs $594 total for six months, averaging $99 per month.'],topics)).toBeNull());
+ it('allows the approved code total with the correct period',()=>expect(medicationPriceError(['Semaglutide with MG25 costs $569 total for six months.'],[...topics,'resume_code_mg25'])).toBeNull());
+ it('requires the offer topic for a discounted total',()=>expect(medicationPriceError(['With $40 off, semaglutide costs $554 total for six months.'],['semaglutide_pricing'])).not.toBeNull());
+ });

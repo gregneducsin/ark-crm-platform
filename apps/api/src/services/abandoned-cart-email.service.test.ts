@@ -292,7 +292,7 @@ describe("sweepAbandonedCartEmailTriggers", () => {
 });
 
 describe("abandoned-cart emails with the patient's magic resume link", () => {
-  const MAGIC = "https://bask.example.com/resume?token=magic-abc";
+  const MAGIC = "https://patient.tryark.com/resume?token=magic-abc";
   async function seedWithResume(resumeUrl: string | null) {
     const personId = await seedCustomer();
     const questionnaireEventId = await seedAbandonedQuestionnaire(personId);
@@ -355,4 +355,3 @@ describe("abandoned-cart emails with the patient's magic resume link", () => {
     expect((await getOrCreateEmailConversation(personId)).promoOffered).toBe(true);
   });
 });
-

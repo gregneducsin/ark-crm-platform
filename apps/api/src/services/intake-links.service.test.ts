@@ -101,6 +101,20 @@ describe("intake-links.service", () => {
     });
   });
 
+  it('rejects an unapproved destination before creating a token', async () => {
+    const personId=await seedCustomer();
+    const { createIntakeLink }=await import('./intake-links.service.js');
+    await expect(createIntakeLink(personId,'none','abandoned_cart',{destinationUrl:'https://unapproved.xyz/pay'})).rejects.toThrow('Unapproved Bask resume destination');
+    expect(await db.select().from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId,personId))).toHaveLength(0);
+  });
+  it('does not redirect an existing token to a legacy unapproved destination', async () => {
+    const personId=await seedCustomer();
+    const { createIntakeLink, handleIntakeLinkClick }=await import('./intake-links.service.js');
+    const {url}=await createIntakeLink(personId);
+    await db.update(intakeLinkTokensTable).set({destinationUrl:'http://unapproved.xyz/pay'}).where(eq(intakeLinkTokensTable.personId,personId));
+    expect((await handleIntakeLinkClick(url.split('/go/')[1])).redirectUrl).toBe('https://bask.example.com/questionnaire');
+  });
+
   describe("handleIntakeLinkClick", () => {
     it("first click redirects to the Bask URL and arms a follow-up job due ~2 hours later, clamped to the 9am-11:59pm Eastern send window", async () => {
       const { createIntakeLink, handleIntakeLinkClick } = await import("./intake-links.service.js");

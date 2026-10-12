@@ -1,3 +1,4 @@
+import { approvedBaskDestination } from "../lib/approved-bask-destination.js";
 import { intakeCompletionReason } from "./intake-completion.service.js";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, intakeLinkTokensTable, followUpJobsTable, type IntakeLinkToken } from "@luma/db";
@@ -29,6 +30,7 @@ function baskQuestionnaireUrl(promo: PromoVariant): string {
   if (!url) {
     throw new Error(`${envVar} is not configured.`);
   }
+  if (!approvedBaskDestination(url)) throw new Error("Invalid Bask questionnaire destination configuration.");
   return url;
 }
 
@@ -66,6 +68,8 @@ export async function createIntakeLink(
   // Resolved before any database write, so a missing base URL fails without
   // leaving an unusable token behind (or aborting a caller's transaction).
   const baseUrl = intakeLinkBaseUrl();
+  const destinationUrl = options.destinationUrl === undefined ? null : approvedBaskDestination(options.destinationUrl);
+  if (options.destinationUrl !== undefined && !destinationUrl) throw new Error("Unapproved Bask resume destination.");
   const rawToken = generateRawToken();
   const expiresAt = new Date(Date.now() + (options.destinationUrl ? RESUME_LINK_TTL_MS : INTAKE_LINK_TTL_MS));
 
@@ -74,7 +78,7 @@ export async function createIntakeLink(
     tokenHash: hashToken(rawToken),
     promoApplied: promo,
     leadSource,
-    destinationUrl: options.destinationUrl ?? null,
+    destinationUrl,
     expiresAt,
   });
 
@@ -109,7 +113,7 @@ export async function handleIntakeLinkClick(rawToken: string): Promise<{ redirec
     // Once expired, fall back to the plain URL, same as an unknown token.
     // A magic resume link keeps working after expiry (it never expires on
     // Bask's side); only the follow-up arming below is gated on freshness.
-    const redirectUrl = token.destinationUrl ?? (expired ? baskQuestionnaireUrl("none") : baskQuestionnaireUrl(token.promoApplied));
+    const redirectUrl = approvedBaskDestination(token.destinationUrl) ?? (expired ? baskQuestionnaireUrl("none") : baskQuestionnaireUrl(token.promoApplied));
 
     if (!alreadyClicked && !expired) {
       await tx.update(intakeLinkTokensTable).set({ clickedAt: sql`now()` }).where(eq(intakeLinkTokensTable.id, token.id));

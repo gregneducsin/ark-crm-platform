@@ -1430,7 +1430,7 @@ describe("Webhooks", () => {
     });
 
     it("stores the magic resume link Bask sends with an abandoned session, and keeps it when a later event arrives without one", async () => {
-      const link = "https://bask.example.com/resume?token=magic-abc";
+      const link = "https://patient.tryark.com/resume?token=magic-abc";
       const res = await request(app)
         .post("/api/webhooks/bask-questionnaire-abandoned")
         .set("x-webhook-secret", QUESTIONNAIRE_SECRET)

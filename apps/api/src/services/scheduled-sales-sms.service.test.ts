@@ -326,7 +326,7 @@ describe("scheduled follow-ups acknowledge customer concerns", () => {
 });
 
 describe("abandoned cart with the patient's magic resume link", () => {
-  const MAGIC = "https://bask.example.com/resume?token=magic-abc";
+  const MAGIC = "https://patient.tryark.com/resume?token=magic-abc";
   async function seedAbandoned(resumeUrl: string | null) {
     const item = await seed("abandoned_cart");
     const job = (await jobFor(item)) as typeof abandonedCartTriggersTable.$inferSelect;
@@ -397,4 +397,3 @@ describe("abandoned cart with the patient's magic resume link", () => {
     expect(convo.promoOffered).toBe(true);
   });
 });
-
