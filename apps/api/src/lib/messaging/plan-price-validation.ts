@@ -53,7 +53,7 @@ export function planPriceError(fields: readonly string[], topics: readonly strin
         if (!candidates.length) return fail;
         const monthly = /^\s*(?:\/\s*(?:mo(?:nth)?|month)|(?:per|a|each)\s+month)/i.test(after) || /\b(?:averag(?:e|es|ing)|monthly equivalent(?: of)?)\s*$/i.test(before);
         const total = /\b(?:total|billed|upfront|up front)\b/i.test(before + after);
-        const regularHere = /\b(?:regular|without (?:the )?(?:code|discount))\b/i.test(before) || /\bbefore discount\b/i.test(after);
+        const regularHere = /\b(?:regular|without (?:the )?(?:code|discount))\b/i.test(before) || /^\s*regular\b|\bbefore discount\b/i.test(after);
         const selectedOffer = regularHere ? "regular" : offer;
         const valid = candidates.some(p => {
           const average = Math.floor(p.regular / p.months);
@@ -70,3 +70,7 @@ export function planPriceError(fields: readonly string[], topics: readonly strin
   }
   return null;
 }
+
+
+
+
