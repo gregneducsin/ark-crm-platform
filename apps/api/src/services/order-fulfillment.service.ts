@@ -54,6 +54,18 @@ async function getCustomerContact(personId: string): Promise<{ firstName: string
   return row;
 }
 
+
+/** Persist before transport so receipts and timeout sweeps can reconcile the attempt.
+ * Transactional notices retain their existing eligibility rules; uncertain
+ * delivery is held for staff, never automatically resent here. */
+async function sendTransactionalNotice(personId: string, conversationId: string, phone: string | null, body: string): Promise<void> {
+  const [message] = await db.insert(supportConversationMessagesTable).values({
+    conversationId, direction: "outbound", body, deliveryStatus: phone ? "queued" : "failed",
+  }).returning({ id: supportConversationMessagesTable.id });
+  if (phone) await sendReservedSms(personId, "support", message.id, phone, body);
+  else await flagSmsDeliveryForStaff(personId);
+}
+
 /**
  * Sends the order-received opener immediately — no sweep, no delay, same
  * "fire instantly" pattern as the Meta lead opener. Called synchronously
@@ -68,17 +80,10 @@ export async function sendOrderReceivedOpener(personId: string): Promise<void> {
 
   const conversation = await getOrCreateSupportConversation(personId);
   const dnd = await isCustomerSmsDnd(personId);
-  if (customer.phone && !dnd) {
+  if (!dnd) {
     const isFirstTextFromThisNumber = !(await hasAnyOutboundSupportMessage(conversation.id));
     const text = renderOrderReceivedMessage(customer.firstName, isFirstTextFromThisNumber);
-    try {
-      const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      logger.warn({ personId, reason }, "order-received opener send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-    }
+    await sendTransactionalNotice(personId, conversation.id, customer.phone, text);
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "order-received opener SMS not sent");
   }
@@ -110,17 +115,10 @@ export async function sendRefillOrderReceivedNotice(personId: string): Promise<v
 
   const conversation = await getOrCreateSupportConversation(personId);
   const dnd = await isCustomerSmsDnd(personId);
-  if (customer.phone && !dnd) {
+  if (!dnd) {
     const isFirstTextFromThisNumber = !(await hasAnyOutboundSupportMessage(conversation.id));
     const text = renderRefillOrderReceivedMessage(customer.firstName, isFirstTextFromThisNumber);
-    try {
-      const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      logger.warn({ personId, reason }, "refill order-received notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-    }
+    await sendTransactionalNotice(personId, conversation.id, customer.phone, text);
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "refill order-received notice SMS not sent");
   }
@@ -143,15 +141,9 @@ export async function handlePrescriptionWritten(personId: string): Promise<void>
   await updateSupportConversationState(conversation.id, { prescriptionWritten: true, prescriptionWrittenAt: new Date() });
 
   const dnd = await isCustomerSmsDnd(personId);
-  if (customer?.phone && !dnd) {
+  if (customer && !dnd) {
     const text = renderPrescriptionWrittenMessage(customer.firstName);
-    try {
-      const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "prescription-written notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-    }
+    await sendTransactionalNotice(personId, conversation.id, customer.phone, text);
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "prescription-written notice not sent");
   }
@@ -247,19 +239,13 @@ export async function handlePaymentFailed(personId: string, isFirstOrder: boolea
     paymentFailed: true,
     paymentFailedAt: new Date(),
     needsAttention: true,
-    needsAttentionReason: "The customer's payment failed and they've been notified — needs a person to help them complete payment.",
+    needsAttentionReason: "The customer's payment failed — needs a person to help them complete payment. Check the notification's delivery status before following up.",
   });
 
   const dnd = await isCustomerSmsDnd(personId);
-  if (customer?.phone && !dnd) {
+  if (customer && !dnd) {
     const text = isFirstOrder ? renderPaymentFailedFirstOrderMessage(customer.firstName) : renderPaymentFailedRecurringMessage(customer.firstName);
-    try {
-      const result = await getSmsProvider().sendMessage(customer.phone, text);
-      await appendSupportMessage(conversation.id, "outbound", text, { providerMessageId: result.providerMessageId, deliveryStatus: "sent" });
-    } catch (err) {
-      logger.warn({ personId, reason: err instanceof Error ? err.message : String(err) }, "payment-failed notice send failed");
-      await appendSupportMessage(conversation.id, "outbound", text, { deliveryStatus: "failed" });
-    }
+    await sendTransactionalNotice(personId, conversation.id, customer.phone, text);
   } else {
     logger.warn({ personId, reason: dnd ? "do_not_disturb" : "no_phone_number" }, "payment-failed notice not sent");
   }
