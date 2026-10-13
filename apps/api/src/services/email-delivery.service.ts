@@ -1,4 +1,4 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { db, emailConversationsTable, supportEmailConversationsTable, emailConversationMessagesTable, supportEmailConversationMessagesTable } from "@luma/db";
 import { getEmailProvider, type EmailPersona } from "../lib/email-provider.js";
 import { buildUnsubscribeUrl } from "../lib/email/unsubscribe.js";
@@ -15,7 +15,11 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export async function flagEmailForReview(persona: ConversationEmailPersona, conversationId: string, reason = REVIEW_REASON, tx?: Tx): Promise<void> {
   const { conversations } = tables(persona);
-  await (tx ?? db).update(conversations).set({ needsAttention: true, needsAttentionReason: reason }).where(eq(conversations.id, conversationId));
+  await (tx ?? db).update(conversations).set({ needsAttention: true, needsAttentionReason: sql`case
+    when nullif(btrim(${conversations.needsAttentionReason}), '') is null then ${reason}
+    when strpos(${conversations.needsAttentionReason}, ${reason}) > 0 then ${conversations.needsAttentionReason}
+    else ${conversations.needsAttentionReason} || chr(10) || chr(10) || ${reason}
+  end` }).where(eq(conversations.id, conversationId));
 }
 
 /** Inbound identity is independent of RFC Message-ID, which may be missing.
