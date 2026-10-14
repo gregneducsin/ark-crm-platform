@@ -138,7 +138,8 @@ if (process.env.GOOGLE_WORKSPACE_SMTP_USER) {
 // every automatic merge is visible.
 async function runDuplicateMergeSweep(): Promise<void> {
   try {
-    const { merged } = await mergeDuplicateCustomersByPhone();
+    const { merged, skipped, pairsExamined, pairsPlausible } = await mergeDuplicateCustomersByPhone();
+    logger.info({ merged: merged.length, skipped, pairsExamined, pairsPlausible }, "duplicate customer merge sweep ran");
     if (merged.length > 0) {
       const lines = merged.map((m) => `${m.duplicatePersonNumber} merged into ${m.survivorPersonNumber}`);
       logger.info({ merged: lines }, "duplicate customer merge sweep completed");

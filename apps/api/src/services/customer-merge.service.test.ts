@@ -223,6 +223,23 @@ describe("reconcileDuplicateByPhone", () => {
 });
 
 describe("mergeDuplicateCustomersByPhone", () => {
+  it("still reaches a real duplicate when many families sharing a phone number are also in the table", async () => {
+    // 250 pairs that share a number but are different people (not mergeable): they must not crowd out the real one.
+    for (let i = 0; i < 250; i++) {
+      const familyPhone = uniquePhone();
+      await seedCustomer({ phone: familyPhone, firstName: `Parent${i}`, lastName: "Crowd" });
+      await seedCustomer({ phone: familyPhone, firstName: `Child${i}`, lastName: "Crowd" });
+    }
+    const phone = uniquePhone();
+    const older = await seedCustomer({ phone, firstName: "Bertha", lastName: "Guerra", createdAt: new Date("2026-09-17T00:00:00Z") });
+    const newer = await seedCustomer({ phone, firstName: "Bertha", lastName: "Guerra", createdAt: new Date("2026-10-14T00:00:00Z") });
+
+    const result = await mergeDuplicateCustomersByPhone();
+    expect(result.pairsExamined).toBeGreaterThanOrEqual(251);
+    expect(result.merged.some((m) => m.survivorId === older.id && m.duplicateId === newer.id)).toBe(true);
+    expect(await exists(newer.id)).toBe(false);
+  });
+
   it("merges existing same-name, same-phone pairs and reports them by person number", async () => {
     const phone = uniquePhone();
     const older = await seedCustomer({ phone, createdAt: new Date("2026-09-01T00:00:00Z") });

@@ -329,31 +329,48 @@ export async function reconcileDuplicateByPhone(tx: Tx, customerId: string, opti
 
 export interface DuplicateSweepResult {
   readonly merged: readonly MergeSummary[];
+  /** Plausible pairs that were tried but not merged (for example both had bought). */
   readonly skipped: number;
+  /** Every pair of records sharing a phone number, before the name check. */
+  readonly pairsExamined: number;
+  /** Pairs whose names matched, so worth trying. */
+  readonly pairsPlausible: number;
 }
 
 /**
  * Finds every pair of records sharing a phone number (exactly two records on
  * that number) and merges those that look like the same person. Catches
- * duplicates that already exist, or that nothing has touched since. Bounded
- * per run so a large backlog is worked through gradually.
+ * duplicates that already exist, or that nothing has touched since.
+ *
+ * Every pair is examined on every run and the plausible ones (names
+ * compatible) are tried first-created first; only the number of MERGES per
+ * run is capped, so a large backlog is worked through gradually. The cap must
+ * not apply to pairs examined: families and test numbers that share a phone
+ * are skipped by the name check, and a cap on those would let them crowd a
+ * real duplicate out of the window forever.
  */
 export async function mergeDuplicateCustomersByPhone(limit = 25): Promise<DuplicateSweepResult> {
-  const { rows } = await db.execute<{ ids: string[] }>(sql`
-    select array_agg(id order by created_at, id) as ids
+  const { rows } = await db.execute<{ ids: string[]; first_names: string[]; last_names: string[] }>(sql`
+    select array_agg(id order by created_at, id) as ids,
+           array_agg(first_name order by created_at, id) as first_names,
+           array_agg(last_name order by created_at, id) as last_names
     from customers
     where length(right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)) = 10
     group by right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)
     having count(*) = 2
-    limit ${limit * 4}`);
+    order by min(created_at), min(id::text)`);
+
+  const candidates = rows.filter((row) =>
+    namesCompatible({ firstName: row.first_names[0], lastName: row.last_names[0] }, { firstName: row.first_names[1], lastName: row.last_names[1] }),
+  );
 
   const merged: MergeSummary[] = [];
   let skipped = 0;
-  for (const row of rows) {
+  for (const row of candidates) {
     if (merged.length >= limit) break;
     const outcome = await db.transaction((tx) => reconcileDuplicateByPhoneDetailed(tx, row.ids[0]));
     if (outcome.merged) merged.push(outcome.merged);
     else skipped++;
   }
-  return { merged, skipped };
+  return { merged, skipped, pairsExamined: rows.length, pairsPlausible: candidates.length };
 }
