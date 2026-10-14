@@ -104,7 +104,7 @@ export async function silenceOtherLeadsSharingPhone(purchasedCustomerId: string)
     .set({ dnd: true, dndAt: now, emailDnd: true, emailDndAt: now })
     .where(
       and(
-        sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`,
+        sql`right(regexp_replace(${customersTable.phone}, '[^0-9]', '', 'g'), 10) = ${key}`,
         ne(customersTable.id, purchasedCustomerId),
         sql`not exists (select 1 from ${purchasesTable} where ${purchasesTable.customerId} = ${customersTable.id} and ${purchasesTable.status} = 'completed')`,
       ),

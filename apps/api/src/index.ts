@@ -13,6 +13,7 @@ import { sweepObjectionReengagementTriggers } from "./services/objection-reengag
 import { sweepUnmatchedSmsFollowUps } from "./services/unmatched-inbound-sms.service.js";
 import { sweepInboundEmail } from "./services/email-inbound.service.js";
 import { notifySlack, notifySmsSlack } from "./lib/slack.js";
+import { mergeDuplicateCustomersByPhone } from "./services/customer-merge.service.js";
 
 // Migrations are applied as a discrete step before this process starts (see
 // packages/db/src/migrate.ts's docstring, the Dockerfile entrypoint, and the
@@ -129,6 +130,28 @@ if (process.env.GOOGLE_WORKSPACE_SMTP_USER) {
 } else {
   logger.info("GOOGLE_WORKSPACE_SMTP_USER not set — inbound email polling disabled");
 }
+
+// Merges customer records that are the same person (same phone number and a
+// matching name) — duplicates created before a phone number was known, or that
+// no webhook has touched since. See customer-merge.service.ts for the rules
+// and what is deliberately left alone. Slack gets the PER numbers merged, so
+// every automatic merge is visible.
+async function runDuplicateMergeSweep(): Promise<void> {
+  try {
+    const { merged } = await mergeDuplicateCustomersByPhone();
+    if (merged.length > 0) {
+      const lines = merged.map((m) => `${m.duplicatePersonNumber} merged into ${m.survivorPersonNumber}`);
+      logger.info({ merged: lines }, "duplicate customer merge sweep completed");
+      void notifySlack(`Merged ${merged.length} duplicate customer record${merged.length === 1 ? "" : "s"} (same phone number and name):\n${lines.join("\n")}`);
+    }
+  } catch (err) {
+    logger.error({ err }, "duplicate customer merge sweep failed");
+    void notifySmsSlack(`Duplicate customer merge sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+const DUPLICATE_MERGE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+setTimeout(() => { void runDuplicateMergeSweep(); }, 2 * 60 * 1000);
+setInterval(() => { void runDuplicateMergeSweep(); }, DUPLICATE_MERGE_SWEEP_INTERVAL_MS);
 
 setInterval(() => {
   sweepPendingSmsReplies().catch((err) => logger.error({ err }, "Pending SMS reply sweep failed"));

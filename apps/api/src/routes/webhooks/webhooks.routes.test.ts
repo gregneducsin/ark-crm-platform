@@ -271,6 +271,84 @@ describe("Webhooks", () => {
     });
   });
 
+  describe("one person under two Bask records", () => {
+    const post = (path: string, secret: string, body: object) => request(app).post(path).set("x-webhook-secret", secret).send(body);
+    const abandoned = (body: object) => post("/api/webhooks/bask-questionnaire-abandoned", QUESTIONNAIRE_SECRET, body);
+    const questionnaire = (body: object) => post("/api/webhooks/bask-questionnaire", QUESTIONNAIRE_SECRET, body);
+    const order = (body: object) => post("/api/webhooks/bask-order", ORDER_SECRET, body);
+
+    async function customersWithPhone(phone: string) {
+      const { db, customersTable } = await import("@luma/db");
+      const { eq } = await import("drizzle-orm");
+      return db.select().from(customersTable).where(eq(customersTable.phone, phone));
+    }
+
+    it("merges the newer record into the original when the order brings the phone the 'started' notice lacked", async () => {
+      const phone = "+15557720001";
+      // 9/17: abandoned cart under one email.
+      expect((await abandoned({
+        eventId: "dup-abandoned-1", externalPersonId: "bask-dup-OLD", email: "dup-older@example.com", firstName: "Bertha", lastName: "Guerra",
+        phone, questionnaireId: "Q-DUP-OLD",
+      })).status).toBe(200);
+      // 10/14: she starts again under a different email; Bask has not collected a phone yet.
+      expect((await questionnaire({
+        eventId: "dup-started-1", externalPersonId: "bask-dup-NEW", email: "dup-newer@example.com", firstName: "Bertha", lastName: "Guerra",
+        questionnaireId: "Q-DUP-NEW", status: "started",
+      })).status).toBe(200);
+      expect(await customersWithPhone(phone)).toHaveLength(1);
+
+      // The order arrives with the phone: the two records are the same person.
+      expect((await order({
+        eventId: "dup-order-1", externalPersonId: "bask-dup-NEW", email: "dup-newer@example.com", firstName: "Bertha", lastName: "Guerra", phone,
+        orderId: "DUP-ORD-1", productName: "Semaglutide", amountPaid: 450, purchasedAt: "2026-10-14T10:00:00.000Z",
+      })).status).toBe(200);
+
+      const { db, customersTable, purchasesTable, questionnaireEventsTable, externalIdentitiesTable } = await import("@luma/db");
+      const { eq, inArray } = await import("drizzle-orm");
+      const records = await db.select().from(customersTable).where(inArray(customersTable.email, ["dup-older@example.com", "dup-newer@example.com"]));
+      expect(records).toHaveLength(1);
+      const [person] = records;
+      // The original record survives, keeps its lead type, and now uses the email she bought with.
+      expect(person.leadType).toBe("Bask abandoned cart");
+      expect(person.email).toBe("dup-newer@example.com");
+      expect((await db.select().from(purchasesTable).where(eq(purchasesTable.customerId, person.id))).map((r) => r.orderNumber)).toEqual(["DUP-ORD-1"]);
+      expect((await db.select().from(questionnaireEventsTable).where(eq(questionnaireEventsTable.personId, person.id))).map((e) => e.questionnaireId).sort()).toEqual(["Q-DUP-NEW", "Q-DUP-OLD"]);
+      expect((await db.select().from(externalIdentitiesTable).where(eq(externalIdentitiesTable.personId, person.id))).map((i) => i.externalId).sort()).toEqual(["bask-dup-NEW", "bask-dup-OLD"]);
+    });
+
+    it("merges two records that already share the phone the next time Bask sends a notice for either", async () => {
+      const phone = "+15557720002";
+      const { db, customersTable, externalIdentitiesTable } = await import("@luma/db");
+      const [older] = await db.insert(customersTable).values({ firstName: "Dana", lastName: "Reyes", email: "dana-older@example.com", phone, leadReceivedDate: "2026-09-01", createdAt: new Date("2026-09-01T00:00:00Z") }).returning();
+      const [newer] = await db.insert(customersTable).values({ firstName: "Dana", lastName: "Reyes", email: "dana-newer@example.com", phone, leadReceivedDate: "2026-10-01", createdAt: new Date("2026-10-01T00:00:00Z") }).returning();
+      await db.insert(externalIdentitiesTable).values({ personId: newer.id, system: "bask", externalId: "bask-dana-NEW" });
+
+      expect((await order({
+        eventId: "dup-order-2", externalPersonId: "bask-dana-NEW", email: "dana-newer@example.com", orderId: "DUP-ORD-2", productName: "Tirzepatide", amountPaid: 510,
+        purchasedAt: "2026-10-14T10:00:00.000Z",
+      })).status).toBe(200);
+
+      const remaining = await customersWithPhone(phone);
+      expect(remaining.map((r) => r.id)).toEqual([older.id]);
+    });
+
+    it("does not merge two different people who share a phone number", async () => {
+      const phone = "+15557720003";
+      const { db, customersTable, externalIdentitiesTable } = await import("@luma/db");
+      const [mom] = await db.insert(customersTable).values({ firstName: "Bertha", lastName: "Fam", email: "fam-mom@example.com", phone, leadReceivedDate: "2026-09-01" }).returning();
+      const [son] = await db.insert(customersTable).values({ firstName: "Carlos", lastName: "Fam", email: "fam-son@example.com", phone, leadReceivedDate: "2026-10-01" }).returning();
+      await db.insert(externalIdentitiesTable).values({ personId: son.id, system: "bask", externalId: "bask-fam-SON" });
+
+      expect((await order({
+        eventId: "dup-order-3", externalPersonId: "bask-fam-SON", email: "fam-son@example.com", orderId: "DUP-ORD-3", productName: "Semaglutide", amountPaid: 270,
+        purchasedAt: "2026-10-14T10:00:00.000Z",
+      })).status).toBe(200);
+
+      const remaining = await customersWithPhone(phone);
+      expect(remaining.map((r) => r.id).sort()).toEqual([mom.id, son.id].sort());
+    });
+  });
+
   describe("Bask order", () => {
     it("matches an existing customer by external identity and classifies purchases", async () => {
       const { db, customersTable, externalIdentitiesTable, purchasesTable } = await import("@luma/db");

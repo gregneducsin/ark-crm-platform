@@ -39,6 +39,7 @@ import {
 } from "./order-fulfillment.service.js";
 import { setCustomerSmsDnd, setCustomerEmailDnd, silenceOtherLeadsSharingPhone } from "./dnd.service.js";
 import { normalizePhone, phoneMatchKey } from "../lib/phone.js";
+import { reconcileDuplicateByPhone } from "./customer-merge.service.js";
 import { logger } from "../lib/logger.js";
 import { notifySlack } from "../lib/slack.js";
 
@@ -209,7 +210,10 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
       .where(and(eq(externalIdentitiesTable.system, params.system), eq(externalIdentitiesTable.externalId, params.externalId)));
     if (byIdentity) {
       await backfillContactInfo(byIdentity.personId);
-      return { id: byIdentity.personId };
+      // The Bask ID says who this is, but a phone number (on this notice or
+      // already on file) can show that another record is the same person —
+      // e.g. a newer record created before the number was known. Merge them.
+      return { id: await reconcileDuplicateByPhone(tx, byIdentity.personId, { preferredEmail: params.email }) };
     }
 
     const [byEmail] = await tx.select({ id: customersTable.id }).from(customersTable).where(caseInsensitiveEmailEq(params.email));
@@ -224,7 +228,7 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
         const matches = await tx
           .select({ id: customersTable.id })
           .from(customersTable)
-          .where(sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`);
+          .where(sql`right(regexp_replace(${customersTable.phone}, '[^0-9]', '', 'g'), 10) = ${key}`);
         if (matches.length === 1) byPhone = matches[0];
       }
     }
@@ -232,7 +236,7 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
       await backfillContactInfo(byPhone.id);
     }
 
-    const customerId = byEmail
+    let customerId = byEmail
       ? byEmail.id
       : byPhone
         ? byPhone.id
@@ -250,6 +254,10 @@ export async function findOrCreateCustomerByExternalIdentity(params: {
               })
               .returning({ id: customersTable.id })
           )[0]!.id;
+
+    // The email (or the phone) found one record; if the phone also belongs to a
+    // different record that is the same person, merge them and carry on with the survivor.
+    if (byEmail) customerId = await reconcileDuplicateByPhone(tx, customerId, { preferredEmail: params.email });
 
     await tx
       .insert(externalIdentitiesTable)

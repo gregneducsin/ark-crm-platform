@@ -146,6 +146,16 @@ describe("silenceOtherLeadsSharingPhone", () => {
     expect(row.emailDndAt).not.toBeNull();
   });
 
+  it("finds a sibling whose phone was stored with punctuation, not just in +1 form", async () => {
+    const digits = `555${String(8000000 + Math.floor(Math.random() * 900000))}`;
+    const purchaserId = await seedCustomer({ phone: `+1${digits}` });
+    const staleLeadId = await seedCustomer({ phone: `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` });
+
+    await silenceOtherLeadsSharingPhone(purchaserId);
+
+    expect(await isCustomerSmsDnd(staleLeadId)).toBe(true);
+  });
+
   it("does not touch the purchasing customer's own DND state", async () => {
     const phone = uniquePhone();
     const purchaserId = await seedCustomer({ phone });

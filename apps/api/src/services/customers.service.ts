@@ -54,7 +54,7 @@ export async function listCustomers(query: ListCustomersQuery) {
             sql`(${customersTable.firstName} || ' ' || ${customersTable.lastName}) ilike ${`%${search}%`}`,
             ilike(customersTable.email, `%${search}%`),
             ilike(customersTable.phone, `%${search}%`),
-            searchDigits.length >= 3 ? sql`regexp_replace(${customersTable.phone}, '\D', '', 'g') ilike ${`%${searchDigits}%`}` : undefined,
+            searchDigits.length >= 3 ? sql`regexp_replace(${customersTable.phone}, '[^0-9]', '', 'g') ilike ${`%${searchDigits}%`}` : undefined,
           ].filter((c) => c !== undefined),
         )
       : undefined,

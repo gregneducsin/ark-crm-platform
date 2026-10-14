@@ -36,7 +36,7 @@ async function findCustomerIdByPhone(phone: string): Promise<string | undefined>
     .select({ id: customersTable.id })
     .from(customersTable)
     .leftJoin(supportConversationsTable, eq(supportConversationsTable.personId, customersTable.id))
-    .where(sql`right(regexp_replace(${customersTable.phone}, '\D', '', 'g'), 10) = ${key}`)
+    .where(sql`right(regexp_replace(${customersTable.phone}, '[^0-9]', '', 'g'), 10) = ${key}`)
     .orderBy(sql`${supportConversationsTable.id} is null`, sql`${customersTable.createdAt} desc`)
     .limit(1);
   return row?.id;

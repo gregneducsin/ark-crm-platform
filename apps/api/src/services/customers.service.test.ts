@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { db, customersTable } from "@luma/db";
-import { getCustomersSummary } from "./customers.service.js";
+import { getCustomersSummary, listCustomers } from "./customers.service.js";
 
 async function seedCustomer(leadReceivedDate: string): Promise<string> {
   const [row] = await db
@@ -38,3 +38,17 @@ describe("getCustomersSummary", () => {
     expect(after.totalLeads - before.totalLeads).toBe(1);
   });
 });
+
+describe("listCustomers phone search", () => {
+  it("finds a customer by digits even when their phone was stored with punctuation", async () => {
+    const tail = String(5000000 + Math.floor(Math.random() * 900000));
+    const [row] = await db
+      .insert(customersTable)
+      .values({ firstName: "Phone", lastName: "Search", email: `phone-search-${crypto.randomUUID()}@example.com`, phone: `(555) ${tail.slice(0, 3)}-${tail.slice(3)}`, leadReceivedDate: "2026-08-15" })
+      .returning({ id: customersTable.id });
+
+    const result = await listCustomers({ search: `555${tail}`, limit: 25, offset: 0, sortBy: "leadReceivedDate", sortDir: "desc" } as Parameters<typeof listCustomers>[0]);
+    expect(result.customers.some((c: { id: string }) => c.id === row.id)).toBe(true);
+  });
+});
+
