@@ -129,6 +129,8 @@ describe("mergeCustomersTx", () => {
     const [note] = await db.select().from(customerNotesTable).where(eq(customerNotesTable.customerId, older.id));
     expect(note.body).toContain(newer.personNumber);
     expect(note.body).toContain("Aliceg0926@gmail.com");
+    // The address that was replaced is not lost: the note says what it was.
+    expect(note.body).toContain("changed from aleceg0926@gmail.com");
   });
 
   it("takes the newer state when both records saw the same questionnaire", async () => {

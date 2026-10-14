@@ -253,7 +253,7 @@ export async function mergeCustomersTx(tx: Tx, survivorId: string, duplicateId: 
     body:
       `Merged duplicate record ${d.personNumber} (${d.firstName} ${d.lastName}, ${d.email}, lead created ${d.createdAt.toISOString().slice(0, 10)}) into this record` +
       `${options.mergedBy ? ` by ${options.mergedBy}` : ": same phone number and name"}. Moved ${Number(purchases.rowCount ?? 0)} purchase(s) and ${messagesMoved} message(s); ` +
-      `${useDuplicateContact ? `contact email set to ${d.email}, the address most recently used` : "contact email unchanged"}.`,
+      `${useDuplicateContact ? `contact email changed from ${k.email} to ${d.email}, the address most recently used` : "contact email unchanged"}.`,
   });
 
   await tx.delete(customersTable).where(eq(customersTable.id, d.id));
