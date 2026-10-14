@@ -147,6 +147,8 @@ const supportFlags = (table: string) => (kId: string, dId: string) => {
 export interface MergeOptions {
   /** The email on the notice that triggered the merge — the address the person is using right now. */
   readonly preferredEmail?: string;
+  /** Set when a staff member asked for the merge; recorded in the note instead of the automatic "same phone and name" reason. */
+  readonly mergedBy?: string;
 }
 
 export async function mergeCustomersTx(tx: Tx, survivorId: string, duplicateId: string, options: MergeOptions = {}): Promise<MergeSummary> {
@@ -249,8 +251,8 @@ export async function mergeCustomersTx(tx: Tx, survivorId: string, duplicateId: 
     customerId: k.id,
     authorEmail: "system@merge",
     body:
-      `Merged duplicate record ${d.personNumber} (${d.firstName} ${d.lastName}, ${d.email}, lead created ${d.createdAt.toISOString().slice(0, 10)}) into this record: ` +
-      `same phone number and name. Moved ${Number(purchases.rowCount ?? 0)} purchase(s) and ${messagesMoved} message(s); ` +
+      `Merged duplicate record ${d.personNumber} (${d.firstName} ${d.lastName}, ${d.email}, lead created ${d.createdAt.toISOString().slice(0, 10)}) into this record` +
+      `${options.mergedBy ? ` by ${options.mergedBy}` : ": same phone number and name"}. Moved ${Number(purchases.rowCount ?? 0)} purchase(s) and ${messagesMoved} message(s); ` +
       `${useDuplicateContact ? `contact email set to ${d.email}, the address most recently used` : "contact email unchanged"}.`,
   });
 
@@ -297,15 +299,15 @@ export async function reconcileDuplicateByPhoneDetailed(tx: Tx, customerId: stri
     .select()
     .from(customersTable)
     .where(and(sql`${PHONE_KEY_SQL} = ${key}`, sql`${customersTable.id} <> ${customerId}`));
-  if (others.length !== 1) {
-    if (others.length > 1) logger.warn({ customerId, matches: others.length }, "customer shares a phone number with several records — not merging automatically");
+  // Only records that could be the same person count. A third record on the
+  // number under a different name (a relative, a test entry) must not stop two
+  // matching records from being merged — but several matching ones is a guess.
+  const matching = others.filter((row) => namesCompatible(self, row));
+  if (matching.length !== 1) {
+    if (others.length > 0) logger.warn({ customerId, sharing: others.length, matching: matching.length }, "records share a phone number but there is not exactly one matching person — not merging automatically");
     return unchanged;
   }
-  const other = others[0];
-  if (!namesCompatible(self, other)) {
-    logger.warn({ customerId, otherId: other.id }, "two records share a phone number but their names differ — not merging");
-    return unchanged;
-  }
+  const other = matching[0];
 
   const { survivor, duplicate } = pickSurvivor(self, other);
   try {
@@ -338,39 +340,134 @@ export interface DuplicateSweepResult {
 }
 
 /**
- * Finds every pair of records sharing a phone number (exactly two records on
- * that number) and merges those that look like the same person. Catches
- * duplicates that already exist, or that nothing has touched since.
+ * Pairs of records on one phone number that are each other's only possible
+ * match: their names are compatible with each other and with no one else on
+ * that number. A group of two is simply a pair; in a larger group (a relative
+ * or a test entry on the same number) the records that don't match anyone
+ * are left out instead of blocking the whole number.
+ */
+function uniqueMatchPairs<T extends { id: string; firstName: string; lastName: string }>(group: readonly T[]): Array<[T, T]> {
+  const pairs: Array<[T, T]> = [];
+  for (const record of group) {
+    const matches = group.filter((other) => other.id !== record.id && namesCompatible(record, other));
+    if (matches.length !== 1) continue;
+    const [other] = matches;
+    const back = group.filter((x) => x.id !== other.id && namesCompatible(other, x));
+    // Report each pair once, from its first-listed record (groups arrive oldest first).
+    if (back.length === 1 && group.indexOf(record) < group.indexOf(other)) pairs.push([record, other]);
+  }
+  return pairs;
+}
+
+/**
+ * Finds records sharing a phone number that look like the same person and
+ * merges them. Catches duplicates that already exist, or that nothing has
+ * touched since.
  *
- * Every pair is examined on every run and the plausible ones (names
- * compatible) are tried first-created first; only the number of MERGES per
- * run is capped, so a large backlog is worked through gradually. The cap must
- * not apply to pairs examined: families and test numbers that share a phone
- * are skipped by the name check, and a cap on those would let them crowd a
- * real duplicate out of the window forever.
+ * Every shared number is examined on every run, and only the number of MERGES
+ * per run is capped, so a large backlog is worked through gradually. The cap
+ * must not apply to numbers examined: families and test numbers that share a
+ * phone would otherwise crowd a real duplicate out of the window forever.
  */
 export async function mergeDuplicateCustomersByPhone(limit = 25): Promise<DuplicateSweepResult> {
-  const { rows } = await db.execute<{ ids: string[]; first_names: string[]; last_names: string[] }>(sql`
-    select array_agg(id order by created_at, id) as ids,
-           array_agg(first_name order by created_at, id) as first_names,
-           array_agg(last_name order by created_at, id) as last_names
-    from customers
-    where length(right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)) = 10
-    group by right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)
-    having count(*) = 2
-    order by min(created_at), min(id::text)`);
+  const { rows } = await db.execute<{ id: string; first_name: string; last_name: string; key: string }>(sql`
+    with keyed as (
+      select id, first_name, last_name, created_at,
+             right(regexp_replace(phone, '[^0-9]', '', 'g'), 10) as key
+      from customers
+      where length(right(regexp_replace(phone, '[^0-9]', '', 'g'), 10)) = 10
+    )
+    select id, first_name, last_name, key from keyed
+    where key in (select key from keyed group by key having count(*) >= 2)
+    order by key, created_at, id`);
 
-  const candidates = rows.filter((row) =>
-    namesCompatible({ firstName: row.first_names[0], lastName: row.last_names[0] }, { firstName: row.first_names[1], lastName: row.last_names[1] }),
-  );
+  const groups = new Map<string, Array<{ id: string; firstName: string; lastName: string }>>();
+  for (const row of rows) {
+    const list = groups.get(row.key) ?? [];
+    list.push({ id: row.id, firstName: row.first_name, lastName: row.last_name });
+    groups.set(row.key, list);
+  }
+  const candidates = [...groups.values()].flatMap((group) => uniqueMatchPairs(group));
 
   const merged: MergeSummary[] = [];
   let skipped = 0;
-  for (const row of candidates) {
+  for (const [older] of candidates) {
     if (merged.length >= limit) break;
-    const outcome = await db.transaction((tx) => reconcileDuplicateByPhoneDetailed(tx, row.ids[0]));
+    const outcome = await db.transaction((tx) => reconcileDuplicateByPhoneDetailed(tx, older.id));
     if (outcome.merged) merged.push(outcome.merged);
     else skipped++;
   }
-  return { merged, skipped, pairsExamined: rows.length, pairsPlausible: candidates.length };
+  return { merged, skipped, pairsExamined: groups.size, pairsPlausible: candidates.length };
+}
+
+export type DuplicateBlockReason = "names_differ" | "both_purchased" | "several_matching_records";
+
+export interface DuplicateCandidate {
+  readonly id: string;
+  readonly personNumber: string;
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly email: string;
+  readonly phone: string | null;
+  readonly leadType: string;
+  readonly createdAt: string;
+  readonly completedOrders: number;
+  /** Why the automatic merge will not combine this record with the one being viewed, or null if it will. */
+  readonly blockedReason: DuplicateBlockReason | null;
+}
+
+/** Other records on the same phone number as this customer, each with the reason it is not merged automatically. */
+export async function findDuplicateCandidates(customerId: string): Promise<DuplicateCandidate[]> {
+  const [self] = await db.select().from(customersTable).where(eq(customersTable.id, customerId));
+  if (!self?.phone) return [];
+  const key = phoneMatchKey(self.phone);
+  if (key.length !== 10) return [];
+
+  const others = await db
+    .select()
+    .from(customersTable)
+    .where(and(sql`${PHONE_KEY_SQL} = ${key}`, sql`${customersTable.id} <> ${customerId}`))
+    .orderBy(customersTable.createdAt);
+  if (others.length === 0) return [];
+
+  const ids = [self.id, ...others.map((row) => row.id)];
+  const counts = await db
+    .select({ customerId: purchasesTable.customerId, n: sql<number>`count(*)::int` })
+    .from(purchasesTable)
+    .where(and(inArray(purchasesTable.customerId, ids), eq(purchasesTable.status, "completed")))
+    .groupBy(purchasesTable.customerId);
+  const orders = new Map(counts.map((row) => [row.customerId, row.n]));
+  const selfOrders = orders.get(self.id) ?? 0;
+  const matchingCount = others.filter((row) => namesCompatible(self, row)).length;
+
+  return others.map((row) => {
+    const completedOrders = orders.get(row.id) ?? 0;
+    let blockedReason: DuplicateBlockReason | null = null;
+    if (!namesCompatible(self, row)) blockedReason = "names_differ";
+    else if (selfOrders > 0 && completedOrders > 0) blockedReason = "both_purchased";
+    else if (matchingCount > 1) blockedReason = "several_matching_records";
+    return {
+      id: row.id, personNumber: row.personNumber, firstName: row.firstName, lastName: row.lastName, email: row.email,
+      phone: row.phone, leadType: row.leadType, createdAt: row.createdAt.toISOString(), completedOrders, blockedReason,
+    };
+  });
+}
+
+/**
+ * A merge a staff member asked for. Works even when the automatic rules would
+ * decline (names differ, several candidates), because a person has looked at
+ * both records; the two records must still share a phone number, and two that
+ * have both bought are still refused. The older record survives.
+ */
+export async function mergeCustomersByStaff(firstId: string, secondId: string, staffEmail: string): Promise<MergeSummary> {
+  return db.transaction(async (tx) => {
+    const rows = await tx.select().from(customersTable).where(inArray(customersTable.id, [firstId, secondId]));
+    const a = rows.find((row) => row.id === firstId);
+    const b = rows.find((row) => row.id === secondId);
+    if (!a || !b) throw new MergeRefusedError("One of the customer records no longer exists.");
+    const aKey = a.phone ? phoneMatchKey(a.phone) : "";
+    if (aKey.length !== 10 || aKey !== (b.phone ? phoneMatchKey(b.phone) : "")) throw new MergeRefusedError("These records do not share a phone number.");
+    const { survivor, duplicate } = pickSurvivor(a, b);
+    return mergeCustomersTx(tx, survivor.id, duplicate.id, { mergedBy: staffEmail });
+  });
 }

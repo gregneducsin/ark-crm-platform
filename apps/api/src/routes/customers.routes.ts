@@ -7,6 +7,7 @@ import {
   createPurchaseRequestSchema,
   cancelUpcomingTriggerRequestSchema,
   createCustomerNoteRequestSchema,
+  mergeCustomersRequestSchema,
 } from "@luma/shared";
 import * as customersService from "../services/customers.service.js";
 import * as purchasesService from "../services/purchases.service.js";
@@ -15,6 +16,7 @@ import { getUpcomingTrigger, cancelUpcomingTrigger } from "../services/scheduled
 import { requireRole } from "../middleware/requireAuth.js";
 import { requireCsrf } from "../middleware/csrf.js";
 import { prepareCall } from "../lib/iblusend-calls.js";
+import { findDuplicateCandidates, mergeCustomersByStaff, MergeRefusedError } from "../services/customer-merge.service.js";
 
 export function createCustomersRouter(): RouterType {
   const router: RouterType = Router();
@@ -87,6 +89,52 @@ export function createCustomersRouter(): RouterType {
   // (that's the whole point of the feature); manager stays read-only, same
   // as the rest of the Leads/Orders surface, and never gets write access
   // since it doesn't take customer-facing actions.
+  // Other records on the same phone number, with the reason each is not merged
+  // automatically — so a duplicate that is still there can be explained and, for
+  // an admin, merged by hand (POST /:id/merge below).
+  router.get("/:id/duplicates", requireRole("admin", "manager", "customer_service"), async (req, res, next) => {
+    try {
+      const customer = await customersService.getCustomer(req.params.id as string);
+      if (!customer) {
+        res.status(404).json({ error: "Customer not found." });
+        return;
+      }
+      res.json({ duplicates: await findDuplicateCandidates(customer.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Staff-requested merge of this record with another one on the same phone
+  // number. The older record survives; two records that have both bought are
+  // refused. Admin only: a merge moves orders and history and is not reversible.
+  router.post("/:id/merge", requireRole("admin"), requireCsrf, async (req, res, next) => {
+    try {
+      const parsed = mergeCustomersRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid request.", details: parsed.error.issues });
+        return;
+      }
+      const customer = await customersService.getCustomer(req.params.id as string);
+      if (!customer) {
+        res.status(404).json({ error: "Customer not found." });
+        return;
+      }
+      try {
+        const summary = await mergeCustomersByStaff(customer.id, parsed.data.duplicateId, req.user!.email);
+        res.json({ survivorId: summary.survivorId, survivorPersonNumber: summary.survivorPersonNumber, duplicatePersonNumber: summary.duplicatePersonNumber });
+      } catch (err) {
+        if (err instanceof MergeRefusedError) {
+          res.status(409).json({ error: err.message });
+          return;
+        }
+        throw err;
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get("/:id/notes", requireRole("admin", "manager", "customer_service"), async (req, res, next) => {
     try {
       const notes = await customersService.listCustomerNotes(req.params.id as string);

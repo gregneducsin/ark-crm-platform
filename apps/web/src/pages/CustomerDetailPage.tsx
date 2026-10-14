@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { useParams, Link } from "wouter";
-import { useCustomer, useCreatePurchase, useUpdatePurchase, useCreateIntakeLink, usePrepareCall } from "../hooks/useCustomers";
+import { useParams, Link, useLocation } from "wouter";
+import { useCustomer, useCreatePurchase, useUpdatePurchase, useCreateIntakeLink, usePrepareCall, useCustomerDuplicates, useMergeCustomer } from "../hooks/useCustomers";
 import { Badge, Button, Card, ErrorText, Field, Input } from "../components/ui";
 import { ApiError, useCurrentUser } from "../hooks/useAuth";
 import { formatDate, formatDateTime } from "../lib/formatTime";
 import { CustomerNotesCard } from "../components/CustomerNotesCard";
-import type { Customer } from "@luma/shared";
+import type { Customer, DuplicateCandidate } from "@luma/shared";
 
 const STATUS_COLORS: Record<string, "gray" | "green" | "yellow" | "red"> = {
   pending: "yellow",
@@ -19,6 +19,65 @@ const QUESTIONNAIRE_BADGE_COLOR: Record<string, "gray" | "green" | "yellow" | "b
   abandoned: "yellow",
   submitted: "green",
 };
+
+const BLOCKED_REASON_TEXT: Record<NonNullable<DuplicateCandidate["blockedReason"]>, string> = {
+  names_differ: "Not merged automatically: the names are different, so this may be a different person sharing the number.",
+  both_purchased: "Not merged automatically: both records have completed orders.",
+  several_matching_records: "Not merged automatically: more than one record on this number could be the same person.",
+};
+
+/**
+ * Other records on this customer's phone number, so a duplicate that is still
+ * there can be explained and, for an admin, merged by hand. Hidden when there
+ * is none. The older record survives a merge; orders, messages and history move
+ * across and it cannot be undone, hence the confirmation.
+ */
+function DuplicatesCard({ customer, canMerge }: { customer: Customer; canMerge: boolean }) {
+  const { data } = useCustomerDuplicates(customer.id);
+  const merge = useMergeCustomer(customer.id);
+  const [, navigate] = useLocation();
+  const duplicates = data?.duplicates ?? [];
+  if (duplicates.length === 0) return null;
+
+  function handleMerge(other: DuplicateCandidate) {
+    const message =
+      `Merge ${other.personNumber} (${other.firstName} ${other.lastName}, ${other.email}) with ${customer.personNumber}?\n\n` +
+      "The older record is kept. Orders, messages and history from the other are moved across, and this cannot be undone.";
+    if (!window.confirm(message)) return;
+    merge.mutate(other.id, { onSuccess: (result) => navigate(`/customers/${result.survivorId}`) });
+  }
+
+  return (
+    <Card>
+      <h2 className="text-sm font-semibold text-ark-ink">Possible duplicates</h2>
+      <p className="text-xs text-gray-500">Other records with the same phone number as {customer.personNumber}.</p>
+      <div className="mt-3 space-y-2">
+        {duplicates.map((d) => (
+          <div key={d.id} className="rounded-md border border-gray-100 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm text-gray-800">
+                <Link href={`/customers/${d.id}`} className="font-medium text-ark-ink hover:underline">{d.personNumber}</Link>
+                {" · "}{d.firstName} {d.lastName} · {d.email}
+              </div>
+              {canMerge && (
+                <Button variant="secondary" onClick={() => handleMerge(d)} disabled={merge.isPending || d.blockedReason === "both_purchased"}>
+                  {merge.isPending ? "Merging…" : "Merge"}
+                </Button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              {d.leadType} · created {formatDate(d.createdAt)} · {d.completedOrders} order{d.completedOrders === 1 ? "" : "s"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              {d.blockedReason ? BLOCKED_REASON_TEXT[d.blockedReason] : "Same person by phone and name: merges automatically within the hour."}
+            </p>
+          </div>
+        ))}
+      </div>
+      <ErrorText>{merge.isError ? (merge.error instanceof ApiError ? merge.error.message : "Something went wrong.") : null}</ErrorText>
+    </Card>
+  );
+}
 
 /**
  * Click-to-call, not an autodialer: this only prepares the call on our
@@ -101,6 +160,8 @@ export function CustomerDetailPage() {
           </div>
         </dl>
       </Card>
+
+      <DuplicatesCard customer={customer} canMerge={canEdit} />
 
       <CustomerNotesCard customerId={customer.id} />
 

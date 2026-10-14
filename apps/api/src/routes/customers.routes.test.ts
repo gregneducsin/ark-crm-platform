@@ -1253,3 +1253,55 @@ describe("Click-to-call", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("Duplicate records", () => {
+  let app: ReturnType<typeof createApp>;
+  beforeAll(() => { app = createApp(); });
+
+  async function seedPair(phone: string, names: [string, string] = ["Rosa", "Rosa"]) {
+    const { db, customersTable } = await import("@luma/db");
+    const [older] = await db.insert(customersTable).values({ firstName: names[0], lastName: "Dupe", email: `dupe-older-${crypto.randomUUID()}@example.com`, phone, leadReceivedDate: "2026-09-01", createdAt: new Date("2026-09-01T00:00:00Z") }).returning();
+    const [newer] = await db.insert(customersTable).values({ firstName: names[1], lastName: "Dupe", email: `dupe-newer-${crypto.randomUUID()}@example.com`, phone, leadReceivedDate: "2026-10-01", createdAt: new Date("2026-10-01T00:00:00Z") }).returning();
+    return { older, newer };
+  }
+
+  it("lists the other records on the same phone for any staff role that can view the customer", async () => {
+    const { older, newer } = await seedPair("+15557730001");
+    await seedUser("dup-cs1@example.com", "customer_service");
+    const { agent } = await loginAgent(app, "dup-cs1@example.com");
+    const res = await agent.get(`/api/app/customers/${newer.id}/duplicates`);
+    expect(res.status).toBe(200);
+    expect(res.body.duplicates).toHaveLength(1);
+    expect(res.body.duplicates[0]).toMatchObject({ id: older.id, personNumber: older.personNumber, blockedReason: null });
+  });
+
+  it("lets an admin merge, keeping the older record, and returns where the person now lives", async () => {
+    const { older, newer } = await seedPair("+15557730002", ["Rosa", "Rosita"]);
+    await seedUser("dup-admin1@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "dup-admin1@example.com");
+    const res = await agent.post(`/api/app/customers/${newer.id}/merge`).set("x-csrf-token", csrf).send({ duplicateId: older.id });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ survivorId: older.id, survivorPersonNumber: older.personNumber, duplicatePersonNumber: newer.personNumber });
+    expect((await agent.get(`/api/app/customers/${newer.id}`)).status).toBe(404);
+  });
+
+  it("rejects the merge for non-admins", async () => {
+    const { older, newer } = await seedPair("+15557730003");
+    await seedUser("dup-cs2@example.com", "customer_service");
+    const { agent, csrf } = await loginAgent(app, "dup-cs2@example.com");
+    const res = await agent.post(`/api/app/customers/${newer.id}/merge`).set("x-csrf-token", csrf).send({ duplicateId: older.id });
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses records on different phone numbers with a 409, and a bad body with a 400", async () => {
+    const a = await seedPair("+15557730004");
+    const b = await seedPair("+15557730005");
+    await seedUser("dup-admin2@example.com", "admin");
+    const { agent, csrf } = await loginAgent(app, "dup-admin2@example.com");
+    const res = await agent.post(`/api/app/customers/${a.newer.id}/merge`).set("x-csrf-token", csrf).send({ duplicateId: b.older.id });
+    expect(res.status).toBe(409);
+    expect((await agent.post(`/api/app/customers/${a.newer.id}/merge`).set("x-csrf-token", csrf).send({ duplicateId: "nope" })).status).toBe(400);
+    expect((await agent.post("/api/app/customers/00000000-0000-0000-0000-000000000000/merge").set("x-csrf-token", csrf).send({ duplicateId: a.older.id })).status).toBe(404);
+  });
+});
+

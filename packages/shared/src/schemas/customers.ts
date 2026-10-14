@@ -134,3 +134,34 @@ export const prepareCallResponseSchema = z.object({
   confirmationUrl: z.string().url(),
 });
 export type PrepareCallResponse = z.infer<typeof prepareCallResponseSchema>;
+
+// Other records on the same phone number as a customer, for the "possible
+// duplicates" card. blockedReason says why the automatic merge will not combine
+// the two (null when it will, on its next run).
+export const duplicateCandidateSchema = z.object({
+  id: z.string().uuid(),
+  personNumber: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  email: z.string(),
+  phone: z.string().nullable(),
+  leadType: z.string(),
+  createdAt: z.string(),
+  completedOrders: z.number(),
+  blockedReason: z.enum(["names_differ", "both_purchased", "several_matching_records"]).nullable(),
+});
+export type DuplicateCandidate = z.infer<typeof duplicateCandidateSchema>;
+
+export const customerDuplicatesResponseSchema = z.object({ duplicates: z.array(duplicateCandidateSchema) });
+export type CustomerDuplicatesResponse = z.infer<typeof customerDuplicatesResponseSchema>;
+
+export const mergeCustomersRequestSchema = z.object({ duplicateId: z.string().uuid() });
+export type MergeCustomersRequest = z.infer<typeof mergeCustomersRequestSchema>;
+
+export const mergeCustomersResponseSchema = z.object({
+  survivorId: z.string().uuid(),
+  survivorPersonNumber: z.string(),
+  duplicatePersonNumber: z.string(),
+});
+export type MergeCustomersResponse = z.infer<typeof mergeCustomersResponseSchema>;
+

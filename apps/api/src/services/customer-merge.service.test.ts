@@ -6,7 +6,7 @@ import {
   emailConversationsTable, emailConversationMessagesTable, leadCheckinTriggersTable, abandonedCartTriggersTable,
 } from "@luma/db";
 import { namesCompatible } from "../lib/customer-name-match.js";
-import { mergeCustomersTx, MergeRefusedError, mergeDuplicateCustomersByPhone, reconcileDuplicateByPhone } from "./customer-merge.service.js";
+import { mergeCustomersTx, MergeRefusedError, mergeDuplicateCustomersByPhone, reconcileDuplicateByPhone, findDuplicateCandidates, mergeCustomersByStaff } from "./customer-merge.service.js";
 
 let phoneCounter = 0;
 const uniquePhone = () => `+1555${String(3000000 + ++phoneCounter).padStart(7, "0")}`;
@@ -257,3 +257,94 @@ describe("mergeDuplicateCustomersByPhone", () => {
     expect(await exists(son.id)).toBe(true);
   });
 });
+
+describe("a third record on the same phone number", () => {
+  it("does not stop two matching records from merging when the other one is a different person", async () => {
+    const phone = uniquePhone();
+    const older = await seedCustomer({ phone, firstName: "Bertha", lastName: "Guerra", createdAt: new Date("2026-09-17T00:00:00Z") });
+    const newer = await seedCustomer({ phone, firstName: "Bertha", lastName: "Guerra", createdAt: new Date("2026-10-14T00:00:00Z") });
+    const relative = await seedCustomer({ phone, firstName: "Alice", lastName: "Guerra", createdAt: new Date("2026-08-01T00:00:00Z") });
+
+    // Webhook-time check.
+    expect(await db.transaction((tx) => reconcileDuplicateByPhone(tx, newer.id))).toBe(older.id);
+    expect(await exists(newer.id)).toBe(false);
+    expect(await exists(relative.id)).toBe(true);
+  });
+
+  it("is merged by the hourly sweep too", async () => {
+    const phone = uniquePhone();
+    const older = await seedCustomer({ phone, firstName: "Dora", lastName: "Mena", createdAt: new Date("2026-09-17T00:00:00Z") });
+    const newer = await seedCustomer({ phone, firstName: "Dora", lastName: "Mena", createdAt: new Date("2026-10-14T00:00:00Z") });
+    const relative = await seedCustomer({ phone, firstName: "Luis", lastName: "Mena" });
+    const result = await mergeDuplicateCustomersByPhone(500);
+    expect(result.merged.some((m) => m.survivorId === older.id && m.duplicateId === newer.id)).toBe(true);
+    expect(await exists(relative.id)).toBe(true);
+  });
+
+  it("still does not guess when two different records could both be the same person", async () => {
+    const phone = uniquePhone();
+    const a = await seedCustomer({ phone, firstName: "Eva", lastName: "Soto" });
+    const b = await seedCustomer({ phone, firstName: "Eva", lastName: "Soto" });
+    const c = await seedCustomer({ phone, firstName: "Eva", lastName: "Soto" });
+    expect(await db.transaction((tx) => reconcileDuplicateByPhone(tx, c.id))).toBe(c.id);
+    for (const row of [a, b, c]) expect(await exists(row.id)).toBe(true);
+  });
+});
+
+describe("findDuplicateCandidates", () => {
+  it("lists other records on the number and says why each is not merged automatically", async () => {
+    const phone = uniquePhone();
+    const self = await seedCustomer({ phone, firstName: "Fran", lastName: "Ibarra" });
+    const sameName = await seedCustomer({ phone, firstName: "Fran", lastName: "Ibarra" });
+    const otherName = await seedCustomer({ phone, firstName: "Gus", lastName: "Ibarra" });
+    const found = await findDuplicateCandidates(self.id);
+    const byId = new Map(found.map((c) => [c.id, c]));
+    expect(found).toHaveLength(2);
+    expect(byId.get(otherName.id)?.blockedReason).toBe("names_differ");
+    // One matching record only: it will be merged automatically.
+    expect(byId.get(sameName.id)?.blockedReason).toBeNull();
+  });
+
+  it("flags several matching records and two records that have both bought", async () => {
+    const phone = uniquePhone();
+    const self = await seedCustomer({ phone, firstName: "Hana", lastName: "Ruiz" });
+    const one = await seedCustomer({ phone, firstName: "Hana", lastName: "Ruiz" });
+    const two = await seedCustomer({ phone, firstName: "Hana", lastName: "Ruiz" });
+    expect((await findDuplicateCandidates(self.id)).map((c) => c.blockedReason)).toEqual(["several_matching_records", "several_matching_records"]);
+    await purchase(self.id); await purchase(one.id);
+    const found = new Map((await findDuplicateCandidates(self.id)).map((c) => [c.id, c]));
+    expect(found.get(one.id)).toMatchObject({ blockedReason: "both_purchased", completedOrders: 1 });
+    expect(found.get(two.id)?.completedOrders).toBe(0);
+  });
+
+  it("returns nothing for a customer without a usable phone, or with no other record on it", async () => {
+    expect(await findDuplicateCandidates((await seedCustomer({ phone: null })).id)).toEqual([]);
+    expect(await findDuplicateCandidates((await seedCustomer({ phone: uniquePhone() })).id)).toEqual([]);
+  });
+});
+
+describe("mergeCustomersByStaff", () => {
+  it("merges two records the automatic rules would decline, keeps the older, and records who asked", async () => {
+    const phone = uniquePhone();
+    const older = await seedCustomer({ phone, firstName: "Ines", lastName: "Vega", createdAt: new Date("2026-09-01T00:00:00Z") });
+    const newer = await seedCustomer({ phone, firstName: "Inez", lastName: "Vega", createdAt: new Date("2026-10-01T00:00:00Z") });
+    // Asking from the newer record's side still keeps the older one.
+    const summary = await mergeCustomersByStaff(newer.id, older.id, "admin@example.com");
+    expect(summary.survivorId).toBe(older.id);
+    expect(await exists(newer.id)).toBe(false);
+    const [note] = await db.select().from(customerNotesTable).where(eq(customerNotesTable.customerId, older.id));
+    expect(note.body).toContain("by admin@example.com");
+  });
+
+  it("refuses records that do not share a phone number, or that have both bought", async () => {
+    const a = await seedCustomer({ phone: uniquePhone() }); const b = await seedCustomer({ phone: uniquePhone() });
+    await expect(mergeCustomersByStaff(a.id, b.id, "admin@example.com")).rejects.toBeInstanceOf(MergeRefusedError);
+    const phone = uniquePhone();
+    const c = await seedCustomer({ phone }); const d = await seedCustomer({ phone });
+    await purchase(c.id); await purchase(d.id);
+    await expect(mergeCustomersByStaff(c.id, d.id, "admin@example.com")).rejects.toBeInstanceOf(MergeRefusedError);
+    expect(await exists(c.id)).toBe(true);
+    expect(await exists(d.id)).toBe(true);
+  });
+});
+

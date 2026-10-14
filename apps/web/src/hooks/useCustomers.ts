@@ -21,6 +21,8 @@ import type {
   CustomerNote,
   CreateCustomerNoteRequest,
   PrepareCallResponse,
+  CustomerDuplicatesResponse,
+  MergeCustomersResponse,
 } from "@luma/shared";
 import { api } from "../lib/apiClient";
 
@@ -142,6 +144,24 @@ export function useCreateCustomerNote(customerId: string) {
   return useMutation({
     mutationFn: (input: CreateCustomerNoteRequest) => api.post<{ note: CustomerNote }>(`/api/app/customers/${customerId}/notes`, input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers", "notes", customerId] }),
+  });
+}
+
+/** Other records on the same phone number as this customer, with why each is not merged automatically. */
+export function useCustomerDuplicates(customerId: string) {
+  return useQuery({
+    queryKey: ["customers", "duplicates", customerId],
+    queryFn: () => api.get<CustomerDuplicatesResponse>(`/api/app/customers/${customerId}/duplicates`),
+  });
+}
+
+/** Admin merge of this record with another on the same phone number; the older record survives. */
+export function useMergeCustomer(customerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (duplicateId: string) => api.post<MergeCustomersResponse>(`/api/app/customers/${customerId}/merge`, { duplicateId }),
+    // Every list, count and detail may have changed: the duplicate is gone and its history moved.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers"] }),
   });
 }
 
