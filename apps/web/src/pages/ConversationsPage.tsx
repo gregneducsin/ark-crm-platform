@@ -337,8 +337,8 @@ function ConversationDetailPanel({ personId, firstName, lastName }: { personId: 
             {sales?.leadSource === "meta_form" && <Badge color="purple">Meta lead</Badge>}
             {sales?.selectedProduct && <Badge color="blue">{sales.selectedProduct}</Badge>}
             {sales?.promoOffered && <Badge color="green">$20 promo offered</Badge>}
-            {sales?.linkProvided && <Badge color="gray">link sent</Badge>}
-            {sales?.linkProvided && (sales.intakeLinkClicked ? <Badge color="green">link clicked</Badge> : <Badge color="gray">link not clicked</Badge>)}
+            {sales?.linkProvided && <Badge color="gray">Trigger link sent</Badge>}
+            {sales?.linkProvided && (sales.intakeLinkClicked ? <Badge color="green">Trigger link clicked</Badge> : <Badge color="gray">Trigger link not clicked</Badge>)}
             {sales && sales.objectionStage > 0 && <Badge color="yellow">objection stage {sales.objectionStage}</Badge>}
             {support?.prescriptionWritten && <Badge color="blue">prescription written</Badge>}
             {support?.orderShipped && <Badge color="green">shipped{support.trackingNumber ? `: ${support.trackingNumber}` : ""}</Badge>}
