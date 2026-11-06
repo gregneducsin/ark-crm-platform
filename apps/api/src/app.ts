@@ -1,3 +1,4 @@
+import { createEmailCampaignsRouter } from "./routes/email-campaigns.routes.js";
 import { createGmailOAuthRouter } from "./routes/gmail-oauth.routes.js";
 import { createGmailRouter } from "./routes/gmail.routes.js";
 import express, { type Express, type Request, type Response } from "express";
@@ -112,6 +113,7 @@ export function createApp(): Express {
   app.use("/api/app/failed-payments", createFailedPaymentsRouter());
   app.use("/api/app/webhook-events", createWebhookEventsRouter());
   app.use("/api/app/gmail", createGmailRouter());
+  app.use("/api/app/email-campaigns", createEmailCampaignsRouter());
   app.use("/api/app/payroll/employees", createEmployeesRouter());
   app.use("/api/app/payroll/weeks", createPayrollWeeksRouter());
   app.use("/api/app/payroll/marketing-spend", createMarketingSpendRouter());

@@ -43,6 +43,8 @@ const EXPECTED_TABLES = [
   "sms_reply_work",
   "missed_sms_response_reviews",
   "lead_checkin_triggers",
+  "email_campaigns",
+  "email_campaign_recipients",
   "email_conversations",
   "email_conversation_messages",
   "support_email_conversations",
@@ -124,3 +126,4 @@ describe("migrate", () => {
     await expect(runMigrations()).resolves.not.toThrow();
   });
 });
+
