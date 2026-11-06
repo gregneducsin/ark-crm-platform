@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   integer,
+  jsonb,
   timestamp,
   uniqueIndex,
   index,
@@ -15,6 +16,7 @@ export const emailCampaignsTable = pgTable("email_campaigns", {
   html: text("html").notNull(),
   status: text("status").notNull().default("draft"),
   perHour: integer("per_hour").notNull().default(20),
+  schedule: jsonb("schedule").$type<{days:number[];start:string;end:string;timezone:string}>(),
   nextSendAt: timestamp("next_send_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

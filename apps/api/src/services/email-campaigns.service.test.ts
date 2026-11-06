@@ -13,6 +13,7 @@ const {
   setCampaignStatus,
   sweepEmailCampaigns,
   campaignAudience,
+  saveCampaignSchedule,
 } = await import("./email-campaigns.service.js");
 async function person(email: string, emailDnd = false) {
   return (
@@ -37,6 +38,66 @@ beforeEach(async () => {
   process.env.INTAKE_LINK_BASE_URL = "https://example.com";
 });
 describe("email campaigns", () => {
+  it("saves without starting and waits on excluded days", async () => {
+    await person("schedule@example.com");
+    const c = await createCampaign("staff@example.com");
+    const schedule = {
+      days: [(new Date().getUTCDay() + 1) % 7],
+      start: "00:00",
+      end: "23:59",
+      timezone: "UTC",
+    };
+    expect((await saveCampaignSchedule(c.id, schedule)).status).toBe("draft");
+    await testCampaign(c.id);
+    await setCampaignStatus(c.id, "start", 20, true);
+    send.mockClear();
+    await sweepEmailCampaigns();
+    expect(send).not.toHaveBeenCalled();
+    expect(
+      (await pool.query("SELECT status FROM email_campaign_recipients")).rows[0]
+        .status,
+    ).toBe("pending");
+    await expect(saveCampaignSchedule(c.id, null)).rejects.toThrow("Pause");
+    await setCampaignStatus(c.id, "pause", 20, false);
+    await saveCampaignSchedule(c.id, null);
+    await setCampaignStatus(c.id, "start", 20, true);
+    await sweepEmailCampaigns();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("includes review holds without clearing them, but excludes explicit pauses", async () => {
+    const p = await person("review@example.com");
+    const paused = await person("paused@example.com");
+    await pool.query("UPDATE customers SET ai_paused=true WHERE id=$1", [
+      paused.id,
+    ]);
+    const { getOrCreateEmailConversation } =
+      await import("./email-conversations.service.js");
+    const conversation = await getOrCreateEmailConversation(p.id);
+    await pool.query(
+      "UPDATE email_conversations SET needs_attention=true,needs_attention_reason='Staff review' WHERE id=$1",
+      [conversation.id],
+    );
+    expect((await campaignAudience()).map((r) => r.email)).toEqual([
+      "review@example.com",
+    ]);
+    const c = await createCampaign("staff@example.com");
+    await testCampaign(c.id);
+    await setCampaignStatus(c.id, "start", 20, true);
+    send.mockClear();
+    await sweepEmailCampaigns();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT needs_attention,needs_attention_reason FROM email_conversations WHERE id=$1",
+          [conversation.id],
+        )
+      ).rows[0],
+    ).toEqual({
+      needs_attention: true,
+      needs_attention_reason: "Staff review",
+    });
+  });
   it("deduplicates repeated draft creation", async () => {
     const [a, b] = await Promise.all([
       createCampaign("staff@example.com"),
