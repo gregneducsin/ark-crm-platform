@@ -48,8 +48,8 @@ export function createEmailCampaignsRouter(): RouterType {
         await setCampaignStatus(
           id,
           action,
-          req.body.perHour,
-          req.body.approved === true,
+          req.body?.perHour,
+          req.body?.approved === true,
         ),
       );
     } catch (e) {
@@ -58,3 +58,4 @@ export function createEmailCampaignsRouter(): RouterType {
   });
   return router;
 }
+
