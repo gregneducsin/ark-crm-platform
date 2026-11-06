@@ -1,3 +1,4 @@
+import { EmailCampaignsPage } from "./pages/EmailCampaignsPage";
 import { Redirect, Route, Switch } from "wouter";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
@@ -57,6 +58,7 @@ export default function App() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/admin/email-campaigns"><ProtectedRoute roles={["admin"]}><AdminLayout><EmailCampaignsPage /></AdminLayout></ProtectedRoute></Route>
       <Route path="/admin">
         <Redirect to="/admin/webhook-log" />
       </Route>

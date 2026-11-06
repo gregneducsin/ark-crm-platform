@@ -5,6 +5,7 @@ import { useCurrentUser } from "../hooks/useAuth";
 const ADMIN_SUB_NAV: readonly { href: string; label: string; adminOnly: boolean }[] = [
   { href: "/admin/webhook-log", label: "Webhook Log", adminOnly: false },
   { href: "/admin/marketing-cpa", label: "Marketing CPA", adminOnly: true },
+  { href: "/admin/email-campaigns", label: "Email Campaigns", adminOnly: true },
 ];
 
 /** Thin sub-nav shared by every page under /admin — Webhook Log and Marketing CPA are unrelated tools, just both operator-only, so this only groups them under one top-level nav slot rather than merging their content. */

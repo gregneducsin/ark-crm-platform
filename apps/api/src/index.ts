@@ -1,3 +1,4 @@
+import { sweepEmailCampaigns } from "./services/email-campaigns.service.js";
 import { recoverInterruptedScheduledJobs } from "./services/scheduled-job-recovery.service.js";
 import { sweepPendingSmsReplies } from "./services/sms-reply-worker.service.js";
 import { env } from "./lib/env.js";
@@ -162,3 +163,5 @@ setInterval(() => {
 const recoverScheduledJobs = () => recoverInterruptedScheduledJobs().catch((err) => logger.error({ err }, "Scheduled-job recovery failed"));
 void recoverScheduledJobs();
 setInterval(() => { void recoverScheduledJobs(); }, 2 * 60_000);
+
+setInterval(() => { sweepEmailCampaigns().catch(err => logger.error({ err }, "Email campaign sweep failed")); }, 60_000);

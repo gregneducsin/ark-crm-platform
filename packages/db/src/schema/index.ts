@@ -8,3 +8,4 @@ export * from "./support";
 export * from "./email";
 
 export * from "./sms-delivery";
+export * from "./email-campaigns";
