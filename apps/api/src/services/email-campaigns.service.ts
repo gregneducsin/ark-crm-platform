@@ -1,4 +1,9 @@
 import { pool } from "@luma/db";
+import {
+  campaignWindowOpen,
+  validateCampaignSchedule,
+  type CampaignSchedule,
+} from "../lib/email/campaign-schedule.js";
 import { withPersonLock } from "../lib/db-lock.js";
 import { getEmailProvider } from "../lib/email-provider.js";
 import { peptideCampaignHtml } from "../lib/email/peptide-campaign.js";
@@ -21,6 +26,7 @@ export interface Campaign {
   html: string;
   status: string;
   per_hour: number;
+  schedule: CampaignSchedule | null;
   test_status: string;
   test_sent_at: string | null;
 }
@@ -33,11 +39,9 @@ async function getCampaign(id: string): Promise<Campaign> {
   return rows[0];
 }
 // Suppress the entire normalized inbox if ANY matching record has an opt-out,
-// staff hold, or unresolved email failure. A duplicate must not bypass a hold.
+// explicit AI pause, or unresolved email failure. Review flags alone do not suppress this campaign.
 const ELIGIBILITY = `NOT EXISTS (SELECT 1 FROM customers other WHERE lower(btrim(other.email))=lower(btrim(c.email)) AND (
  other.email_dnd OR other.ai_paused
- OR EXISTS (SELECT 1 FROM email_conversations e WHERE e.person_id=other.id AND e.needs_attention)
- OR EXISTS (SELECT 1 FROM support_email_conversations e WHERE e.person_id=other.id AND e.needs_attention)
  OR EXISTS (SELECT 1 FROM email_conversations e JOIN email_conversation_messages m ON m.conversation_id=e.id WHERE e.person_id=other.id AND m.delivery_status IN ('queued','unknown','failed'))
  OR EXISTS (SELECT 1 FROM support_email_conversations e JOIN support_email_conversation_messages m ON m.conversation_id=e.id WHERE e.person_id=other.id AND m.delivery_status IN ('queued','unknown','failed'))
  OR EXISTS (SELECT 1 FROM purchases p WHERE p.customer_id=other.id AND p.order_classification='test')
@@ -113,6 +117,19 @@ export async function testCampaign(id: string) {
     return getCampaign(id);
   });
 }
+export async function saveCampaignSchedule(id: string, value: unknown) {
+  const schedule = validateCampaignSchedule(value);
+  return withPersonLock(LOCK, async () => {
+    const c = await getCampaign(id);
+    if (c.status !== "draft" && c.status !== "paused")
+      throw new Error("Pause the campaign before changing its schedule");
+    await pool.query(
+      "UPDATE email_campaigns SET schedule=$2::jsonb WHERE id=$1",
+      [id, JSON.stringify(schedule)],
+    );
+    return getCampaign(id);
+  });
+}
 export async function setCampaignStatus(
   id: string,
   action: "start" | "pause",
@@ -176,7 +193,9 @@ export async function sweepEmailCampaigns() {
     const { rows: campaigns } = await pool.query(
       "SELECT * FROM email_campaigns WHERE status='running' AND next_send_at<=now() ORDER BY next_send_at LIMIT 1",
     );
-    const c: Campaign | undefined = campaigns[0];
+    const c: Campaign | undefined = campaigns.find((c: Campaign) =>
+      campaignWindowOpen(c.schedule),
+    );
     if (!c) return;
     const { rows } = await pool.query(
       "SELECT * FROM email_campaign_recipients WHERE campaign_id=$1 AND status='pending' ORDER BY id LIMIT 1",
@@ -214,6 +233,8 @@ export async function sweepEmailCampaigns() {
         return;
       }
       const conversation = await getOrCreateEmailConversation(r.person_id);
+      // A person lock or DB call may have waited past the end of the window.
+      if (!campaignWindowOpen(c.schedule)) return;
       await pool.query(
         "UPDATE email_campaign_recipients SET status='sending',attempted_at=now() WHERE id=$1",
         [r.id],
@@ -221,6 +242,7 @@ export async function sweepEmailCampaigns() {
       try {
         const result = await sendTrackedEmail({
           persona: "alexis",
+          allowCampaignReviewHold: true,
           personId: r.person_id,
           conversationId: conversation.id,
           email: r.email,

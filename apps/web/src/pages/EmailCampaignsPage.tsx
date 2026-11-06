@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/apiClient";
+import {
+  CampaignScheduleEditor,
+  type CampaignSchedule,
+} from "../components/CampaignScheduleEditor";
 interface Campaign {
   id: string;
   name: string;
@@ -8,6 +12,7 @@ interface Campaign {
   html: string;
   status: string;
   per_hour: number;
+  schedule: CampaignSchedule | null;
   test_status: string;
   test_sent_at: string | null;
   counts: Record<string, number> | null;
@@ -19,6 +24,7 @@ export function EmailCampaignsPage() {
   const [notice, setNotice] = useState("");
   const [approved, setApproved] = useState(false);
   const [rate, setRate] = useState(20);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
   const {
     data,
     isLoading,
@@ -66,10 +72,11 @@ export function EmailCampaignsPage() {
       </p>
       <p className="text-sm">
         Audience: all saved leads and customers with a valid email, excluding
-        email opt-outs, AI pauses, review holds, test purchases and recorded
-        email failures. Suppressions apply across duplicate email addresses and
-        are checked again before sending. Unmatched inbox contacts are not
-        enrolled.
+        email opt-outs, AI pauses, test purchases and recorded email failures.
+        Suppressions apply across duplicate email addresses and are checked
+        again before sending. Unmatched inbox contacts are not enrolled.
+        Contacts flagged for review are included; their review flags stay in
+        place.
       </p>
       <p className="font-medium">
         Eligible addresses now: {data?.eligible ?? "Loading…"}
@@ -161,7 +168,9 @@ export function EmailCampaignsPage() {
               </label>
               <button
                 className={button}
-                disabled={busy || !approved || c.test_status !== "sent"}
+                disabled={
+                  busy || scheduleDirty || !approved || c.test_status !== "sent"
+                }
                 onClick={() =>
                   void run(`/${c.id}/start`, { approved, perHour: rate })
                 }
@@ -172,6 +181,13 @@ export function EmailCampaignsPage() {
               </button>
             </div>
           )}
+          <CampaignScheduleEditor
+            key={`${c.id}-${JSON.stringify(c.schedule)}`}
+            id={c.id}
+            schedule={c.schedule}
+            editable={c.status === "draft" || c.status === "paused"}
+            onDirty={setScheduleDirty}
+          />
           {c.status === "running" && (
             <button
               className={button}

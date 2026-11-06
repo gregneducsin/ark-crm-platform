@@ -62,6 +62,8 @@ export async function sendTrackedEmail(params: {
   sentBy?: "ai" | "staff"; staffEmail?: string;
   /** Approved order/payment notifications still go out when they themselves require staff attention. */
   transactional?: boolean;
+  /** Approved campaign only: review flags remain in place; queued sends still block. */
+  allowCampaignReviewHold?: boolean;
 }): Promise<TrackedEmailResult> {
   const { persona, personId, conversationId, subject, body, inReplyTo } = params;
   const { messages, conversations } = tables(persona);
@@ -69,7 +71,7 @@ export async function sendTrackedEmail(params: {
     const [conversation] = await tx.select().from(conversations).where(eq(conversations.id, conversationId)).for("update");
     if (!conversation) return null;
     const [queued] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, conversationId), eq(messages.deliveryStatus, "queued"))).limit(1);
-    const blocked = Boolean(queued) || (conversation.needsAttention && params.sentBy !== "staff" && !params.transactional);
+    const blocked = Boolean(queued) || (conversation.needsAttention && params.sentBy !== "staff" && !params.transactional && !params.allowCampaignReviewHold);
     if (queued) await flagEmailForReview(persona, conversationId, "Another outgoing email is awaiting confirmation. This reply was saved but not sent; please review the conversation.", tx);
     const [row] = await tx.insert(messages).values({ conversationId, direction: "outbound", subject, body, inReplyTo,
       sentBy: params.sentBy ?? "ai", sentByStaffEmail: params.staffEmail, deliveryStatus: blocked ? "failed" : "queued" }).returning();

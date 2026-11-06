@@ -7,6 +7,7 @@ import {
   listCampaigns,
   setCampaignStatus,
   testCampaign,
+  saveCampaignSchedule,
 } from "../services/email-campaigns.service.js";
 export function createEmailCampaignsRouter(): RouterType {
   const router = Router();
@@ -38,6 +39,11 @@ export function createEmailCampaignsRouter(): RouterType {
       }
       if (action === "test") {
         res.json(await testCampaign(id));
+        return;
+      }
+      if (action === "schedule") {
+        try { res.json(await saveCampaignSchedule(id,req.body?.schedule)); }
+        catch(e) { res.status(400).json({error:e instanceof Error?e.message:'Invalid schedule'}); }
         return;
       }
       if (action !== "start" && action !== "pause") {
