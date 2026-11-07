@@ -1,3 +1,4 @@
+import { confirmedTriggerLinkState } from "../lib/trigger-link-state.js";
 import { withStaffNames } from "./message-authorship.service.js";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -124,7 +125,7 @@ export async function getSalesResponseStats(): Promise<SalesResponseStats> {
   return { totalContacted, totalResponded, responseRate: totalContacted > 0 ? totalResponded / totalContacted : 0 };
 }
 
-function mergeSalesThreadInfo(sms: Conversation | null, email: EmailConversation | null, intakeLinkClicked: boolean): SalesThreadInfo | null {
+function mergeSalesThreadInfo(sms: Conversation | null, email: EmailConversation | null, intakeLinkClicked: boolean, linkSent: boolean): SalesThreadInfo | null {
   if (!sms && !email) return null;
   const reasons = [sms?.needsAttention ? sms.needsAttentionReason : null, email?.needsAttention ? email.needsAttentionReason : null].filter(
     (r): r is string => Boolean(r),
@@ -136,20 +137,39 @@ function mergeSalesThreadInfo(sms: Conversation | null, email: EmailConversation
     selectedProduct: sms?.selectedProduct ?? email?.selectedProduct ?? null,
     objectionStage: Math.max(sms?.objectionStage ?? 0, email?.objectionStage ?? 0),
     promoOffered: Boolean(sms?.promoOffered || email?.promoOffered),
-    linkProvided: Boolean(sms?.linkProvided || email?.linkProvided),
+    linkProvided: linkSent,
     intakeLinkClicked,
   };
 }
 
-/** Whether the most recently minted intake link (see createIntakeLink in intake-links.service.ts) for this person has been clicked. */
-async function hasClickedMostRecentIntakeLink(personId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ clickedAt: intakeLinkTokensTable.clickedAt })
-    .from(intakeLinkTokensTable)
-    .where(eq(intakeLinkTokensTable.personId, personId))
-    .orderBy(desc(intakeLinkTokensTable.createdAt))
-    .limit(1);
-  return row?.clickedAt != null;
+/** Read all confirmed link messages, independent of the paginated timeline.
+ * Covers scheduled trigger emails and SMS as well as AI/staff replies. */
+async function getConfirmedTriggerLinkState(personId: string) {
+  const links = await db.select({ tokenHash: intakeLinkTokensTable.tokenHash, clickedAt: intakeLinkTokensTable.clickedAt })
+    .from(intakeLinkTokensTable).where(eq(intakeLinkTokensTable.personId, personId));
+  if (!links.length) return { sent: false, clicked: false };
+  const result = await db.execute<{ body: string; direction: string; deliveryStatus: string }>(sql`
+    select m.body, m.direction, m.delivery_status as "deliveryStatus"
+    from conversation_messages m join conversations c on c.id = m.conversation_id
+    where c.person_id = ${personId} and m.direction = 'outbound'
+      and m.delivery_status in ('sent', 'delivered', 'read') and m.body like '%/go/%'
+    union all
+    select m.body, m.direction, m.delivery_status as "deliveryStatus"
+    from email_conversation_messages m join email_conversations c on c.id = m.conversation_id
+    where c.person_id = ${personId} and m.direction = 'outbound'
+      and m.delivery_status = 'sent' and m.body like '%/go/%'
+    union all
+    select m.body, m.direction, m.delivery_status as "deliveryStatus"
+    from support_conversation_messages m join support_conversations c on c.id = m.conversation_id
+    where c.person_id = ${personId} and m.direction = 'outbound'
+      and m.delivery_status in ('sent', 'delivered', 'read') and m.body like '%/go/%'
+    union all
+    select m.body, m.direction, m.delivery_status as "deliveryStatus"
+    from support_email_conversation_messages m join support_email_conversations c on c.id = m.conversation_id
+    where c.person_id = ${personId} and m.direction = 'outbound'
+      and m.delivery_status = 'sent' and m.body like '%/go/%'
+  `);
+  return confirmedTriggerLinkState(result.rows, links);
 }
 
 function mergeSupportThreadInfo(sms: SupportConversation | null, email: SupportEmailConversation | null): SupportThreadInfo | null {
@@ -217,14 +237,14 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
 
   if (!salesSmsRow && !salesEmailRow && !supportSmsRow && !supportEmailRow) return null;
 
-  const [purchased, intakeLinkClicked] = await Promise.all([
+  const [purchased, triggerLinkState] = await Promise.all([
     db
       .select({ id: purchasesTable.id })
       .from(purchasesTable)
       .where(and(eq(purchasesTable.customerId, personId), eq(purchasesTable.status, "completed")))
       .limit(1)
       .then((rows) => rows[0]),
-    hasClickedMostRecentIntakeLink(personId),
+    getConfirmedTriggerLinkState(personId),
   ]);
 
   const [salesSmsMessages, salesEmailMessages, supportSmsMessages, supportEmailMessages] = await Promise.all([
@@ -324,7 +344,7 @@ export async function getUnifiedConversationDetail(personId: string): Promise<{
       hasQualifyingPurchase: Boolean(purchased),
       aiPaused: customer.aiPaused,
     },
-    sales: mergeSalesThreadInfo(salesSmsRow, salesEmailRow, intakeLinkClicked),
+    sales: mergeSalesThreadInfo(salesSmsRow, salesEmailRow, triggerLinkState.clicked, triggerLinkState.sent),
     support: mergeSupportThreadInfo(supportSmsRow, supportEmailRow),
     messages: attributedMessages,
     availableReplyTargets,
